@@ -1,0 +1,12 @@
+{
+  "name": "balagh-token-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "agora-token": "^2.0.3"
+  }
+}
