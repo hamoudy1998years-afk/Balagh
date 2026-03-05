@@ -1,6 +1,7 @@
 const express = require('express');
 const { RtcTokenBuilder, RtcRole } = require('agora-token');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const { createClient } = require('@supabase/supabase-js');
 const cors = require('cors');
 require('dotenv').config();
@@ -57,15 +58,11 @@ async function captureThumbnail(channelName, token = null) {
   console.log(`🎬 Starting browser for channel: ${channelName}`);
 
   const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--window-size=640,360',
-      '--hide-scrollbars'
-    ]
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
+    ignoreHTTPSErrors: true,
   });
 
   try {
@@ -297,5 +294,4 @@ app.listen(PORT, () => {
   console.log(`📹 Token endpoint: /token`);
   console.log(`🖼️  Thumbnail endpoints: /api/thumbnail/*`);
   console.log(`========================================`);
-});/ /   t r i g g e r   r e d e p l o y  
- 
+});
