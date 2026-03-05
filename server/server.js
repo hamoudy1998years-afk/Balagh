@@ -297,4 +297,5 @@ app.listen(PORT, () => {
   console.log(`📹 Token endpoint: /token`);
   console.log(`🖼️  Thumbnail endpoints: /api/thumbnail/*`);
   console.log(`========================================`);
-});
+});/ /   t r i g g e r   r e d e p l o y  
+ 
