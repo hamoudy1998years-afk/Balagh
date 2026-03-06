@@ -4,6 +4,7 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
 
@@ -19,7 +20,6 @@ function rateLimit(req, res, next) {
   const userLimit = rateLimits.get(ip) || { count: 0, resetTime: now + windowMs };
 
   if (now > userLimit.resetTime) {
-    // Reset window
     userLimit.count = 1;
     userLimit.resetTime = now + windowMs;
   } else {
@@ -40,7 +40,7 @@ app.get('/token', rateLimit, (req, res) => {
   const channelName = req.query.channelName;
   const uid = req.query.uid || 0;
   const role = req.query.role === 'publisher' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
-  const expirationTimeInSeconds = 86400; // 🔧 Already fixed: 24 hours
+  const expirationTimeInSeconds = 86400; // 24 hours
   const currentTimestamp = Math.floor(Date.now() / 1000);
   const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
 
@@ -58,4 +58,18 @@ app.get('/token', rateLimit, (req, res) => {
   );
 
   res.json({ token, uid, channelName });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log('========================================');
+  console.log('🚀 Server running on port', PORT);
+  console.log('📹 Token endpoint: /token');
+  console.log('========================================');
 });
