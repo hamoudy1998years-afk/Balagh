@@ -1,0 +1,271 @@
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, ActivityIndicator,
+  Alert, Animated, PanResponder, Vibration, RefreshControl, StatusBar,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { supabase } from '../lib/supabase';
+import AnimatedButton from './AnimatedButton';
+
+// ─── Single notification row with swipe + long press ─────────────────────────
+function NotificationItem({ item, onDelete, onMarkRead }) {
+  const translateX    = useRef(new Animated.Value(0)).current;
+  const deleteOpacity = useRef(new Animated.Value(0)).current;
+  const rowScale      = useRef(new Animated.Value(1)).current;
+  const isDeleting    = useRef(false);
+  const SWIPE_THRESHOLD = 80;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 8 && Math.abs(g.dy) < 20,
+      onPanResponderMove: (_, g) => {
+        if (isDeleting.current) return;
+        translateX.setValue(g.dx);
+        deleteOpacity.setValue(Math.min(Math.abs(g.dx) / SWIPE_THRESHOLD, 1));
+      },
+      onPanResponderRelease: (_, g) => {
+        if (isDeleting.current) return;
+        if (Math.abs(g.dx) >= SWIPE_THRESHOLD) {
+          triggerDelete();
+        } else {
+          Animated.spring(translateX, { toValue: 0, useNativeDriver: true, tension: 100, friction: 10 }).start();
+          Animated.timing(deleteOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+        }
+      },
+    })
+  ).current;
+
+  const triggerDelete = () => {
+    isDeleting.current = true;
+    Vibration.vibrate(30);
+    Animated.parallel([
+      Animated.timing(translateX, { toValue: 500, duration: 250, useNativeDriver: true }),
+      Animated.timing(rowScale,   { toValue: 0,   duration: 300, useNativeDriver: true }),
+    ]).start(() => onDelete(item.id));
+  };
+
+  const handleLongPress = () => {
+    Vibration.vibrate(40);
+    Alert.alert('Delete Notification', 'Remove this notification?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: triggerDelete },
+    ]);
+  };
+
+  const handlePress = () => { if (!item.is_read) onMarkRead(item.id); };
+
+  const getIcon = () => {
+    switch (item.type) {
+      case 'like': return '❤️'; case 'follow': return '👤';
+      case 'comment': return '💬'; case 'reply': return '↩️'; default: return '🔔';
+    }
+  };
+
+  const getMessage = () => {
+    const name = item.actor?.username || 'Someone';
+    switch (item.type) {
+      case 'like': return `${name} liked your video`;
+      case 'follow': return `${name} started following you`;
+      case 'comment': return `${name} commented on your video`;
+      case 'reply': return `${name} replied to your comment`;
+      default: return `${name} interacted with you`;
+    }
+  };
+
+  const formatTime = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scaleY: rowScale }], overflow: 'hidden' }}>
+      <Animated.View style={[styles.deleteBackground, { opacity: deleteOpacity }]}>
+        <Text style={styles.deleteBackgroundText}>🗑️ Delete</Text>
+      </Animated.View>
+      {/* Keep as Animated.View with panHandlers — AnimatedButton wraps the inner content */}
+      <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
+        <AnimatedButton
+          onPress={handlePress}
+          onLongPress={handleLongPress}
+          delayLongPress={400}
+          style={[styles.notificationRow, !item.is_read && styles.unreadRow]}
+        >
+          {!item.is_read && <View style={styles.unreadDot} />}
+          <View style={styles.iconContainer}>
+            <Text style={styles.icon}>{getIcon()}</Text>
+          </View>
+          <View style={styles.textContent}>
+            <Text style={[styles.message, !item.is_read && styles.unreadMessage]}>{getMessage()}</Text>
+            <Text style={styles.time}>{formatTime(item.created_at)}</Text>
+          </View>
+          {!item.is_read && <View style={styles.swipeHint}><Text style={styles.swipeHintText}>← →</Text></View>}
+        </AnimatedButton>
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
+export default function NotificationsScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const [notifications, setNotifications] = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [refreshing,    setRefreshing]    = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => { if (data.user) setCurrentUserId(data.user.id); });
+  }, []);
+
+  useEffect(() => { if (currentUserId) loadNotifications(); }, [currentUserId]);
+
+  const loadNotifications = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select(`*, actor:profiles!notifications_actor_id_fkey(id, username, avatar_url)`)
+        .eq('user_id', currentUserId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      setNotifications(data ?? []);
+    } catch (e) {
+      console.error('Error loading notifications:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => { setRefreshing(true); await loadNotifications(); setRefreshing(false); };
+
+  const handleDelete = useCallback(async (id) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    await supabase.from('notifications').delete().eq('id', id);
+  }, []);
+
+  const handleMarkRead = useCallback(async (id) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+  }, []);
+
+  const handleMarkAllRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUserId);
+  };
+
+  const handleDeleteAll = () => {
+    Alert.alert('Clear All Notifications', 'Are you sure you want to delete all notifications?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear All', style: 'destructive', onPress: async () => {
+        setNotifications([]);
+        await supabase.from('notifications').delete().eq('user_id', currentUserId);
+      }},
+    ]);
+  };
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  if (loading) {
+    return (
+      <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
+        <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+        <ActivityIndicator size="large" color="#FE2C55" />
+        <Text style={styles.loadingText}>Loading notifications...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.fullScreen}>
+      <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>
+            Notifications{unreadCount > 0 ? <Text style={styles.unreadBadge}>  {unreadCount}</Text> : null}
+          </Text>
+          <View style={styles.headerActions}>
+            {unreadCount > 0 && (
+              <AnimatedButton onPress={handleMarkAllRead} style={styles.headerBtn}>
+                <Text style={styles.headerBtnText}>Mark all read</Text>
+              </AnimatedButton>
+            )}
+            {notifications.length > 0 && (
+              <AnimatedButton onPress={handleDeleteAll} style={styles.headerBtn}>
+                <Text style={[styles.headerBtnText, { color: '#FE2C55' }]}>Clear all</Text>
+              </AnimatedButton>
+            )}
+          </View>
+        </View>
+
+        {notifications.length > 0 && (
+          <View style={styles.hintBanner}>
+            <Text style={styles.hintBannerText}>👈 Swipe left or right to delete · Long press for options</Text>
+          </View>
+        )}
+
+        {notifications.length === 0 ? (
+          <View style={styles.centered}>
+            <Text style={styles.emptyIcon}>🔔</Text>
+            <Text style={styles.emptyText}>No notifications yet</Text>
+            <Text style={styles.emptySubtext}>When someone likes, follows, or comments — it'll show up here!</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={notifications}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <NotificationItem item={item} onDelete={handleDelete} onMarkRead={handleMarkRead} navigation={navigation} />
+            )}
+            ItemSeparatorComponent={() => <View style={styles.separator} />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FE2C55" colors={['#FE2C55']} />}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+          />
+        )}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  fullScreen: { flex: 1, backgroundColor: '#0f0f0f' },
+  container: { flex: 1, backgroundColor: '#0f0f0f' },
+  loadingContainer: { flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222222' },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: '#ffffff' },
+  unreadBadge: { fontSize: 14, fontWeight: '700', color: '#FE2C55' },
+  headerActions: { flexDirection: 'row', gap: 12 },
+  headerBtn: { paddingVertical: 4, paddingHorizontal: 8 },
+  headerBtnText: { fontSize: 13, color: '#aaaaaa', fontWeight: '600' },
+  hintBanner: { backgroundColor: '#1a1a1a', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#222222' },
+  hintBannerText: { fontSize: 12, color: '#777777', textAlign: 'center' },
+  deleteBackground: { ...StyleSheet.absoluteFillObject, backgroundColor: '#FE2C55', justifyContent: 'center', alignItems: 'center' },
+  deleteBackgroundText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  notificationRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#0f0f0f' },
+  unreadRow: { backgroundColor: '#1a0a0d' },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FE2C55', marginRight: 8 },
+  iconContainer: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  icon: { fontSize: 20 },
+  textContent: { flex: 1 },
+  message: { fontSize: 14, color: '#aaaaaa', fontWeight: '500', lineHeight: 20 },
+  unreadMessage: { fontWeight: '700', color: '#ffffff' },
+  time: { fontSize: 12, color: '#777777', marginTop: 3 },
+  swipeHint: { marginLeft: 8 },
+  swipeHintText: { fontSize: 11, color: '#444444' },
+  separator: { height: 1, backgroundColor: '#1e1e1e', marginLeft: 72 },
+  emptyIcon: { fontSize: 52 },
+  emptyText: { fontSize: 17, fontWeight: '700', color: '#ffffff' },
+  emptySubtext: { fontSize: 14, color: '#777777', textAlign: 'center', paddingHorizontal: 40, lineHeight: 20 },
+  loadingText: { fontSize: 14, color: '#aaaaaa' },
+});

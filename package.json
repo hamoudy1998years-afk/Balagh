@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "balagh-root",
   "version": "1.0.0",
   "scripts": {
@@ -6,5 +6,8 @@
   },
   "engines": {
     "node": "18.x"
+  },
+  "dependencies": {
+    "react-native-fs": "^2.20.0"
   }
 }

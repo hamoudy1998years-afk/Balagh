@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "Balagh",
+    "name": "Bushrann",
     "slug": "Balagh",
+    "scheme": "bushrann",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,17 +14,62 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow Bushrann to access your photos to update your profile picture.",
+        "NSPhotoLibraryAddUsageDescription": "Allow Bushrann to save videos to your photo library.",
+        "NSCameraUsageDescription": "Allow Bushrann to access your camera to take a profile photo."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.bushrann.app",
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-video",
+      "expo-web-browser",
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Bushrann to use Face ID for sign in"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Bushrann to access your photos to update your profile picture.",
+          "cameraPermission": "Allow Bushrann to access your camera to take a profile photo."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Bushrann to access your photos.",
+          "savePhotosPermission": "Allow Bushrann to save videos to your photo library.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "5804d13c-1244-4972-8b7a-083f99fbb885"
+      }
     }
   }
 }

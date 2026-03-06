@@ -1,0 +1,130 @@
+import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator } from 'react-native';
+import { useState } from 'react';
+import { supabase } from '../lib/supabase';
+import AnimatedButton from './AnimatedButton';
+
+const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
+
+export default function SearchScreen() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('All');
+
+  async function handleSearch(text) {
+    setQuery(text);
+    if (text.trim().length < 2) { setResults([]); return; }
+    setLoading(true);
+    const { data } = await supabase.from('videos').select('*').ilike('caption', `%${text}%`).limit(20);
+    setResults(data ?? []);
+    setLoading(false);
+  }
+
+  async function handleCategory(cat) {
+    setSelectedCategory(cat);
+    setLoading(true);
+    if (cat === 'All') {
+      const { data } = await supabase.from('videos').select('*').limit(20);
+      setResults(data ?? []);
+    } else {
+      const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(20);
+      setResults(data ?? []);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Search</Text>
+
+      <View style={styles.searchBar}>
+        <Text style={styles.searchIcon}>🔍</Text>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search videos, scholars..."
+          placeholderTextColor="#4b5563"
+          value={query}
+          onChangeText={handleSearch}
+        />
+        {query.length > 0 && (
+          <AnimatedButton onPress={() => { setQuery(''); setResults([]); }}>
+            <Text style={styles.clearBtn}>✕</Text>
+          </AnimatedButton>
+        )}
+      </View>
+
+      <FlatList
+        data={CATEGORIES}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(item) => item}
+        style={styles.categoryList}
+        renderItem={({ item }) => (
+          <AnimatedButton
+            style={[styles.categoryChip, selectedCategory === item && styles.categoryChipActive]}
+            onPress={() => handleCategory(item)}
+          >
+            <Text style={[styles.categoryChipText, selectedCategory === item && styles.categoryChipTextActive]}>{item}</Text>
+          </AnimatedButton>
+        )}
+      />
+
+      {loading ? (
+        <ActivityIndicator color="#7c3aed" size="large" style={styles.loader} />
+      ) : results.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyIcon}>🕌</Text>
+          <Text style={styles.emptyText}>{query.length > 0 ? 'No videos found' : 'Search for Islamic content'}</Text>
+          <Text style={styles.emptySubtext}>{query.length > 0 ? 'Try different keywords' : 'or browse by category above'}</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={results}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.resultsList}
+          renderItem={({ item }) => (
+            <View style={styles.resultCard}>
+              <View style={styles.resultThumbnail}><Text style={styles.resultThumbnailIcon}>🎬</Text></View>
+              <View style={styles.resultInfo}>
+                <Text style={styles.resultCaption} numberOfLines={2}>{item.caption}</Text>
+                <View style={styles.resultMeta}>
+                  <View style={styles.categoryTag}><Text style={styles.categoryTagText}>{item.category}</Text></View>
+                  <Text style={styles.resultViews}>{item.views_count ?? 0} views</Text>
+                </View>
+              </View>
+            </View>
+          )}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0f0f0f', paddingTop: 60 },
+  title: { fontSize: 24, fontWeight: '700', color: '#ffffff', paddingHorizontal: 16, marginBottom: 16 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1d27', borderRadius: 12, marginHorizontal: 16, paddingHorizontal: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2d3148' },
+  searchIcon: { fontSize: 16, marginRight: 8 },
+  searchInput: { flex: 1, color: '#ffffff', fontSize: 15, paddingVertical: 14 },
+  clearBtn: { color: '#64748b', fontSize: 16, padding: 4 },
+  categoryList: { paddingHorizontal: 16, marginBottom: 16, flexGrow: 0 },
+  categoryChip: { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8 },
+  categoryChipActive: { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
+  categoryChipText: { color: '#64748b', fontSize: 13, fontWeight: '600' },
+  categoryChipTextActive: { color: '#ffffff' },
+  loader: { marginTop: 60 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
+  emptyIcon: { fontSize: 48, marginBottom: 16 },
+  emptyText: { color: '#ffffff', fontSize: 16, fontWeight: '600', marginBottom: 6 },
+  emptySubtext: { color: '#64748b', fontSize: 14 },
+  resultsList: { paddingHorizontal: 16, paddingBottom: 40 },
+  resultCard: { flexDirection: 'row', backgroundColor: '#1a1d27', borderRadius: 12, padding: 12, marginBottom: 10, gap: 12, alignItems: 'center' },
+  resultThumbnail: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#2d3148', alignItems: 'center', justifyContent: 'center' },
+  resultThumbnailIcon: { fontSize: 28 },
+  resultInfo: { flex: 1 },
+  resultCaption: { color: '#ffffff', fontSize: 14, fontWeight: '600', marginBottom: 8, lineHeight: 20 },
+  resultMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  categoryTag: { backgroundColor: '#4c1d95', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  categoryTagText: { color: '#a78bfa', fontSize: 11, fontWeight: '700' },
+  resultViews: { color: '#64748b', fontSize: 12 },
+});

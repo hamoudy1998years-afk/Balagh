@@ -1,0 +1,264 @@
+// ────────────────────────────────────────────────────────────────────────────
+// EditProfileScreen.js
+// ────────────────────────────────────────────────────────────────────────────
+import {
+  View, Text, TextInput, StyleSheet,
+  Alert, ActivityIndicator, ScrollView, Keyboard
+} from 'react-native';
+import { useState, useEffect, useRef } from 'react';
+import { supabase } from '../lib/supabase';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AnimatedButton from './AnimatedButton';
+
+export default function EditProfileScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const [isScholar,    setIsScholar]    = useState(false);
+  const [loading,      setLoading]      = useState(true);
+  const [saving,       setSaving]       = useState(false);
+  const [username,     setUsername]     = useState('');
+  const [fullName,     setFullName]     = useState('');
+  const [bio,          setBio]          = useState('');
+  const [scholarId,    setScholarId]    = useState(null);
+  const [realName,     setRealName]     = useState('');
+  const [age,          setAge]          = useState('');
+  const [location,     setLocation]     = useState('');
+  const [education,    setEducation]    = useState('');
+  const [expertise,    setExpertise]    = useState('');
+  const [extraPadding, setExtraPadding] = useState(0);
+
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    loadProfile();
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setExtraPadding(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setExtraPadding(0);
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
+
+  async function loadProfile() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    if (profile) {
+      setUsername(profile.username ?? '');
+      setFullName(profile.full_name ?? '');
+      setBio(profile.bio ?? '');
+      setIsScholar(profile.is_scholar === true);
+    }
+    if (profile?.is_scholar) {
+      const { data: scholarData } = await supabase
+        .from('scholar_applications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (scholarData) {
+        setScholarId(scholarData.id);
+        setRealName(scholarData.full_name ?? '');
+        setAge(scholarData.age?.toString() ?? '');
+        setLocation(scholarData.location ?? '');
+        setEducation(scholarData.education ?? '');
+        setExpertise(scholarData.expertise ?? '');
+      }
+    }
+    setLoading(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    try {
+      if (isScholar) {
+        const { error: profileError } = await supabase.from('profiles').update({ username: username.trim() }).eq('id', user.id);
+        if (profileError) throw profileError;
+        if (scholarId) {
+          const { error: scholarError } = await supabase.from('scholar_applications').update({
+            full_name: realName.trim(),
+            age: age ? parseInt(age) : null,
+            location: location.trim(),
+            education: education.trim(),
+            expertise: expertise.trim(),
+          }).eq('id', scholarId);
+          if (scholarError) throw scholarError;
+        }
+      } else {
+        const { error } = await supabase.from('profiles').update({
+          username: username.trim(),
+          full_name: fullName.trim(),
+          bio: bio.trim(),
+        }).eq('id', user.id);
+        if (error) throw error;
+      }
+      Alert.alert('Success!', 'Profile updated!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Scroll to a field when focused so it appears above keyboard
+  function scrollToField(y) {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ y, animated: true });
+    }, 100);
+  }
+
+  if (loading) {
+    return <View style={epStyles.loadingContainer}><ActivityIndicator color="#7c3aed" size="large" /></View>;
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0f0f0f' }}>
+      <ScrollView
+        ref={scrollRef}
+        style={epStyles.container}
+        contentContainerStyle={{ paddingTop: insets.top + 5, paddingBottom: insets.bottom + 120 + extraPadding }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        scrollEnabled={true}
+      >
+        <View style={epStyles.headerRow}>
+          <AnimatedButton onPress={() => navigation.goBack()} style={epStyles.backBtn}>
+            <Text style={epStyles.backBtnText}>←</Text>
+          </AnimatedButton>
+          <Text style={epStyles.title}>Edit Profile</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {isScholar && (
+          <View style={epStyles.scholarNotice}>
+            <Text style={epStyles.scholarNoticeText}>🎓 Scholar Profile</Text>
+          </View>
+        )}
+
+        <Text style={epStyles.label}>Username</Text>
+        <TextInput
+          style={epStyles.input}
+          value={username}
+          onChangeText={setUsername}
+          placeholderTextColor="#4b5563"
+          autoCapitalize="none"
+          placeholder="@username"
+          onFocus={() => scrollToField(0)}
+        />
+
+        {isScholar ? (
+          <>
+            <Text style={epStyles.sectionTitle}>Scholar Information</Text>
+
+            <Text style={epStyles.label}>Real Name</Text>
+            <TextInput
+              style={epStyles.input}
+              value={realName}
+              onChangeText={setRealName}
+              placeholderTextColor="#4b5563"
+              placeholder="Your real full name"
+              onFocus={() => scrollToField(0)}
+            />
+
+            <Text style={epStyles.label}>Age (Optional)</Text>
+            <TextInput
+              style={epStyles.input}
+              value={age}
+              onChangeText={setAge}
+              placeholderTextColor="#4b5563"
+              placeholder="Your age"
+              keyboardType="numeric"
+              maxLength={3}
+              onFocus={() => scrollToField(0)}
+            />
+
+            <Text style={epStyles.label}>Location / Town / Province</Text>
+            <TextInput
+              style={epStyles.input}
+              value={location}
+              onChangeText={setLocation}
+              placeholderTextColor="#4b5563"
+              placeholder="e.g. Davao City, Davao del Sur"
+              onFocus={() => scrollToField(85)}
+            />
+
+            <Text style={epStyles.label}>Education</Text>
+            <TextInput
+              style={epStyles.input}
+              value={education}
+              onChangeText={setEducation}
+              placeholderTextColor="#4b5563"
+              placeholder="e.g. Bachelor of Islamic Studies"
+              onFocus={() => scrollToField(170)}
+            />
+
+            <Text style={epStyles.label}>Expertise</Text>
+            <TextInput
+              style={[epStyles.input, epStyles.multilineInput]}
+              value={expertise}
+              onChangeText={setExpertise}
+              placeholderTextColor="#4b5563"
+              placeholder="e.g. Fiqh, Hadith, Quran Tafsir"
+              multiline
+              onFocus={() => scrollToField(285)}
+            />
+          </>
+        ) : (
+          <>
+            <Text style={epStyles.label}>Display Name</Text>
+            <TextInput
+              style={epStyles.input}
+              value={fullName}
+              onChangeText={setFullName}
+              placeholderTextColor="#4b5563"
+              placeholder="Your display name"
+              onFocus={() => scrollToField(100)}
+            />
+
+            <Text style={epStyles.label}>Bio</Text>
+            <TextInput
+              style={[epStyles.input, epStyles.multilineInput]}
+              value={bio}
+              onChangeText={setBio}
+              placeholderTextColor="#4b5563"
+              placeholder="Tell the world about yourself..."
+              multiline
+              onFocus={() => scrollToField(200)}
+            />
+          </>
+        )}
+
+        <AnimatedButton style={epStyles.saveBtn} onPress={handleSave} disabled={saving}>
+          <Text style={epStyles.saveBtnText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
+        </AnimatedButton>
+
+        <AnimatedButton style={epStyles.cancelBtn} onPress={() => navigation.goBack()}>
+          <Text style={epStyles.cancelBtnText}>Cancel</Text>
+        </AnimatedButton>
+      </ScrollView>
+    </View>
+  );
+}
+
+const epStyles = StyleSheet.create({
+  loadingContainer: { flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: '#0f0f0f', paddingHorizontal: 24 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  backBtn: { padding: 4 },
+  backBtnText: { color: '#fff', fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 20, fontWeight: '800', color: '#ffffff' },
+  scholarNotice: { backgroundColor: '#2d1b69', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 16, marginBottom: 16, alignItems: 'center' },
+  scholarNoticeText: { color: '#a78bfa', fontSize: 14, fontWeight: '700' },
+  sectionTitle: { color: '#7c3aed', fontSize: 13, fontWeight: '700', marginBottom: 10, marginTop: 4, textTransform: 'uppercase', letterSpacing: 1 },
+  label: { color: '#94a3b8', fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  input: { width: '100%', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 14, color: '#ffffff', fontSize: 15, marginBottom: 14 },
+  multilineInput: { height: 80, textAlignVertical: 'top' },
+  saveBtn: { width: '100%', backgroundColor: '#7c3aed', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10, marginTop: 6 },
+  saveBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  cancelBtn: { width: '100%', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 20 },
+  cancelBtnText: { color: '#64748b', fontSize: 16 },
+});
