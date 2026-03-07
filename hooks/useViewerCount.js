@@ -1,40 +1,44 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 export const useViewerCount = (streamId) => {
   const [viewerCount, setViewerCount] = useState(0);
-  const refreshInterval = useRef(null);
 
   useEffect(() => {
     if (!streamId) return;
 
     const getViewerCount = async () => {
-      const { count, error } = await supabase
-        .from('stream_viewers')
-        .select('*', { count: 'exact', head: true })
-        .eq('stream_id', streamId);
-      
-      setViewerCount(count || 0);
+      try {
+        const { count, error } = await supabase
+          .from('stream_viewers')
+          .select('*', { count: 'exact', head: true })
+          .eq('stream_id', streamId);
+
+        if (error) {
+          console.error('Viewer count error:', error);
+          return;
+        }
+
+        setViewerCount(count || 0);
+      } catch (e) {
+        console.error('Viewer count exception:', e);
+      }
     };
 
+    // Initial fetch
     getViewerCount();
 
+    // Real-time subscription only (no polling)
     const subscription = supabase
       .channel(`stream:${streamId}:viewers`)
-      .on('postgres_changes', 
+      .on('postgres_changes',
         { event: '*', schema: 'public', table: 'stream_viewers', filter: `stream_id=eq.${streamId}` },
         () => getViewerCount()
       )
       .subscribe();
 
-    // Refresh every 5 seconds as backup
-    refreshInterval.current = setInterval(() => {
-      getViewerCount();
-    }, 5000);
-
     return () => {
       subscription.unsubscribe();
-      clearInterval(refreshInterval.current);
     };
   }, [streamId]);
 
