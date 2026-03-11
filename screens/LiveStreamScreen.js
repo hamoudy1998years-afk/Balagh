@@ -210,41 +210,24 @@ export default function LiveStreamScreen({ navigation, route }) {
         return;
       }
 
-      try {
-        const { data: stream, error: streamError } = await supabase
-          .from('live_streams')
-          .insert({
-            user_id: user.id,
-            title,
-            channel_name: channel,
-            max_questions: maxQuestions,
-            is_live: true,
-            viewer_token: viewerToken,
-            thumbnail_url: profile?.avatar_url || null,
-            allow_questions: allowQuestions,
-          })
-          .select()
-          .single();
+      const { data: stream, error: streamError } = await supabase
+        .from('live_streams')
+        .insert({
+          user_id: user.id,
+          title,
+          channel_name: channel,
+          max_questions: maxQuestions,
+          is_live: true,
+          viewer_token: viewerToken,
+          thumbnail_url: profile?.avatar_url || null,
+          allow_questions: allowQuestions,
+        })
+        .select()
+        .single();
 
-        if (streamError) {
-          console.error('Stream creation error:', streamError);
-          Alert.alert('Error', `Could not start stream: ${streamError.message}`);
-          setIsStarting(false);
-          navigation.goBack();
-          return;
-        }
-
-        if (!stream) {
-          Alert.alert('Error', 'No stream data returned from server');
-          setIsStarting(false);
-          navigation.goBack();
-          return;
-        }
-
-      } catch (e) {
-        console.error('Unexpected error creating stream:', e);
-        Alert.alert('Error', 'Unexpected error starting stream. Please try again.');
-        setIsStarting(false);
+      if (streamError) {
+        Alert.alert('Error', 'Could not start stream.');
+        setIsStarting(false); // 🔧 FIXED: Reset button state
         navigation.goBack();
         return;
       }
