@@ -12,6 +12,8 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import AnimatedButton from './AnimatedButton';
 import { useDownload } from '../context/DownloadContext';
+import { userCache } from '../utils/userCache';
+import { useUser } from '../context/UserContext';
 
 const { width } = Dimensions.get('window');
 const GRID_ITEM_SIZE = (width - 3) / 3;
@@ -80,6 +82,18 @@ function DownloadProgressOverlay({ visible, progress }) {
 export default function ProfileScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const targetUserId = route?.params?.profileUserId ?? null;
+  const { user: globalUser, loading: userLoading } = useUser();
+
+  useEffectHook(() => {
+    if (!navigation) return;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) navigation.replace('Login');
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) navigation.replace('Login');
+    });
+    return () => subscription.unsubscribe();
+  }, []);
   
   // SAFETY CHECK for context
   const downloadContext = useDownload();
@@ -118,26 +132,65 @@ export default function ProfileScreen({ route, navigation }) {
 
   useFocusEffect(
     useCallback(() => {
-      init();
-    }, [])
+      if (globalUser) {
+        init();
+      }
+    }, [globalUser])
   );
 
-  async function init() {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    setCurrentUser(user);
-    if (!user) return;
-    const viewingId = targetUserId ?? user.id;
-    const ownProfile = viewingId === user.id;
-    setIsOwnProfile(ownProfile);
-    await Promise.all([loadProfile(viewingId), loadVideos(viewingId, ownProfile), checkScholarStatus(viewingId)]);
-    if (!ownProfile) {
-      const { data: followRow } = await supabase.from('follows').select('id').eq('follower_id', user.id).eq('following_id', viewingId).maybeSingle();
-      setFollowing(!!followRow);
-    } else {
-      loadLikedVideos(user.id);
+  useEffectHook(() => {
+    if (globalUser && !currentUser) {
+      init();
     }
-    setLoading(false);
+  }, [globalUser, userLoading]);
+
+  async function init() {
+    // STEP 1: Show global user instantly (0ms - from memory)
+    if (globalUser) {
+      setCurrentUser(globalUser);
+      const viewingId = targetUserId ?? globalUser.id;
+      const ownProfile = viewingId === globalUser.id;
+      setIsOwnProfile(ownProfile);
+      setLoading(false); // Show screen immediately!
+      
+      // Load everything in background (no await!)
+      Promise.all([
+        loadProfile(viewingId), 
+        loadVideos(viewingId, ownProfile), 
+        checkScholarStatus(viewingId)
+      ]);
+      
+      if (!ownProfile) {
+        supabase.from('follows')
+          .select('id')
+          .eq('follower_id', globalUser.id)
+          .eq('following_id', viewingId)
+          .maybeSingle()
+          .then(({ data }) => setFollowing(!!data));
+      } else {
+        loadLikedVideos(globalUser.id);
+      }
+      
+      return; // SKIP STEP 2 - we already have user!
+    }
+    
+    // STEP 2: Only run if no global user (fallback)
+    if (!userLoading) {
+      const cachedUser = await userCache.get();
+      if (cachedUser) {
+        setCurrentUser(cachedUser);
+        const viewingId = targetUserId ?? cachedUser.id;
+        const ownProfile = viewingId === cachedUser.id;
+        setIsOwnProfile(ownProfile);
+        setLoading(false);
+        
+        Promise.all([
+          loadProfile(viewingId), 
+          loadVideos(viewingId, ownProfile), 
+          checkScholarStatus(viewingId)
+        ]);
+      }
+    }
   }
 
   async function loadProfile(userId) {
@@ -323,8 +376,8 @@ export default function ProfileScreen({ route, navigation }) {
     <View style={styles.headerSection}>
       <View style={styles.avatarSection}>
         <Avatar
-          uri={profile?.avatar_url}
-          username={profile?.username}
+          uri={currentUser?.avatar_url || profile?.avatar_url}
+          username={currentUser?.username || profile?.username}
           size={90}
           onPress={() => { if (isOwnProfile) setAvatarModal(true); else if (profile?.avatar_url) setEnlargeAvatar(true); }}
         />
@@ -379,8 +432,8 @@ export default function ProfileScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={styles.regularInfo}>
-          <Text style={styles.displayName}>{profile?.full_name || profile?.username || 'User'}</Text>
-          <Text style={styles.usernameText}>@{profile?.username || 'username'}</Text>
+          <Text style={styles.displayName}>{currentUser?.full_name || currentUser?.username || profile?.full_name || profile?.username || 'User'}</Text>
+          <Text style={styles.usernameText}>@{currentUser?.username || profile?.username || 'username'}</Text>
           {profile?.bio ? (
             <Text style={styles.bioText}>{profile.bio}</Text>
           ) : isOwnProfile ? (

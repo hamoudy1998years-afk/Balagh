@@ -1,11 +1,9 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 
-const CLOUD_NAME = 'dgmurkssa';
-const UPLOAD_PRESET = 'balagh_videos';
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
 export default function UploadScreen({ navigation }) {
@@ -13,8 +11,9 @@ export default function UploadScreen({ navigation }) {
   const [caption, setCaption]     = useState('');
   const [category, setCategory]   = useState('');
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress]   = useState('');
   const [isScholar, setIsScholar] = useState(false);
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
 
   // ── Go Live setup state ────────────────────────────────────────────────────
   const [showLiveSetup, setShowLiveSetup] = useState(false);
@@ -33,80 +32,105 @@ export default function UploadScreen({ navigation }) {
   async function pickVideo() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission Required', 'Please go to your phone Settings → Apps → Expo Go → Permissions → Storage and enable it.', [{ text: 'OK' }]);
+      Alert.alert(
+        'Permission Required',
+        'Please go to your phone Settings → Apps → Expo Go → Permissions → Storage and enable it.',
+        [{ text: 'OK' }]
+      );
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaType.Videos, allowsEditing: false, quality: 1 });
-    if (!result.canceled) { setVideo(result.assets[0]); }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (!result.canceled) setVideo(result.assets[0]);
   }
 
   async function uploadVideo() {
-    if (!video) { Alert.alert('No video', 'Please pick a video first.'); return; }
+    if (!video)          { Alert.alert('No video', 'Please pick a video first.'); return; }
     if (!caption.trim()) { Alert.alert('No caption', 'Please add a caption.'); return; }
-    if (!category) { Alert.alert('No category', 'Please select a category.'); return; }
+    if (!category)       { Alert.alert('No category', 'Please select a category.'); return; }
 
     setUploading(true);
-    setProgress('Getting your account...');
+    setProgressPercent(0);
+    setProgressLabel('Uploading...');
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { Alert.alert('Not logged in'); setUploading(false); return; }
 
-    try {
-      setProgress('Uploading video... 0%');
-      const formData = new FormData();
-      formData.append('file', { uri: video.uri, type: 'video/mp4', name: 'upload.mp4' });
-      formData.append('upload_preset', UPLOAD_PRESET);
-      formData.append('resource_type', 'video');
-      formData.append('quality', 'auto:best');
-      formData.append('fetch_format', 'auto');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { Alert.alert('Session expired', 'Please log in again.'); setUploading(false); return; }
 
-      const cloudinaryData = await new Promise((resolve, reject) => {
+    try {
+      const ext      = video.uri.split('.').pop() || 'mp4';
+      const fileName = `${user.id}/${Date.now()}.${ext}`;
+
+      const SUPABASE_URL = 'https://waurtjtnyinncbdhfydu.supabase.co';
+
+      const formData = new FormData();
+      formData.append('', {
+        uri:  video.uri,
+        type: 'video/mp4',
+        name: fileName.split('/').pop(),
+      });
+
+      await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`);
+        xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/videos/${fileName}`);
+        xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
+        xhr.setRequestHeader('x-upsert', 'false');
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            setProgress(`Uploading video... ${pct}%`);
+            const pct = Math.min(Math.round((e.loaded / e.total) * 100), 99);
+            setProgressPercent(pct);
+            setProgressLabel('Uploading...');
           }
         };
         xhr.onload = () => {
-          try { resolve(JSON.parse(xhr.responseText)); }
-          catch (e) { reject(new Error('Failed to parse response')); }
+          if (xhr.status === 200 || xhr.status === 201) {
+            resolve(JSON.parse(xhr.responseText));
+          } else {
+            reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
+          }
         };
-        xhr.onerror = () => reject(new Error('Upload failed'));
+        xhr.onerror = () => reject(new Error('Network request failed'));
         xhr.send(formData);
       });
 
-      if (!cloudinaryData.secure_url) throw new Error('Upload failed');
+      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${fileName}`;
 
-      setProgress('Saving to database...');
-      const { error } = await supabase.from('videos').insert({
-        user_id: user.id,
-        caption: caption.trim(),
+      setProgressPercent(100);
+      setProgressLabel('Saving...');
+
+      const { error: dbError } = await supabase.from('videos').insert({
+        user_id:       user.id,
+        caption:       caption.trim(),
         category,
-        video_url: cloudinaryData.secure_url,
-        thumbnail_url: cloudinaryData.secure_url.replace('/upload/', '/upload/so_0/').replace('.mp4', '.jpg'),
+        video_url:     publicUrl,
+        thumbnail_url: null,
       });
 
-      if (error) throw error;
+      if (dbError) throw dbError;
 
-      setProgress('');
+      setProgressPercent(0);
+      setProgressLabel('');
       setUploading(false);
       setVideo(null);
       setCaption('');
       setCategory('');
       Alert.alert('Success! 🎉', 'Your video has been uploaded to Bushrann!');
+
     } catch (error) {
       setUploading(false);
-      setProgress('');
+      setProgressPercent(0);
+      setProgressLabel('');
+      console.error('Upload error:', error);
       Alert.alert('Upload failed', error.message);
     }
   }
 
-  // ── Go Live handlers ───────────────────────────────────────────────────────
-  function handleGoLive() {
-    setShowLiveSetup(true);
-  }
+  function handleGoLive() { setShowLiveSetup(true); }
 
   function startLiveStream() {
     if (!liveTitle.trim()) {
@@ -117,13 +141,9 @@ export default function UploadScreen({ navigation }) {
     setShowLiveSetup(false);
     setLiveTitle('');
     setMaxQuestions('5');
-    navigation.navigate('LiveStream', {
-      title: liveTitle.trim(),
-      maxQuestions: max,
-    });
+    navigation.navigate('LiveStream', { title: liveTitle.trim(), maxQuestions: max });
   }
 
-  // ── Go Live Setup Screen ───────────────────────────────────────────────────
   if (showLiveSetup) {
     return (
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -165,7 +185,6 @@ export default function UploadScreen({ navigation }) {
     );
   }
 
-  // ── Main Upload Screen ─────────────────────────────────────────────────────
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Upload Video</Text>
@@ -175,11 +194,13 @@ export default function UploadScreen({ navigation }) {
         <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
           <Text style={styles.liveDot}>🔴</Text>
           <Text style={styles.liveBtnText}>Go Live</Text>
-          <View style={styles.scholarBadge}><Text style={styles.scholarBadgeText}>Scholar</Text></View>
+          <View style={styles.scholarBadge}>
+            <Text style={styles.scholarBadgeText}>Scholar</Text>
+          </View>
         </AnimatedButton>
       )}
 
-      <AnimatedButton style={styles.videoPicker} onPress={pickVideo}>
+      <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading}>
         {video ? (
           <View style={styles.videoSelected}>
             <Text style={styles.videoSelectedIcon}>🎬</Text>
@@ -197,7 +218,16 @@ export default function UploadScreen({ navigation }) {
       </AnimatedButton>
 
       <Text style={styles.label}>Caption</Text>
-      <TextInput style={styles.input} placeholder="What is this video about?" placeholderTextColor="#4b5563" value={caption} onChangeText={setCaption} multiline maxLength={200} />
+      <TextInput
+        style={styles.input}
+        placeholder="What is this video about?"
+        placeholderTextColor="#4b5563"
+        value={caption}
+        onChangeText={setCaption}
+        multiline
+        maxLength={200}
+        editable={!uploading}
+      />
       <Text style={styles.charCount}>{caption.length}/200</Text>
 
       <Text style={styles.label}>Category</Text>
@@ -206,32 +236,45 @@ export default function UploadScreen({ navigation }) {
           <AnimatedButton
             key={cat}
             style={[styles.categoryChip, category === cat && styles.categoryChipActive]}
-            onPress={() => setCategory(cat)}
+            onPress={() => !uploading && setCategory(cat)}
           >
-            <Text style={[styles.categoryChipText, category === cat && styles.categoryChipTextActive]}>{cat}</Text>
+            <Text style={[styles.categoryChipText, category === cat && styles.categoryChipTextActive]}>
+              {cat}
+            </Text>
           </AnimatedButton>
         ))}
       </View>
 
+      {/* ── TikTok Style Upload Button ── */}
       <AnimatedButton
         style={[styles.uploadBtn, uploading && styles.uploadBtnDisabled]}
         onPress={uploadVideo}
         disabled={uploading}
       >
-        {uploading ? (
-          <View style={styles.uploadingRow}>
-            <ActivityIndicator color="#fff" size="small" />
-            <Text style={styles.uploadBtnText}>{progress}</Text>
+        {/* Thin progress bar at the very bottom of the button */}
+        {uploading && (
+          <View style={styles.tiktokBarBg}>
+            <View style={[styles.tiktokBarFill, { width: `${progressPercent}%` }]} />
           </View>
-        ) : (
-          <Text style={styles.uploadBtnText}>Upload to Bushrann ☪️</Text>
         )}
+
+        {/* Button content */}
+        <View style={styles.uploadBtnContent}>
+          <Text style={styles.uploadBtnText}>
+            {uploading ? progressLabel : 'Upload to Bushrann ☪️'}
+          </Text>
+          {uploading && (
+            <Text style={styles.uploadBtnPct}>{progressPercent}%</Text>
+          )}
+        </View>
       </AnimatedButton>
 
       {!isScholar && (
         <View style={styles.scholarInfo}>
           <Text style={styles.scholarInfoIcon}>🎓</Text>
-          <Text style={styles.scholarInfoText}>Are you a verified Islamic scholar? Contact us to get your Scholar badge and unlock live streaming.</Text>
+          <Text style={styles.scholarInfoText}>
+            Are you a verified Islamic scholar? Contact us to get your Scholar badge and unlock live streaming.
+          </Text>
         </View>
       )}
     </ScrollView>
@@ -239,49 +282,54 @@ export default function UploadScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:            { flex: 1, backgroundColor: '#0f0f0f' },
-  content:              { padding: 24, paddingTop: 60 },
-  title:                { fontSize: 24, fontWeight: '700', color: '#ffffff', marginBottom: 4 },
-  subtitle:             { fontSize: 14, color: '#64748b', marginBottom: 28 },
-  hint:                 { color: '#64748b', fontSize: 12, marginBottom: 10 },
-  liveBtn:              { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#ef4444', borderRadius: 14, padding: 16, marginBottom: 20, gap: 10 },
-  liveDot:              { fontSize: 18 },
-  liveBtnText:          { color: '#ef4444', fontSize: 16, fontWeight: '700', flex: 1 },
-  scholarBadge:         { backgroundColor: '#ef4444', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  scholarBadgeText:     { color: '#fff', fontSize: 11, fontWeight: '700' },
-  videoPicker:          { backgroundColor: '#1a1d27', borderRadius: 16, borderWidth: 2, borderColor: '#2d3148', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
-  videoPlaceholder:     { padding: 40, alignItems: 'center' },
-  videoPlaceholderIcon: { fontSize: 48, marginBottom: 12 },
-  videoPlaceholderText: { color: '#ffffff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  videoPlaceholderSub:  { color: '#64748b', fontSize: 13 },
-  videoSelected:        { padding: 24, alignItems: 'center' },
-  videoSelectedIcon:    { fontSize: 40, marginBottom: 8 },
-  videoSelectedText:    { color: '#10b981', fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  videoSelectedName:    { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
-  tapToChange:          { color: '#4b5563', fontSize: 12 },
-  label:                { color: '#94a3b8', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
-  input:                { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 16, color: '#ffffff', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
-  charCount:            { color: '#4b5563', fontSize: 12, textAlign: 'right', marginTop: 4, marginBottom: 20 },
-  categories:           { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 32 },
-  categoryChip:         { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  categoryChipActive:   { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
-  categoryChipText:     { color: '#64748b', fontSize: 13, fontWeight: '600' },
+  container:              { flex: 1, backgroundColor: '#0f0f0f' },
+  content:                { padding: 24, paddingTop: 60 },
+  title:                  { fontSize: 24, fontWeight: '700', color: '#ffffff', marginBottom: 4 },
+  subtitle:               { fontSize: 14, color: '#64748b', marginBottom: 28 },
+  hint:                   { color: '#64748b', fontSize: 12, marginBottom: 10 },
+  liveBtn:                { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#ef4444', borderRadius: 14, padding: 16, marginBottom: 20, gap: 10 },
+  liveDot:                { fontSize: 18 },
+  liveBtnText:            { color: '#ef4444', fontSize: 16, fontWeight: '700', flex: 1 },
+  scholarBadge:           { backgroundColor: '#ef4444', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  scholarBadgeText:       { color: '#fff', fontSize: 11, fontWeight: '700' },
+  videoPicker:            { backgroundColor: '#1a1d27', borderRadius: 16, borderWidth: 2, borderColor: '#2d3148', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
+  videoPlaceholder:       { padding: 40, alignItems: 'center' },
+  videoPlaceholderIcon:   { fontSize: 48, marginBottom: 12 },
+  videoPlaceholderText:   { color: '#ffffff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  videoPlaceholderSub:    { color: '#64748b', fontSize: 13 },
+  videoSelected:          { padding: 24, alignItems: 'center' },
+  videoSelectedIcon:      { fontSize: 40, marginBottom: 8 },
+  videoSelectedText:      { color: '#10b981', fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  videoSelectedName:      { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
+  tapToChange:            { color: '#4b5563', fontSize: 12 },
+  label:                  { color: '#94a3b8', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
+  input:                  { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 16, color: '#ffffff', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  charCount:              { color: '#4b5563', fontSize: 12, textAlign: 'right', marginTop: 4, marginBottom: 20 },
+  categories:             { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 32 },
+  categoryChip:           { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  categoryChipActive:     { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
+  categoryChipText:       { color: '#64748b', fontSize: 13, fontWeight: '600' },
   categoryChipTextActive: { color: '#ffffff' },
-  uploadBtn:            { backgroundColor: '#7c3aed', borderRadius: 14, padding: 18, alignItems: 'center', marginBottom: 20 },
-  uploadBtnDisabled:    { backgroundColor: '#4c1d95' },
-  uploadBtnText:        { color: '#ffffff', fontSize: 16, fontWeight: '700', marginLeft: 8 },
-  uploadingRow:         { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  scholarInfo:          { flexDirection: 'row', backgroundColor: '#1a1d27', borderRadius: 12, padding: 14, gap: 10, marginBottom: 40, alignItems: 'flex-start' },
-  scholarInfoIcon:      { fontSize: 20 },
-  scholarInfoText:      { color: '#64748b', fontSize: 13, lineHeight: 20, flex: 1 },
-  // ── Go Live setup styles ──
-  maxQuestionsRow:      { flexDirection: 'row', gap: 10, marginBottom: 28, flexWrap: 'wrap' },
-  qChip:                { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
-  qChipActive:          { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
-  qChipText:            { color: '#64748b', fontSize: 15, fontWeight: '600' },
-  qChipTextActive:      { color: '#ffffff' },
-  goLiveConfirmBtn:     { backgroundColor: '#ef4444', borderRadius: 14, padding: 18, alignItems: 'center', marginBottom: 12 },
-  goLiveConfirmBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  cancelBtn:            { borderWidth: 1, borderColor: '#2d3148', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 40 },
-  cancelBtnText:        { color: '#64748b', fontSize: 15 },
+
+  // ── TikTok Style Button ────────────────────────────────────────────────────
+  uploadBtn:              { backgroundColor: '#7c3aed', borderRadius: 14, paddingVertical: 18, paddingHorizontal: 65, marginBottom: 20, overflow: 'hidden' },
+  uploadBtnDisabled:      { backgroundColor: '#4c1d95' },
+  uploadBtnContent:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  uploadBtnText:          { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  uploadBtnPct:           { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  tiktokBarBg:            { position: 'absolute', bottom: -15, left: -30, right: -30, height: 4, backgroundColor: 'rgba(255,255,255,0.2)' },
+  tiktokBarFill:          { height: 4, backgroundColor: '#ffffff' },
+
+  scholarInfo:            { flexDirection: 'row', backgroundColor: '#1a1d27', borderRadius: 12, padding: 14, gap: 10, marginBottom: 40, alignItems: 'flex-start' },
+  scholarInfoIcon:        { fontSize: 20 },
+  scholarInfoText:        { color: '#64748b', fontSize: 13, lineHeight: 20, flex: 1 },
+  maxQuestionsRow:        { flexDirection: 'row', gap: 10, marginBottom: 28, flexWrap: 'wrap' },
+  qChip:                  { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
+  qChipActive:            { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
+  qChipText:              { color: '#64748b', fontSize: 15, fontWeight: '600' },
+  qChipTextActive:        { color: '#ffffff' },
+  goLiveConfirmBtn:       { backgroundColor: '#ef4444', borderRadius: 14, padding: 18, alignItems: 'center', marginBottom: 12 },
+  goLiveConfirmBtnText:   { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  cancelBtn:              { borderWidth: 1, borderColor: '#2d3148', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 40 },
+  cancelBtnText:          { color: '#64748b', fontSize: 15 },
 });

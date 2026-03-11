@@ -1,4 +1,4 @@
-import { useVideoPlayer, VideoView } from 'expo-video';
+import Video from 'react-native-video';
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import CommentsModal from './CommentsModal';
@@ -30,9 +30,17 @@ function DownloadProgressOverlay({ visible, progress }) {
   );
 }
 
-export default function VideoCard({ item, isActive, initialLiked = false, initialFollowed = false, onFollowChange, navigation, cardHeight }) {
+// ── FIX: Accept username + avatarUrl as props — no DB fetch needed per card ───
+export default function VideoCard({
+  item, player, isActive, isVisible, isTabActive = true,
+  initialLiked = false, initialFollowed = false,
+  onFollowChange, navigation, cardHeight,
+  username: usernameProp,   // ✅ passed from HomeScreen
+  avatarUrl: avatarUrlProp, // ✅ passed from HomeScreen
+}) {
+
   const { width } = useWindowDimensions();
-  const { showVideoOptionsSheet } = useDownload(); // CHANGED from showDownloadSheet
+  const { showVideoOptionsSheet } = useDownload();
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(item.likes_count ?? 0);
   const [showComments, setShowComments] = useState(false);
@@ -41,53 +49,70 @@ export default function VideoCard({ item, isActive, initialLiked = false, initia
   const [paused, setPaused] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [showPauseIcon, setShowPauseIcon] = useState(false);
-  const [username, setUsername] = useState('user');
   const [isDownloading, setIsDownloading] = useState(false);
-  const [avatarUrl, setAvatarUrl] = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(() => downloadedVideoIds.has(item.id));
 
+  // ── Use props directly — no more per-card DB fetch ─────────────────────────
+  const username = usernameProp ?? 'user';
+  const avatarUrl = avatarUrlProp ?? null;
+
+  function requireAuth() {
+    if (!currentUserId) {
+      Alert.alert(
+        'Join Bushrann',
+        'Login or create an account to interact with content.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Login', onPress: () => navigation.navigate('Login') },
+        ]
+      );
+      return false;
+    }
+    return true;
+  }
+
   const lastTap = useRef(null);
   const tapTimer = useRef(null);
+  const hasPlayed = useRef(false);
   const insets = useSafeAreaInsets();
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      setPaused(true);
+      if (player?.current) {
+        try { player.current.seek(0); } catch (e) {}
+      }
+    };
+  }, [player]);
+
+  // When scrolling to a video — always unpause it
+  useEffect(() => {
+    if (isActive) {
+      setPaused(false);
+      hasPlayed.current = true;
+    }
+  }, [isActive]);
+
+  // When switching tabs back — resume whatever video is currently active
+  useEffect(() => {
+    if (isTabActive && isActive) {
+      setPaused(false);
+    }
+  }, [isTabActive]);
 
   useEffect(() => { setFollowed(initialFollowed); }, [initialFollowed]);
 
+  // Only fetch current user ID — lightweight, cached by Supabase client
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setCurrentUserId(data.user?.id ?? null);
     });
   }, []);
 
-  useEffect(() => {
-    if (!item.user_id) return;
-    supabase.from('profiles').select('username, avatar_url').eq('id', item.user_id).single()
-      .then(({ data }) => {
-        if (data?.username) setUsername(data.username);
-        if (data?.avatar_url) setAvatarUrl(data.avatar_url);
-      });
-  }, [item.user_id]);
-
-  const player = useVideoPlayer(item.video_url ?? '', (player) => {
-    player.loop = true;
-    player.muted = false;
-  });
-
-  useEffect(() => {
-    if (!player) return;
-    try {
-      if (isActive && !paused) { player.play(); }
-      else if (!isDownloading) { player.pause(); if (!isActive) setPaused(false); }
-    } catch (e) {}
-  }, [isActive, paused, isDownloading]);
-
-  useEffect(() => {
-    return () => {
-      try { player.pause(); player.release(); } catch (e) {}
-    };
-  }, []);
-
   async function handleLike() {
+    if (!requireAuth()) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     if (liked) {
@@ -100,6 +125,7 @@ export default function VideoCard({ item, isActive, initialLiked = false, initia
   }
 
   async function handleFollow() {
+    if (!requireAuth()) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || user.id === item.user_id) return;
     const newFollowed = !followed;
@@ -135,16 +161,15 @@ export default function VideoCard({ item, isActive, initialLiked = false, initia
     }
   }
 
-  // UPDATED: Use global VideoOptionsSheet (not just download sheet)
   function handleLongPress() {
     showVideoOptionsSheet(
       item,
-      false, // isOwner - false for feed
+      false,
       hasDownloaded,
       {
         onDownload: handleDownloadVideo,
-        onPin: null, // Not available in feed
-        onDelete: null, // Not available in feed
+        onPin: null,
+        onDelete: null,
       }
     );
   }
@@ -185,8 +210,6 @@ export default function VideoCard({ item, isActive, initialLiked = false, initia
       downloadedVideoIds.add(item.id);
       setHasDownloaded(true);
 
-      try { if (isActive && !paused) player.play(); } catch (e) {}
-
       Alert.alert('Downloaded ✅', 'Video saved to your gallery!');
     } catch (e) {
       setIsDownloading(false);
@@ -203,11 +226,39 @@ export default function VideoCard({ item, isActive, initialLiked = false, initia
   const hashtags = item.caption?.match(/#\w+/g) ?? [];
   const captionText = item.caption?.replace(/#\w+/g, '').trim() ?? '';
 
+  const [playerReady, setPlayerReady] = useState(false);
+
+  useEffect(() => {
+    if (player) {
+      const timer = setTimeout(() => setPlayerReady(true), 50);
+      return () => {
+        clearTimeout(timer);
+        setPlayerReady(false);
+      };
+    }
+  }, [player]);
+
+  if (!player) {
+    return <View style={{ height: cardHeight, backgroundColor: '#000' }} />;
+  }
+
   return (
     <View style={[styles.card, { height: cardHeight }]}>
-      {item.video_url ? (
-        <VideoView player={player} style={styles.video} contentFit="contain" nativeControls={false} />
-      ) : null}
+      <Video
+        key={item.id}
+        ref={player}
+        source={{ uri: item.video_url }}
+        style={styles.video}
+        resizeMode="contain"
+        repeat={true}
+        paused={!isActive || !isTabActive || paused}
+        muted={false}
+        playInBackground={false}
+        playWhenInactive={false}
+        ignoreSilentSwitch="ignore"
+        progressUpdateInterval={250}
+        onError={(e) => console.log('Video error:', e)}
+      />
 
       <TouchableOpacity
         style={styles.tapArea}
@@ -260,7 +311,7 @@ export default function VideoCard({ item, isActive, initialLiked = false, initia
           <Text style={styles.actionIcon}>{liked ? '❤️' : '🤍'}</Text>
           <Text style={styles.actionCount}>{likeCount}</Text>
         </AnimatedButton>
-        <AnimatedButton style={styles.actionBtn} onPress={() => setShowComments(true)}>
+        <AnimatedButton style={styles.actionBtn} onPress={() => { if (requireAuth()) setShowComments(true); }}>
           <Text style={styles.actionIcon}>💬</Text>
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>

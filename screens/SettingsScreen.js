@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, Animated, StatusBar, Alert, Image,
+  Switch, Animated, StatusBar, Alert, Image, Modal,
   TextInput, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform, BackHandler,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { userCache } from '../utils/userCache';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ACCENT     = '#00F5C4';
@@ -97,6 +98,35 @@ function Card({ children }) {
   return <View style={styles.card}>{children}</View>;
 }
 
+function AnimatedButton({ label, onPress, danger, outline }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const pi = () => Animated.spring(scale, { toValue: 0.94, useNativeDriver: true, tension: 300, friction: 10 }).start();
+  const po = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true, tension: 300, friction: 10 }).start();
+  return (
+    <Animated.View style={{ transform: [{ scale }], flex: 1 }}>
+      <TouchableOpacity
+        onPressIn={pi}
+        onPressOut={po}
+        onPress={onPress}
+        activeOpacity={1}
+        style={[
+          styles.modalBtn,
+          danger && styles.modalBtnDanger,
+          outline && styles.modalBtnOutline,
+        ]}
+      >
+        <Text style={[
+          styles.modalBtnText,
+          danger && styles.modalBtnTextDanger,
+          outline && styles.modalBtnTextOutline,
+        ]}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 function SubScreen({ title, onBack, insets, children }) {
   return (
     <View style={[styles.subContainer, { paddingTop: insets.top }]}>
@@ -155,6 +185,7 @@ export default function SettingsScreen({ navigation }) {
   const [blockedLoading, setBlockedLoading] = useState(false);
 
   const [isDark, setIsDark] = useState(true);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   useEffect(() => { init(); }, []);
 
@@ -239,22 +270,53 @@ export default function SettingsScreen({ navigation }) {
   }
 
   async function handleLogout() {
-    Alert.alert('Log Out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: () => supabase.auth.signOut() },
-    ]);
+    setShowLogoutModal(true);
+  }
+
+  async function confirmLogout() {
+    setShowLogoutModal(false);
+    await userCache.clear();
+    await supabase.auth.signOut({ scope: 'local' });
   }
 
   async function handleDeleteAccount() {
-    Alert.alert('Delete Account', 'This will permanently delete your account and all your content. This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete Forever', style: 'destructive', onPress: async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        await supabase.from('profiles').delete().eq('id', user.id);
-        await supabase.auth.signOut();
-      }},
-    ]);
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete your account, videos, comments, and all data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Forever',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session) throw new Error('No active session');
+
+              const response = await fetch(
+                'https://waurtjtnyinncbdhfydu.supabase.co/functions/v1/delete-user',
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`,
+                  },
+                }
+              );
+
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.error || 'Deletion failed');
+
+              await userCache.clear();
+              await supabase.auth.signOut();
+
+            } catch (error) {
+              Alert.alert('Error', error.message || 'Something went wrong. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   }
 
   async function handleResetPassword() {
@@ -269,6 +331,28 @@ export default function SettingsScreen({ navigation }) {
       }},
     ]);
   }
+
+  // ── LOGOUT MODAL ─────────────────────────────────────────────────────────────
+  const logoutModal = (
+    <Modal
+      visible={showLogoutModal}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowLogoutModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalBox}>
+          <Text style={styles.modalIcon}>🚪</Text>
+          <Text style={styles.modalTitle}>Log Out</Text>
+          <Text style={styles.modalMessage}>Are you sure you want to log out?</Text>
+          <View style={styles.modalActions}>
+            <AnimatedButton label="Cancel"   outline onPress={() => setShowLogoutModal(false)} />
+            <AnimatedButton label="Log Out"  danger  onPress={confirmLogout} />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   // ── ACCOUNT ──────────────────────────────────────────────────────────────────
   if (screen === 'account') return (
@@ -599,7 +683,7 @@ export default function SettingsScreen({ navigation }) {
           { title: '11. Modifications',
             body: 'We reserve the right to modify these Terms at any time. We will notify registered users of material changes at least fifteen (15) days prior to the effective date via email or in-app notification. Continued use of the Service after the effective date constitutes acceptance of the modified Terms.' },
           { title: '12. Contact',
-            body: 'For questions regarding these Terms, contact us at:\n\nBalagh\nDavao City, Davao del Sur, Philippines\nEmail: legal@balagh.app' },
+            body: 'For questions regarding these Terms, contact us at:\n\nBalagh\nEmail: bushrann.app@gmail.com' },
         ].map((s, i) => (
           <View key={i} style={styles.legalSection}>
             <Text style={styles.legalTitle}>{s.title}</Text>
@@ -650,7 +734,7 @@ export default function SettingsScreen({ navigation }) {
           { title: '8. Your Rights as a Data Subject',
             body: 'Under the Data Privacy Act of 2012 and the GDPR, you have the right to:\n\n• Be Informed — how your data is processed (Sec. 16(a), DPA)\n• Access — request a copy of your personal data (Sec. 16(b), DPA; Art. 15, GDPR)\n• Rectification — correct inaccurate data (Sec. 16(e), DPA; Art. 16, GDPR)\n• Erasure — request deletion of your data (Sec. 16(c), DPA; Art. 17, GDPR)\n• Object — to processing of your data (Sec. 16(d), DPA; Art. 21, GDPR)\n• Data Portability — receive your data in a portable format (Sec. 18, DPA; Art. 20, GDPR)\n• Damages — be indemnified for unlawful processing (Sec. 16(f), DPA)\n• File a Complaint — with the NPC at www.privacy.gov.ph' },
           { title: '9. Data Protection Officer',
-            body: 'In compliance with Section 21 of the Data Privacy Act of 2012, Balagh has designated a Data Protection Officer (DPO).\n\nData Protection Officer — Balagh\nDavao City, Davao del Sur, Philippines\nEmail: legal@balagh.app' },
+            body: 'In compliance with Section 21 of the Data Privacy Act of 2012, Balagh has designated a Data Protection Officer (DPO).\n\nData Protection Officer — Balagh\nEmail: bushrann.app@gmail.com' },
           { title: "10. Children's Privacy",
             body: 'The Service is not directed to children under thirteen (13). We do not knowingly collect personal information from children under 13 without verifiable parental consent, in compliance with Republic Act No. 7610 (Special Protection of Children Against Abuse, Exploitation and Discrimination Act).' },
           { title: '11. International Data Transfers',
@@ -658,7 +742,7 @@ export default function SettingsScreen({ navigation }) {
           { title: '12. Changes to This Policy',
             body: 'We may update this Privacy Policy from time to time. We will notify you of material changes through the App or by direct notification as required by law. Continued use of the Service after any changes constitutes acceptance of the updated Policy.' },
           { title: '13. Contact Us',
-            body: 'For privacy-related questions or to exercise your data subject rights, contact us at:\n\nBalagh\nDavao City, Davao del Sur, Philippines\nEmail: legal@balagh.app' },
+            body: 'For privacy-related questions or to exercise your data subject rights, contact us at:\n\nBalagh\nEmail: bushrann.app@gmail.com' },
         ].map((s, i) => (
           <View key={i} style={styles.legalSection}>
             <Text style={styles.legalTitle}>{s.title}</Text>
@@ -676,6 +760,7 @@ export default function SettingsScreen({ navigation }) {
   // ── MAIN MENU ─────────────────────────────────────────────────────────────────
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      {logoutModal}
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -794,7 +879,6 @@ const styles = StyleSheet.create({
   contactIntro: { fontSize: 15, color: SUBTEXT, lineHeight: 22, marginBottom: 24 },
   infoBox:      { backgroundColor: CARD, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: BORDER },
   infoBoxText:  { color: SUBTEXT, fontSize: 14, lineHeight: 21 },
-  // ── Legal screens ─────────────────────────────────────────────────────────────
   legalHeader:     { backgroundColor: CARD, borderRadius: 16, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: BORDER, alignItems: 'center' },
   legalAppName:    { fontSize: 26, fontWeight: '800', color: ACCENT, marginBottom: 6 },
   legalEffective:  { fontSize: 13, color: SUBTEXT, fontStyle: 'italic' },
@@ -806,4 +890,16 @@ const styles = StyleSheet.create({
   legalFooterText: { fontSize: 12, color: MUTED, textAlign: 'center' },
   toggleTrack: { width: 52, height: 28, borderRadius: 14, justifyContent: 'center' },
   toggleKnob:  { position: 'absolute', width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+  modalOverlay:        { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+  modalBox:            { backgroundColor: CARD, borderRadius: 24, padding: 28, alignItems: 'center', width: '100%', borderWidth: 1, borderColor: BORDER },
+  modalIcon:           { fontSize: 40, marginBottom: 12 },
+  modalTitle:          { fontSize: 20, fontWeight: '800', color: TEXT, marginBottom: 8 },
+  modalMessage:        { fontSize: 14, color: SUBTEXT, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
+  modalActions:        { flexDirection: 'row', gap: 12, width: '100%' },
+  modalBtn:            { paddingVertical: 14, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: ACCENT },
+  modalBtnDanger:      { backgroundColor: DANGER },
+  modalBtnOutline:     { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: BORDER },
+  modalBtnText:        { fontSize: 15, fontWeight: '700', color: BG },
+  modalBtnTextDanger:  { color: '#fff' },
+  modalBtnTextOutline: { color: SUBTEXT },
 });

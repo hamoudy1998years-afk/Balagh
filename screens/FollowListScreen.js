@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─── Single user row ──────────────────────────────────────────────────────────
-function UserRow({ item, onPress, currentUserId }) {
+function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
   const [following, setFollowing] = useState(item.isFollowing ?? false);
   const isOwnAccount = item.id === currentUserId;
 
@@ -31,19 +31,14 @@ function UserRow({ item, onPress, currentUserId }) {
 
   return (
     <TouchableOpacity style={styles.userRow} onPress={onPress} activeOpacity={0.7}>
-      {/* Avatar */}
       {item.avatar_url ? (
-        <Image
-          source={{ uri: item.avatar_url }}
-          style={styles.avatar}
-        />
+        <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
       ) : (
         <View style={styles.avatarFallback}>
           <Text style={styles.avatarLetter}>{letter}</Text>
         </View>
       )}
 
-      {/* Name & username */}
       <View style={styles.userInfo}>
         <Text style={styles.displayName}>
           {item.full_name || item.username || 'User'}
@@ -51,8 +46,8 @@ function UserRow({ item, onPress, currentUserId }) {
         <Text style={styles.username}>@{item.username || 'username'}</Text>
       </View>
 
-      {/* Follow button — hide on own account */}
-      {!isOwnAccount && (
+      {/* ✅ FIXED: hide follow button on own account AND when viewing your own list */}
+      {!isOwnAccount && !isViewingOwnList && (
         <TouchableOpacity
           style={[styles.followBtn, following && styles.followingBtn]}
           onPress={handleFollow}
@@ -70,7 +65,6 @@ function UserRow({ item, onPress, currentUserId }) {
 export default function FollowListScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { userId, type, username } = route.params;
-  // type = 'followers' or 'following'
 
   const [users,         setUsers]         = useState([]);
   const [loading,       setLoading]       = useState(true);
@@ -92,14 +86,12 @@ export default function FollowListScreen({ route, navigation }) {
       let profileIds = [];
 
       if (type === 'followers') {
-        // Get IDs of people who follow userId
         const { data } = await supabase
           .from('follows')
           .select('follower_id')
           .eq('following_id', userId);
         profileIds = (data ?? []).map(row => row.follower_id);
       } else {
-        // Get IDs of people userId is following
         const { data } = await supabase
           .from('follows')
           .select('following_id')
@@ -113,7 +105,6 @@ export default function FollowListScreen({ route, navigation }) {
         return;
       }
 
-      // Fetch profiles for those IDs
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username, full_name, avatar_url')
@@ -121,7 +112,6 @@ export default function FollowListScreen({ route, navigation }) {
 
       const list = profiles ?? [];
 
-      // Check which ones current user is already following
       if (currentUserId && list.length > 0) {
         const { data: myFollows } = await supabase
           .from('follows')
@@ -145,15 +135,10 @@ export default function FollowListScreen({ route, navigation }) {
     setRefreshing(false);
   }, [currentUserId]);
 
-  const title = type === 'followers'
-    ? `${username ? '@' + username + "'s " : ''}Followers`
-    : `${username ? '@' + username + ' is ' : ''}Following`;
-
   return (
-    <View style={[styles.container]}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
 
-      {/* ── Header ──────────────────────────────────────────────────── */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>←</Text>
@@ -164,7 +149,6 @@ export default function FollowListScreen({ route, navigation }) {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* ── List ────────────────────────────────────────────────────── */}
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#7c3aed" />
@@ -177,6 +161,7 @@ export default function FollowListScreen({ route, navigation }) {
             <UserRow
               item={item}
               currentUserId={currentUserId}
+              isViewingOwnList={userId === currentUserId}
               onPress={() => navigation.navigate('UserProfile', { profileUserId: item.id })}
             />
           )}
@@ -219,7 +204,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 60,
   },
-  // ── Header ────────────────────────────────────────────────────────────────
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -237,7 +221,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center',
   },
-  // ── User row ──────────────────────────────────────────────────────────────
   userRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -277,7 +260,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
-  // ── Follow button ─────────────────────────────────────────────────────────
   followBtn: {
     backgroundColor: '#7c3aed',
     borderRadius: 8,
@@ -303,7 +285,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e1e',
     marginLeft: 78,
   },
-  // ── Empty state ───────────────────────────────────────────────────────────
   emptyIcon: { fontSize: 48 },
   emptyText: {
     color: '#64748b',

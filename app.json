@@ -10,8 +10,8 @@
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "resizeMode": "native",
+      "backgroundColor": "#0a1172"
     },
     "ios": {
       "supportsTablet": true,
@@ -22,11 +22,14 @@
       }
     },
     "android": {
+      "navigationBar": {
+        "backgroundColor": "#000000",
+        "barStyle": "light-content"
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#1e4fa3"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.bushrann.app",
       "permissions": [
         "android.permission.USE_BIOMETRIC",
@@ -42,7 +45,6 @@
     },
     "plugins": [
       "expo-video",
-      "expo-web-browser",
       "expo-secure-store",
       [
         "expo-local-authentication",
@@ -64,7 +66,9 @@
           "savePhotosPermission": "Allow Bushrann to save videos to your photo library.",
           "isAccessMediaLocationEnabled": true
         }
-      ]
+      ],
+      "expo-web-browser",
+      "react-native-video"
     ],
     "extra": {
       "eas": {

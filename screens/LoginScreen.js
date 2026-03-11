@@ -7,10 +7,14 @@ import {
   Alert,
   KeyboardAvoidingView,
   ScrollView,
+  FlatList,
   Platform,
   ActivityIndicator,
+  Modal,
+  TouchableOpacity,
+  Keyboard,
 } from 'react-native';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
 import { supabase } from '../lib/supabase';
@@ -18,6 +22,9 @@ import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import * as LocalAuthentication from 'expo-local-authentication';
 import AnimatedButton from './AnimatedButton';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { userCache } from '../utils/userCache';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -30,6 +37,13 @@ export default function LoginScreen({ navigation }) {
   const [biometricType, setBiometricType] = useState(null);
   const [savedAccounts, setSavedAccounts] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState(null);
+  const [enteredPin, setEnteredPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [isCreatingPin, setIsCreatingPin] = useState(false);
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
 
   const suppressDropdown = useRef(false);
   const silentReAuth = useRef(false);
@@ -42,6 +56,9 @@ export default function LoginScreen({ navigation }) {
     saveGoogleCredentials,
     saveAccount,
     loginWithBiometrics,
+    hasQuickPin,
+    validateQuickPin,
+    saveQuickPin,
   } = useBiometricAuth();
 
   useEffect(() => {
@@ -65,30 +82,85 @@ export default function LoginScreen({ navigation }) {
   const closeDropdown = () => setShowDropdown(false);
 
   const handleAccountSelect = async (account) => {
-    suppressDropdown.current = true;
-    setShowDropdown(false);
-    setIdentifier(account.identifier || account.email);
+    closeDropdown();
+    setLoading(true);
+    setSelectedAccount(account);
 
-    const bioAvailable = await isBiometricAvailable();
-    const credsSaved = await hasCredentials(account.email);
+    try {
+      if (account.provider === 'email') {
+        const available = await isBiometricAvailable();
+        const hasCreds = await hasCredentials(account.email);
 
-    if (bioAvailable && credsSaved) {
-      try {
-        setLoading(true);
-        await loginWithBiometrics(account.email);
-      } catch (e) {
-        setLoading(false);
-        if (e.message === 'BIOMETRIC_CANCELLED') {
-          // User cancelled — do nothing
-        } else if (e.message === 'SESSION_EXPIRED') {
-          silentReAuth.current = true;
-          await handleGoogleLogin();
-        } else if (e.message !== 'NO_CREDENTIALS') {
-          Alert.alert('Login Failed', e.message);
+        if (available && hasCreds) {
+          try {
+            await loginWithBiometrics(account.email);
+            navigation.navigate('Main');
+            return;
+          } catch (e) {
+            if (e.message === 'BIOMETRIC_CANCELLED') {
+              setLoading(false);
+              return;
+            }
+          }
         }
+
+        setIdentifier(account.email);
+        setLoading(false);
+        return;
       }
-    } else if (account.provider === 'google') {
-      handleGoogleLogin();
+
+      if (account.provider === 'google') {
+        const hasPin = await hasQuickPin(account.email);
+
+        if (hasPin) {
+          const bioAvailable = await isBiometricAvailable();
+
+          if (bioAvailable) {
+            const bioResult = await LocalAuthentication.authenticateAsync({
+              promptMessage: 'Verify to login instantly',
+              cancelLabel: 'Use PIN',
+            });
+
+            if (bioResult.success) {
+              setLoading(false);
+              navigation.navigate('Main');
+              return;
+            }
+          }
+
+          setLoading(false);
+          setPinModalVisible(true);
+          setIsCreatingPin(false);
+          setEnteredPin('');
+          setPinError('');
+          return;
+        }
+
+        setLoading(false);
+        Alert.alert(
+          '⚡ Enable Instant Login',
+          'Create a 4-digit PIN to skip Google sign-in next time. Takes 10 seconds.',
+          [
+            {
+              text: 'Set Up Now',
+              onPress: () => {
+                setPinModalVisible(true);
+                setIsCreatingPin(true);
+                setNewPin('');
+                setConfirmPin('');
+              }
+            },
+            {
+              text: 'Use Google',
+              onPress: () => handleGoogleLogin(),
+              style: 'cancel'
+            }
+          ]
+        );
+      }
+    } catch (e) {
+      console.log('handleAccountSelect error:', e);
+      setLoading(false);
     }
   };
 
@@ -134,13 +206,15 @@ export default function LoginScreen({ navigation }) {
       return;
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
 
     if (error) {
       Alert.alert('Login Failed', error.message);
       return;
     }
+
+    if (data?.user) await userCache.set(data.user);
 
     const bioAvailable = await isBiometricAvailable();
     if (bioAvailable) {
@@ -157,6 +231,7 @@ export default function LoginScreen({ navigation }) {
               onPress: async () => {
                 await saveAccount(identifier.trim(), email, 'email');
                 await refreshAccountsList();
+                navigation.navigate('Main');
               },
             },
             {
@@ -164,16 +239,19 @@ export default function LoginScreen({ navigation }) {
               onPress: async () => {
                 await saveCredentials(identifier.trim(), email, password);
                 await refreshAccountsList();
+                navigation.navigate('Main');
               },
             },
           ]
         );
       } else {
         await refreshAccountsList();
+        navigation.navigate('Main');
       }
     } else {
       await saveAccount(identifier.trim(), email, 'email');
       await refreshAccountsList();
+      navigation.navigate('Main');
     }
   }
 
@@ -225,9 +303,55 @@ export default function LoginScreen({ navigation }) {
         const displayName = userMeta?.full_name || userMeta?.name || userEmail;
         await saveGoogleCredentials(displayName, userEmail, tokenToStore);
         await refreshAccountsList();
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+
+          const userWithProfile = {
+            ...user,
+            ...profile,
+            full_name: profile?.full_name || displayName,
+          };
+
+          await userCache.set(userWithProfile);
+        }
       }
+
+      setTimeout(async () => {
+        const bioAvailable = await isBiometricAvailable();
+
+        Alert.alert(
+          '⚡ Enable Instant Login?',
+          bioAvailable
+            ? 'Create a 4-digit PIN to skip Google sign-in next time. Just tap your account and use Face ID or fingerprint.'
+            : 'Create a 4-digit PIN to skip Google sign-in next time.',
+          [
+            {
+              text: 'Set Up Now',
+              onPress: () => {
+                setSelectedAccount({ email: userEmail, provider: 'google' });
+                setPinModalVisible(true);
+                setIsCreatingPin(true);
+                setNewPin('');
+                setConfirmPin('');
+              }
+            },
+            {
+              text: 'Later',
+              onPress: () => navigation.navigate('Main'),
+              style: 'cancel'
+            }
+          ]
+        );
+      }, 500);
     }
 
+    navigation.navigate('Main');
     silentReAuth.current = false;
     setGoogleLoading(false);
   }
@@ -237,11 +361,13 @@ export default function LoginScreen({ navigation }) {
       suppressDropdown.current = false;
       return;
     }
-    if (savedAccounts.length > 0) setShowDropdown(true);
+    if (savedAccounts.length > 0) {
+      Keyboard.dismiss();
+      setShowDropdown(true);
+    }
   };
 
   const handleIdentifierBlur = () => {
-    setTimeout(() => setShowDropdown(false), 200);
   };
 
   const handleIdentifierChange = (text) => {
@@ -254,19 +380,120 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const biometricIcon = biometricType === 'face' ? '🔒' : '👆';
+  const biometricIcon = biometricType === 'face' ? 'face-recognition' : 'fingerprint';
+
+  const handlePinKeyPress = async (key) => {
+    if (isCreatingPin) {
+      if (key === 'back') {
+        if (confirmPin.length > 0) {
+          setConfirmPin(confirmPin.slice(0, -1));
+        } else if (newPin.length > 0) {
+          setNewPin(newPin.slice(0, -1));
+        }
+      } else if (key === 'enter') {
+        if (newPin.length < 4) {
+          setPinError('Enter 4 digits');
+          return;
+        }
+        if (confirmPin.length < 4) {
+          setPinError('Confirm your PIN');
+          return;
+        }
+        if (newPin !== confirmPin) {
+          setPinError('PINs do not match');
+          setConfirmPin('');
+          return;
+        }
+
+        const saved = await saveQuickPin(selectedAccount.email, newPin);
+        if (saved) {
+          setPinModalVisible(false);
+          setNewPin('');
+          setConfirmPin('');
+          navigation.navigate('Main');
+        } else {
+          setPinError('Failed to save PIN');
+        }
+      } else {
+        if (newPin.length < 4) {
+          setNewPin(newPin + key);
+        } else if (confirmPin.length < 4) {
+          setConfirmPin(confirmPin + key);
+        }
+      }
+    } else {
+      if (key === 'back') {
+        setEnteredPin(enteredPin.slice(0, -1));
+        setPinError('');
+      } else if (key === 'enter') {
+        if (enteredPin.length !== 4) {
+          setPinError('Enter 4 digits');
+          return;
+        }
+
+        try {
+          await validateQuickPin(selectedAccount.email, enteredPin);
+
+          // Restore Supabase session after PIN verified
+          const credKey = 'bushrann_creds_' + selectedAccount.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          const savedRaw = await SecureStore.getItemAsync(credKey);
+          if (savedRaw) {
+            const creds = JSON.parse(savedRaw);
+            if (creds.type === 'google' && creds.refreshToken) {
+              const { data, error } = await supabase.auth.refreshSession({
+                refresh_token: creds.refreshToken,
+              });
+              if (error || !data?.session) {
+                setPinError('Session expired. Please login with Google again.');
+                return;
+              }
+              // Update stored token with new one
+              await SecureStore.setItemAsync(credKey, JSON.stringify({
+                ...creds,
+                refreshToken: data.session.refresh_token,
+              }));
+            }
+          }
+
+          setPinModalVisible(false);
+          setEnteredPin('');
+          navigation.navigate('Main');
+        } catch (e) {
+          if (e.message === 'INVALID_PIN') {
+            setPinError('Wrong PIN');
+            setEnteredPin('');
+          } else {
+            setPinError('Error validating PIN');
+          }
+        }
+      } else {
+        if (enteredPin.length < 4) {
+          setEnteredPin(enteredPin + key);
+          setPinError('');
+        }
+      }
+    }
+  };
 
   return (
     <TouchableWithoutFeedback onPress={closeDropdown}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={!showDropdown}
+          nestedScrollEnabled={true}
+        >
+          <AnimatedButton onPress={() => navigation.navigate('Main')} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+            <Text style={{ color: '#a78bfa', fontSize: 16 }}>← Back</Text>
+          </AnimatedButton>
           <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
           <Text style={styles.title}>Bushrann</Text>
           <Text style={styles.subtitle}>Welcome back</Text>
 
           <View style={styles.inputWrapper}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, showDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
               placeholder="Email, Username or Phone"
               placeholderTextColor="#4b5563"
               value={identifier}
@@ -282,12 +509,19 @@ export default function LoginScreen({ navigation }) {
             />
 
             {showDropdown && savedAccounts.length > 0 && (
-              <View style={styles.dropdown}>
+              <ScrollView
+                style={styles.dropdown}
+                nestedScrollEnabled={true}
+                scrollEnabled={true}
+                keyboardShouldPersistTaps="handled"
+                onStartShouldSetResponder={() => true}
+              >
                 {savedAccounts.map((account, idx) => (
-                  <AnimatedButton
+                  <TouchableOpacity
                     key={idx}
                     style={[styles.dropdownItem, idx < savedAccounts.length - 1 && styles.dropdownItemBorder]}
-                    onPress={() => handleAccountSelect(account)}
+                    onPress={() => { closeDropdown(); handleAccountSelect(account); }}
+                    activeOpacity={0.7}
                   >
                     <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
                       <Text style={styles.dropdownAvatarText}>
@@ -300,10 +534,10 @@ export default function LoginScreen({ navigation }) {
                         <Text style={styles.dropdownEmail}>{account.email}</Text>
                       )}
                     </View>
-                    <Text style={styles.dropdownAction}>{biometricIcon}</Text>
-                  </AnimatedButton>
+                    <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
+                  </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
             )}
           </View>
 
@@ -346,6 +580,78 @@ export default function LoginScreen({ navigation }) {
               <Text style={styles.linkBold}>Sign up</Text>
             </Text>
           </AnimatedButton>
+
+          <Modal
+            animationType="slide"
+            transparent={true}
+            visible={pinModalVisible}
+            onRequestClose={() => {
+              setPinModalVisible(false);
+              setEnteredPin('');
+              setNewPin('');
+              setConfirmPin('');
+              setPinError('');
+            }}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>
+                  {isCreatingPin ? 'Create Quick PIN' : 'Enter PIN'}
+                </Text>
+
+                <Text style={styles.modalSubtitle}>
+                  {isCreatingPin
+                    ? 'This PIN is only stored on your device'
+                    : selectedAccount?.email
+                  }
+                </Text>
+
+                <View style={styles.pinDisplay}>
+                  {[0, 1, 2, 3].map((index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.pinDot,
+                        (isCreatingPin
+                          ? (confirmPin.length > index || (confirmPin.length === 0 && newPin.length > index))
+                          : enteredPin.length > index
+                        ) && styles.pinDotFilled
+                      ]}
+                    />
+                  ))}
+                </View>
+
+                {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}
+
+                <View style={styles.keypad}>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'back', 0, 'enter'].map((key) => (
+                    <TouchableOpacity
+                      key={key}
+                      style={styles.keypadButton}
+                      onPress={() => handlePinKeyPress(key)}
+                    >
+                      <Text style={styles.keypadButtonText}>
+                        {key === 'back' ? '⌫' : key === 'enter' ? '→' : key}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => {
+                    setPinModalVisible(false);
+                    setEnteredPin('');
+                    setNewPin('');
+                    setConfirmPin('');
+                    setPinError('');
+                  }}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
         </ScrollView>
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
@@ -360,16 +666,18 @@ const styles = StyleSheet.create({
   arabic: { fontSize: 24, color: '#a78bfa', marginBottom: 8 },
   title: { fontSize: 36, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#64748b', marginBottom: 36 },
-  inputWrapper: { width: '100%', zIndex: 10, marginBottom: 14 },
+  inputWrapper: { width: '100%', zIndex: 999, marginBottom: 14 },
   input: {
     width: '100%', backgroundColor: '#1a1d27', borderWidth: 1,
-    borderColor: '#2d3148', borderRadius: 12, padding: 16, color: '#ffffff', fontSize: 15,
+    borderColor: '#2d3148', borderRadius: 12,
+    padding: 16, color: '#ffffff', fontSize: 15,
   },
   dropdown: {
-    position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6,
-    backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148',
-    borderRadius: 12, overflow: 'hidden', zIndex: 999, elevation: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 10,
+    width: '100%', height: 200,
+    backgroundColor: '#1a1d27',
+    borderWidth: 1, borderTopWidth: 0, borderColor: '#2d3148',
+    borderBottomLeftRadius: 12, borderBottomRightRadius: 12,
+    overflow: 'hidden',
   },
   dropdownItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14 },
   dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: '#2d3148' },
@@ -402,4 +710,48 @@ const styles = StyleSheet.create({
   googleButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
   link: { color: '#64748b', fontSize: 14, marginTop: 4 },
   linkBold: { color: '#a78bfa', fontWeight: '700' },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white', borderRadius: 20,
+    padding: 30, width: '80%', alignItems: 'center',
+  },
+  modalTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 10, color: '#333' },
+  modalSubtitle: { fontSize: 14, color: '#666', marginBottom: 30, textAlign: 'center' },
+  pinDisplay: { flexDirection: 'row', marginBottom: 20, gap: 15 },
+  pinDot: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 2, borderColor: '#ccc', backgroundColor: 'transparent',
+  },
+  pinDotFilled: { backgroundColor: '#333', borderColor: '#333' },
+  pinError: { color: '#ff4444', marginBottom: 15, fontSize: 14 },
+  keypad: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    justifyContent: 'center', width: 240, gap: 10, marginBottom: 20,
+  },
+  keypadButton: {
+    width: 70, height: 70, borderRadius: 35,
+    backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center',
+  },
+  keypadButtonText: { fontSize: 24, color: '#333', fontWeight: '600' },
+  cancelButton: { paddingVertical: 12, paddingHorizontal: 30 },
+  cancelButtonText: { color: '#666', fontSize: 16 },
+  accountModalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-start', alignItems: 'center',
+    paddingTop: 350,
+  },
+  accountModalBox: {
+    width: '85%', maxHeight: 200,
+    backgroundColor: '#1a1d27', borderRadius: 16,
+    borderWidth: 1, borderColor: '#2d3148',
+    overflow: 'hidden',
+  },
+  accountModalTitle: {
+    color: '#a78bfa', fontWeight: '700', fontSize: 15,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#2d3148',
+  },
 });

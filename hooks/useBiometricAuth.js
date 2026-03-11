@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { supabase } from '../lib/supabase';
@@ -6,6 +7,7 @@ const ACCOUNTS_LIST_KEY = 'bushrann_saved_accounts';
 const CREDS_PREFIX = 'bushrann_creds_';
 const CREDS_VERSION_KEY = 'bushrann_creds_version';
 const CURRENT_VERSION = '2';
+const PIN_KEY_SUFFIX = '_pin';
 
 const makeCredKey = (email) =>
   CREDS_PREFIX + email.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -149,7 +151,7 @@ export function useBiometricAuth() {
     }
 
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Sign in to Bushrann',
+      promptMessage: 'Verify with Face ID or fingerprint',
       cancelLabel: 'Cancel',
       disableDeviceFallback: true,
     });
@@ -206,6 +208,56 @@ export function useBiometricAuth() {
     }
   };
 
+  const hasQuickPin = async (email) => {
+    try {
+      const pinData = await SecureStore.getItemAsync(makeCredKey(email) + PIN_KEY_SUFFIX);
+      return !!pinData;
+    } catch {
+      return false;
+    }
+  };
+
+  const saveQuickPin = async (email, pin) => {
+    try {
+      const hashedPin = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        pin
+      );
+      await SecureStore.setItemAsync(
+        makeCredKey(email) + PIN_KEY_SUFFIX,
+        JSON.stringify({
+          pinHash: hashedPin,
+          createdAt: Date.now()
+        })
+      );
+      return true;
+    } catch (e) {
+      console.log('saveQuickPin error:', e);
+      return false;
+    }
+  };
+
+  const validateQuickPin = async (email, enteredPin) => {
+    try {
+      const savedRaw = await SecureStore.getItemAsync(makeCredKey(email) + PIN_KEY_SUFFIX);
+      if (!savedRaw) throw new Error('NO_PIN');
+
+      const pinData = JSON.parse(savedRaw);
+      const enteredHash = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        enteredPin
+      );
+      
+      if (enteredHash !== pinData.pinHash) {
+        throw new Error('INVALID_PIN');
+      }
+
+      return true;
+    } catch (e) {
+      throw e;
+    }
+  };
+
   return {
     isBiometricAvailable,
     runMigrationIfNeeded,
@@ -217,5 +269,8 @@ export function useBiometricAuth() {
     saveAccount,
     loginWithBiometrics,
     clearCredentials,
+    hasQuickPin,
+    saveQuickPin,
+    validateQuickPin,
   };
 }

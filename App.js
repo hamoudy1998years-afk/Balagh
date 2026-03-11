@@ -27,10 +27,16 @@ import AvatarCropScreen from './screens/AvatarCropScreen';
 import { useEffect, useState } from 'react';
 import React from 'react';
 import CommentsModal from './screens/CommentsModal';
+import * as WebBrowser from 'expo-web-browser';
+
+// ADD THIS IMPORT
+import { UserProvider } from './context/UserContext';
 
 // Global Sheet Imports
 import { DownloadProvider } from './context/DownloadContext';
 import GlobalVideoOptionsSheet from './components/GlobalVideoOptionsSheet';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -76,25 +82,23 @@ function ProfileTabIcon({ color, size, focused }) {
   return <Text style={{ fontSize: size, color: color }}>👤</Text>;
 }
 
-function MainTabs() {
+function MainTabs({ session }) {
   const [homeKey, setHomeKey] = useState(0);
   const navigation = useNavigation();
 
   const handleHomePress = () => {
-    const currentRoute = navigation.getState().routes[navigation.getState().index].name;
+    const state = navigation.getState();
+    const mainRoute = state?.routes?.find(r => r.name === 'Main');
+    const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
 
-    if (currentRoute === 'Main') {
-      const mainState = navigation.getState().routes.find(r => r.name === 'Main')?.state;
-      const currentTab = mainState?.routes[mainState.index]?.name;
-
-      if (currentTab === 'Home') {
-        setHomeKey(prev => prev + 1);
-        if (homeRefreshRef.current) homeRefreshRef.current();
-      } else {
-        navigation.navigate('Main', { screen: 'Home', params: { resetToForYou: true } });
+    if (activeTab === 'Home') {
+      // Already on home — refresh the feed
+      if (homeRefreshRef.current) {
+        homeRefreshRef.current();
       }
     } else {
-      navigation.navigate('Main', { screen: 'Home', params: { resetToForYou: true } });
+      // On another screen — just navigate back to home
+      navigation.navigate('Main', { screen: 'Home' });
     }
   };
 
@@ -135,6 +139,18 @@ function MainTabs() {
           tabBarIcon: ({ color, size }) => (
             <Text style={{ fontSize: size, color: color }}>➕</Text>
           ),
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate('Login');
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -144,6 +160,18 @@ function MainTabs() {
           tabBarIcon: ({ color, size }) => (
             <Text style={{ fontSize: size, color: color }}>🔔</Text>
           ),
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate('Login');
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
+          ),
         }}
       />
       <Tab.Screen
@@ -151,6 +179,18 @@ function MainTabs() {
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => <ProfileTabIcon color={color} size={size} focused={focused} />,
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate('Login');
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
+          ),
         }}
       />
     </Tab.Navigator>
@@ -188,42 +228,38 @@ export default function App() {
   }
 
   return (
-    <DownloadProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
-          <StatusBar style="light" translucent backgroundColor="transparent" />
-          <BottomSheetModalProvider>
-            <NavigationContainer>
-              <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
-                {session ? (
-                  <>
-                    <Stack.Screen name="Main" component={MainTabs} />
-                    <Stack.Screen name="CommentsModal" component={CommentsModal} options={{ presentation: 'modal' }} />
-                    <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-                    <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
-                    <Stack.Screen name="Search" component={SearchScreen} />
-                    <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
-                    <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
-                    <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
-                    <Stack.Screen name="FollowList" component={FollowListScreen} />
-                    <Stack.Screen name="Settings" component={SettingsScreen} />
-                    <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
-                  </>
-                ) : (
-                  <>
-                    <Stack.Screen name="Login" component={LoginScreen} />
-                    <Stack.Screen name="Signup" component={SignupScreen} />
-                  </>
-                )}
-              </Stack.Navigator>
-              
-              {/* Global Sheets - Always mounted at root level */}
-              <GlobalVideoOptionsSheet />
-              
-            </NavigationContainer>
-          </BottomSheetModalProvider>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
-    </DownloadProvider>
+    // ADD UserProvider HERE - wraps everything
+    <UserProvider>
+      <DownloadProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <SafeAreaProvider>
+            <StatusBar style="light" translucent backgroundColor="transparent" />
+            <BottomSheetModalProvider>
+              <NavigationContainer>
+                <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
+                  <Stack.Screen name="Main">
+                    {() => <MainTabs session={session} />}
+                  </Stack.Screen>
+                  <Stack.Screen name="Login" component={LoginScreen} />
+                  <Stack.Screen name="Signup" component={SignupScreen} />
+                  <Stack.Screen name="CommentsModal" component={CommentsModal} options={{ presentation: 'modal' }} />
+                  <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+                  <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
+                  <Stack.Screen name="Search" component={SearchScreen} />
+                  <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
+                  <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
+                  <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
+                  <Stack.Screen name="FollowList" component={FollowListScreen} />
+                  <Stack.Screen name="Settings" component={SettingsScreen} />
+                  <Stack.Screen name="UserProfile" component={ProfileScreen} />
+                  <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
+                </Stack.Navigator>
+                <GlobalVideoOptionsSheet />
+              </NavigationContainer>
+            </BottomSheetModalProvider>
+          </SafeAreaProvider>
+        </GestureHandlerRootView>
+      </DownloadProvider>
+    </UserProvider>
   );
 }

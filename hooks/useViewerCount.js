@@ -9,11 +9,10 @@ export const useViewerCount = (streamId) => {
     if (!streamId) return;
 
     const getViewerCount = async () => {
-      const { count, error } = await supabase
+      const { count } = await supabase
         .from('stream_viewers')
         .select('*', { count: 'exact', head: true })
         .eq('stream_id', streamId);
-      
       setViewerCount(count || 0);
     };
 
@@ -21,16 +20,13 @@ export const useViewerCount = (streamId) => {
 
     const subscription = supabase
       .channel(`stream:${streamId}:viewers`)
-      .on('postgres_changes', 
+      .on('postgres_changes',
         { event: '*', schema: 'public', table: 'stream_viewers', filter: `stream_id=eq.${streamId}` },
         () => getViewerCount()
       )
       .subscribe();
 
-    // Refresh every 5 seconds as backup
-    refreshInterval.current = setInterval(() => {
-      getViewerCount();
-    }, 5000);
+    refreshInterval.current = setInterval(getViewerCount, 5000);
 
     return () => {
       subscription.unsubscribe();
