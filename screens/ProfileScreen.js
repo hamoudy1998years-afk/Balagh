@@ -145,6 +145,17 @@ export default function ProfileScreen({ route, navigation }) {
   }, [globalUser, userLoading]);
 
   async function init() {
+    setProfile(null);
+    setPublicVideos([]);
+    setPrivateVideos([]);
+    setLikedVideos([]);
+    setFollowersCount(0);
+    setFollowingCount(0);
+    setTotalLikes(0);
+    setIsScholar(false);
+    setScholarData(null);
+    setFollowing(false);
+    
     // STEP 1: Show global user instantly (0ms - from memory)
     if (globalUser) {
       setCurrentUser(globalUser);
@@ -376,8 +387,8 @@ export default function ProfileScreen({ route, navigation }) {
     <View style={styles.headerSection}>
       <View style={styles.avatarSection}>
         <Avatar
-          uri={currentUser?.avatar_url || profile?.avatar_url}
-          username={currentUser?.username || profile?.username}
+          uri={profile?.avatar_url}
+          username={profile?.username}
           size={90}
           onPress={() => { if (isOwnProfile) setAvatarModal(true); else if (profile?.avatar_url) setEnlargeAvatar(true); }}
         />
@@ -432,8 +443,8 @@ export default function ProfileScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={styles.regularInfo}>
-          <Text style={styles.displayName}>{currentUser?.full_name || currentUser?.username || profile?.full_name || profile?.username || 'User'}</Text>
-          <Text style={styles.usernameText}>@{currentUser?.username || profile?.username || 'username'}</Text>
+          <Text style={styles.displayName}>{profile?.full_name || profile?.username || 'User'}</Text>
+          <Text style={styles.usernameText}>@{profile?.username || 'username'}</Text>
           {profile?.bio ? (
             <Text style={styles.bioText}>{profile.bio}</Text>
           ) : isOwnProfile ? (

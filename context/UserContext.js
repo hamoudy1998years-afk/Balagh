@@ -13,17 +13,14 @@ export function UserProvider({ children }) {
   }, []);
 
   async function loadUser() {
-    // Show cached data instantly while fetching fresh data
     const cached = await userCache.get();
     if (cached) {
       setUser(cached);
       setLoading(false);
     }
 
-    // Fetch fresh auth user in background
     const { data: { user: freshUser } } = await supabase.auth.getUser();
     if (freshUser) {
-      // cached profile data (username, avatar etc) wins over raw auth data
       const mergedUser = { ...freshUser, ...cached };
       setUser(mergedUser);
       await userCache.set(mergedUser);

@@ -23,6 +23,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import AnimatedButton from './AnimatedButton';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { userCache } from '../utils/userCache';
+import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 
@@ -45,6 +46,7 @@ export default function LoginScreen({ navigation }) {
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
 
+  const { refreshUser } = useUser();
   const suppressDropdown = useRef(false);
   const silentReAuth = useRef(false);
 
@@ -214,7 +216,12 @@ export default function LoginScreen({ navigation }) {
       return;
     }
 
-    if (data?.user) await userCache.set(data.user);
+    // ✅ Clear old user cache before setting new one
+    if (data?.user) {
+      await userCache.clear();
+      await userCache.set(data.user);
+      await refreshUser(); // ✅ force UserContext to reload with new user
+    }
 
     const bioAvailable = await isBiometricAvailable();
     if (bioAvailable) {
@@ -318,7 +325,9 @@ export default function LoginScreen({ navigation }) {
             full_name: profile?.full_name || displayName,
           };
 
+          await userCache.clear();
           await userCache.set(userWithProfile);
+          await refreshUser(); // ✅ force UserContext to reload with new user
         }
       }
 
