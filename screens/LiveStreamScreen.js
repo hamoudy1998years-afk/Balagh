@@ -115,6 +115,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [viewerListMode, setViewerListMode] = useState('recent');
   const [allowQuestions, setAllowQuestions] = useState(true);
   const [isStarting, setIsStarting] = useState(false);
+  const [showEndModal, setShowEndModal] = useState(false);
 
   const engineRef = useRef(null);
   const flatListRef = useRef(null);
@@ -382,17 +383,14 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function endStream() {
-    Alert.alert('End Stream', 'Are you sure you want to end your live stream?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'End Stream', style: 'destructive',
-        onPress: async () => {
-          await supabase.from('live_streams').delete().eq('id', streamId);
-          await cleanup();
-          navigation.goBack();
-        },
-      },
-    ]);
+    setShowEndModal(true);
+  }
+
+  async function confirmEndStream() {
+    setShowEndModal(false);
+    await supabase.from('live_streams').delete().eq('id', streamId);
+    await cleanup();
+    navigation.goBack();
   }
 
   if (!isLive) {
@@ -606,6 +604,33 @@ export default function LiveStreamScreen({ navigation, route }) {
           </AnimatedButton>
         </View>
       </KeyboardAvoidingView>
+    {showEndModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.glassModal}>
+            <View style={styles.glassModalIcon}>
+              <View style={styles.glassModalDot} />
+            </View>
+            <Text style={styles.glassModalTitle}>End Stream</Text>
+            <Text style={styles.glassModalSubtitle}>
+              This will end your live session for all viewers.
+            </Text>
+            <View style={styles.glassModalButtons}>
+              <AnimatedButton
+                style={styles.glassModalCancel}
+                onPress={() => setShowEndModal(false)}
+              >
+                <Text style={styles.glassModalCancelText}>Cancel</Text>
+              </AnimatedButton>
+              <AnimatedButton
+                style={styles.glassModalEnd}
+                onPress={confirmEndStream}
+              >
+                <Text style={styles.glassModalEndText}>End Stream</Text>
+              </AnimatedButton>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -799,4 +824,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', zIndex: 999 },
+  glassModal: { width: 300, borderRadius: 24, overflow: 'hidden', backgroundColor: 'rgba(239,68,68,0.12)', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.18)', padding: 30, alignItems: 'center' },
+  glassModalIcon: { width: 60, height: 60, borderRadius: 18, backgroundColor: 'rgba(239,68,68,0.2)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  glassModalDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444' },
+  glassModalTitle: { color: '#fff', fontSize: 20, fontWeight: '800', marginBottom: 8, letterSpacing: -0.5 },
+  glassModalSubtitle: { color: 'rgba(255,255,255,0.45)', fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: 26 },
+  glassModalButtons: { flexDirection: 'row', gap: 10, width: '100%' },
+  glassModalCancel: { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.15)' },
+  glassModalCancelText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
+  glassModalEnd: { flex: 1, backgroundColor: '#ef4444', borderRadius: 14, padding: 14, alignItems: 'center' },
+  glassModalEndText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });
