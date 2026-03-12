@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList, Alert,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  Keyboard, Platform, ActivityIndicator,
   Dimensions, PermissionsAndroid, AppState, Image, Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -116,6 +116,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [allowQuestions, setAllowQuestions] = useState(true);
   const [isStarting, setIsStarting] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const engineRef = useRef(null);
   const flatListRef = useRef(null);
@@ -131,20 +132,30 @@ export default function LiveStreamScreen({ navigation, route }) {
   const { enabled: showEngagedTab } = useFeatureFlag('engaged_viewers_tab');
 
   useEffect(() => {
-    // REMOVED: setup() - now called manually when pressing "Start Streaming"
-    appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        console.log('App went to background, ending stream...');
-        forceEndStream();
-      }
-    });
-    return () => {
-      if (appStateSubscription.current) {
-        appStateSubscription.current.remove();
-      }
-      cleanup();
-    };
-  }, []);
+      // REMOVED: setup() - now called manually when pressing "Start Streaming"
+      appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
+        if (nextAppState === 'background' || nextAppState === 'inactive') {
+          console.log('App went to background, ending stream...');
+          forceEndStream();
+        }
+      });
+
+      const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
+
+      return () => {
+        if (appStateSubscription.current) {
+          appStateSubscription.current.remove();
+        }
+        keyboardDidShow.remove();
+        keyboardDidHide.remove();
+        cleanup();
+      };
+    }, []);
 
   async function requestPermissions() {
     if (Platform.OS === 'android') {
@@ -540,7 +551,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         </View>
       )}
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
+      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
         <View style={styles.tabs}>
           <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={() => setActiveTab('chat')}>
             <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>💬 Chat</Text>
@@ -567,7 +578,7 @@ export default function LiveStreamScreen({ navigation, route }) {
               )}
               showsVerticalScrollIndicator={false}
             />
-            <View style={styles.chatInputRow}>
+            <View style={[styles.chatInputRow, { marginBottom: Math.max(10, keyboardHeight - 45) }]}>
               <TextInput style={styles.chatInput} value={chatInput} onChangeText={setChatInput}
                 placeholder="Say something..." placeholderTextColor="#64748b" onSubmitEditing={sendMessage} />
               <AnimatedButton style={styles.sendBtn} onPress={sendMessage}>
@@ -603,7 +614,7 @@ export default function LiveStreamScreen({ navigation, route }) {
             <Text style={styles.flipBtnBottomText}>🔄 Flip Camera</Text>
           </AnimatedButton>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     {showEndModal && (
         <View style={styles.modalOverlay}>
           <View style={styles.glassModal}>
