@@ -647,7 +647,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 2
   },
   chatInputRow:         { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  chatInput:            { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, color: '#fff', fontSize: 14 },
+  chatInput: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, color: 'rgba(255,255,255,0.9)', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
   sendBtn:              { backgroundColor: '#7c3aed', borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
   sendBtnText:          { color: '#fff', fontWeight: '700', fontSize: 13 },
   questionInputContainer: { marginBottom: 8 },
