@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, TextInput, ScrollView, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
@@ -19,6 +20,13 @@ export default function UploadScreen({ navigation }) {
   const [showLiveSetup, setShowLiveSetup] = useState(false);
   const [liveTitle, setLiveTitle]         = useState('');
   const [maxQuestions, setMaxQuestions]   = useState('5');
+
+  const scrollRef = useRef(null);
+  useFocusEffect(
+    useCallback(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+    }, [])
+  );
 
   useEffect(() => { checkIfScholar(); }, []);
 
@@ -146,7 +154,7 @@ export default function UploadScreen({ navigation }) {
 
   if (showLiveSetup) {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.content}>
         <Text style={styles.title}>🔴 Go Live</Text>
         <Text style={styles.subtitle}>Set up your live stream</Text>
 
@@ -186,7 +194,7 @@ export default function UploadScreen({ navigation }) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Upload Video</Text>
       <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
 

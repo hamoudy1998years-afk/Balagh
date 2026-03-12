@@ -130,7 +130,14 @@ export default function ProfileScreen({ route, navigation }) {
     return unsubscribe;
   }, [navigation, route?.params?.croppedUri]);
 
+  const flatListRef = useRef(null);
   const hasLoaded = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }, [])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -541,6 +548,7 @@ export default function ProfileScreen({ route, navigation }) {
       </View>
 
       <FlatList
+        ref={flatListRef}
         data={activeVideos}
         keyExtractor={(item) => item.id}
         numColumns={3}

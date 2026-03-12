@@ -5,7 +5,8 @@ import {
   View, Text, TextInput, StyleSheet,
   Alert, ActivityIndicator, ScrollView, Keyboard
 } from 'react-native';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnimatedButton from './AnimatedButton';
@@ -27,6 +28,12 @@ export default function EditProfileScreen({ navigation }) {
   const [extraPadding, setExtraPadding] = useState(0);
 
   const scrollRef = useRef(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+    }, [])
+  );
 
   useEffect(() => {
     loadProfile();

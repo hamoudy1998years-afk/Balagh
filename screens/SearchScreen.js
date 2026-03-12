@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator } from 'react-native';
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 
@@ -10,6 +11,13 @@ export default function SearchScreen() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const flatListRef = useRef(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }, [])
+  );
 
   async function handleSearch(text) {
     setQuery(text);
@@ -79,6 +87,7 @@ export default function SearchScreen() {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={results}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.resultsList}

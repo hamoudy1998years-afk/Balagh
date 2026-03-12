@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, FlatList, ActivityIndicator,
   Alert, Animated, PanResponder, Vibration, RefreshControl, StatusBar,
@@ -121,6 +122,13 @@ export default function NotificationsScreen({ navigation }) {
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const flatListRef = useRef(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }, [])
+  );
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => { if (data.user) setCurrentUserId(data.user.id); });
@@ -221,6 +229,7 @@ export default function NotificationsScreen({ navigation }) {
           </View>
         ) : (
           <FlatList
+            ref={flatListRef}
             data={notifications}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (

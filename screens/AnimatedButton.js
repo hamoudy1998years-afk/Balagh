@@ -44,7 +44,6 @@ export default function AnimatedButton({ children, style, onPress, onLongPress, 
         onPressOut={handlePressOut}
         unstable_pressDelay={0}
         style={StyleSheet.absoluteFill}
-        {...props}
       />
     </Animated.View>
   );

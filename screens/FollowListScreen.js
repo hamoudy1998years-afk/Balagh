@@ -2,7 +2,8 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Image, ActivityIndicator, RefreshControl, StatusBar,
 } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -70,6 +71,13 @@ export default function FollowListScreen({ route, navigation }) {
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const flatListRef = useRef(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }, [])
+  );
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -155,6 +163,7 @@ export default function FollowListScreen({ route, navigation }) {
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={users}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
