@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  Keyboard, Platform, ActivityIndicator,
   Animated, Dimensions, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -58,6 +58,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [floatingReactions, setFloatingReactions] = useState([]);
   const [hostTimeoutReached, setHostTimeoutReached] = useState(false); // ⏱️ TIMEOUT: Track if we hit timeout
   const [retryCount, setRetryCount] = useState(0);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const hasJoinedRef = useRef(false);
 
   const engineRef = useRef(null);
@@ -81,12 +82,21 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   // ⏱️ TIMEOUT: Cleanup timeout on unmount
   useEffect(() => {
-    return () => {
-      if (hostWaitTimeoutRef.current) {
-        clearTimeout(hostWaitTimeoutRef.current);
-      }
-    };
-  }, []);
+      const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
+
+      return () => {
+        if (hostWaitTimeoutRef.current) {
+          clearTimeout(hostWaitTimeoutRef.current);
+        }
+        keyboardDidShow.remove();
+        keyboardDidHide.remove();
+      };
+    }, []);
 
   // ⏱️ TIMEOUT: Start timeout when joining completes but host hasn't joined
   useEffect(() => {
@@ -511,7 +521,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         </View>
       )}
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
+      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
         <View style={styles.tabs}>
           <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={() => setActiveTab('chat')}>
             <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>💬 Chat</Text>
@@ -536,7 +546,7 @@ export default function WatchLiveScreen({ navigation, route }) {
               )}
               showsVerticalScrollIndicator={false}
             />
-            <View style={styles.chatInputRow}>
+            <View style={[styles.chatInputRow, { marginBottom: Math.max(0, keyboardHeight - 45) }]}>
               <TextInput style={styles.chatInput} value={chatInput} onChangeText={setChatInput}
                 placeholder="Say something..." placeholderTextColor="#64748b" onSubmitEditing={sendMessage} />
               <AnimatedButton style={styles.sendBtn} onPress={sendMessage}>
@@ -563,7 +573,7 @@ export default function WatchLiveScreen({ navigation, route }) {
                 <Text style={styles.questionHint}>
                   Ask the scholar a question. You have {questionsLeft} question{questionsLeft !== 1 ? 's' : ''} left.
                 </Text>
-                <View style={styles.chatInputRow}>
+                <View style={[styles.chatInputRow, { marginBottom: keyboardHeight > 0 ? keyboardHeight : 0 }]}>
                   <TextInput style={styles.chatInput} value={questionInput} onChangeText={setQuestionInput}
                     placeholder="Type your question..." placeholderTextColor="#64748b" multiline maxLength={200} />
                   <AnimatedButton style={[styles.sendBtn, questionsLeft <= 0 && { backgroundColor: '#4c1d95' }]}
@@ -583,7 +593,7 @@ export default function WatchLiveScreen({ navigation, route }) {
             </AnimatedButton>
           ))}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
