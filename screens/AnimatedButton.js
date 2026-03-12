@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Animated, Pressable } from 'react-native';
+import { Animated, Pressable, StyleSheet } from 'react-native';
 
 export default function AnimatedButton({ children, style, onPress, onLongPress, delayLongPress, disabled, ...props }) {
   const opacity = useRef(new Animated.Value(1)).current;
@@ -34,6 +34,7 @@ export default function AnimatedButton({ children, style, onPress, onLongPress, 
 
   return (
     <Animated.View style={[{ opacity }, style]}>
+      {children}
       <Pressable
         onPress={handlePress}
         onLongPress={onLongPress ? handleLongPress : undefined}
@@ -42,10 +43,9 @@ export default function AnimatedButton({ children, style, onPress, onLongPress, 
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         unstable_pressDelay={0}
+        style={StyleSheet.absoluteFill}
         {...props}
-      >
-        {children}
-      </Pressable>
+      />
     </Animated.View>
   );
 }
