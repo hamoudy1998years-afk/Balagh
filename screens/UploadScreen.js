@@ -13,6 +13,7 @@ export default function UploadScreen({ navigation }) {
   const [category, setCategory]   = useState('');
   const [uploading, setUploading] = useState(false);
   const [isScholar, setIsScholar] = useState(false);
+  const [scholarChecked, setScholarChecked] = useState(true);
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
 
@@ -35,6 +36,7 @@ export default function UploadScreen({ navigation }) {
     if (!user) return;
     const { data } = await supabase.from('profiles').select('is_scholar').eq('id', user.id).single();
     setIsScholar(data?.is_scholar ?? false);
+    setScholarChecked(true);
   }
 
   async function pickVideo() {
@@ -277,8 +279,8 @@ export default function UploadScreen({ navigation }) {
         </View>
       </AnimatedButton>
 
-      {!isScholar && (
-        <View style={styles.scholarInfo}>
+      {scholarChecked && !isScholar && (
+          <View style={styles.scholarInfo}>
           <Text style={styles.scholarInfoIcon}>🎓</Text>
           <Text style={styles.scholarInfoText}>
             Are you a verified Islamic scholar? Contact us to get your Scholar badge and unlock live streaming.
