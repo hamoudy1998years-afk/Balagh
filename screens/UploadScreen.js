@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
+import { userCache } from '../utils/userCache';
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
@@ -12,7 +13,7 @@ export default function UploadScreen({ navigation }) {
   const [caption, setCaption]     = useState('');
   const [category, setCategory]   = useState('');
   const [uploading, setUploading] = useState(false);
-  const [isScholar, setIsScholar] = useState(false);
+  const [isScholar, setIsScholar] = useState(null);
   const [scholarChecked, setScholarChecked] = useState(true);
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
@@ -29,9 +30,17 @@ export default function UploadScreen({ navigation }) {
     }, [])
   );
 
-  useEffect(() => { checkIfScholar(); }, []);
+  useEffect(() => { checkIfScholarInstant(); }, []);
 
-  async function checkIfScholar() {
+  async function checkIfScholarInstant() {
+    // ✅ Show instantly from cache
+    const cached = await userCache.get();
+    if (cached?.is_scholar !== undefined) {
+      setIsScholar(cached.is_scholar);
+      setScholarChecked(true);
+    }
+
+    // ✅ Then verify from DB in background
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const { data } = await supabase.from('profiles').select('is_scholar').eq('id', user.id).single();
@@ -200,8 +209,8 @@ export default function UploadScreen({ navigation }) {
       <Text style={styles.title}>Upload Video</Text>
       <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
 
-      {isScholar && (
-        <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
+      {isScholar === true && (
+          <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
           <Text style={styles.liveDot}>🔴</Text>
           <Text style={styles.liveBtnText}>Go Live</Text>
           <View style={styles.scholarBadge}>
@@ -279,7 +288,7 @@ export default function UploadScreen({ navigation }) {
         </View>
       </AnimatedButton>
 
-      {scholarChecked && !isScholar && (
+      {scholarChecked && isScholar === false && (
           <View style={styles.scholarInfo}>
           <Text style={styles.scholarInfoIcon}>🎓</Text>
           <Text style={styles.scholarInfoText}>
