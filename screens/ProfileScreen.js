@@ -130,9 +130,12 @@ export default function ProfileScreen({ route, navigation }) {
     return unsubscribe;
   }, [navigation, route?.params?.croppedUri]);
 
+  const hasLoaded = useRef(false);
+
   useFocusEffect(
     useCallback(() => {
-      if (globalUser) {
+      if (globalUser && !hasLoaded.current) {
+        hasLoaded.current = true;
         init();
       }
     }, [globalUser])
