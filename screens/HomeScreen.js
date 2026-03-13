@@ -305,7 +305,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         overScrollMode="never"
         onLayout={(e) => setListHeight(e.nativeEvent.layout.height)}
         renderItem={({ item, index }) => {
-          const isVisible = Math.abs(index - activeIndex) <= 1;
+          const isVisible = Math.abs(index - activeIndex) <= 2;
           if (!isVisible) return <View style={{ height: listHeight }} />;
 
           let slot = null;
