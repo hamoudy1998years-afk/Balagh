@@ -14,6 +14,7 @@ import AnimatedButton from './AnimatedButton';
 import { useDownload } from '../context/DownloadContext';
 import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
+import { COLORS } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
 const GRID_ITEM_SIZE = (width - 3) / 3;
@@ -31,9 +32,9 @@ function Avatar({ uri, username, size = 90, onPress }) {
   return (
     <AnimatedButton onPress={onPress}>
       {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#2a2a2a' }} />
+        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#eee' }} />
       ) : (
-        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontSize: size * 0.4, fontWeight: '700', color: '#fff' }}>{letter}</Text>
         </View>
       )}
@@ -41,7 +42,6 @@ function Avatar({ uri, username, size = 90, onPress }) {
   );
 }
 
-// ─── Video Grid Item ──────────────────────────────────────────────────────────
 function VideoGridItem({ item, onPress, onLongPress }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -64,7 +64,6 @@ function VideoGridItem({ item, onPress, onLongPress }) {
   );
 }
 
-// ─── Download Progress Overlay ────────────────────────────────────────────────
 function DownloadProgressOverlay({ visible, progress }) {
   if (!visible) return null;
   const pct = Math.round(progress * 100);
@@ -94,8 +93,7 @@ export default function ProfileScreen({ route, navigation }) {
     });
     return () => subscription.unsubscribe();
   }, []);
-  
-  // SAFETY CHECK for context
+
   const downloadContext = useDownload();
   const showVideoOptionsSheet = downloadContext?.showVideoOptionsSheet;
 
@@ -165,22 +163,20 @@ export default function ProfileScreen({ route, navigation }) {
     setIsScholar(false);
     setScholarData(null);
     setFollowing(false);
-    
-    // STEP 1: Show global user instantly (0ms - from memory)
+
     if (globalUser) {
       setCurrentUser(globalUser);
       const viewingId = targetUserId ?? globalUser.id;
       const ownProfile = viewingId === globalUser.id;
       setIsOwnProfile(ownProfile);
-      setLoading(false); // Show screen immediately!
-      
-      // Load everything in background (no await!)
+      setLoading(false);
+
       Promise.all([
-        loadProfile(viewingId), 
-        loadVideos(viewingId, ownProfile), 
+        loadProfile(viewingId),
+        loadVideos(viewingId, ownProfile),
         checkScholarStatus(viewingId)
       ]);
-      
+
       if (!ownProfile) {
         supabase.from('follows')
           .select('id')
@@ -191,11 +187,9 @@ export default function ProfileScreen({ route, navigation }) {
       } else {
         loadLikedVideos(globalUser.id);
       }
-      
-      return; // SKIP STEP 2 - we already have user!
+      return;
     }
-    
-    // STEP 2: Only run if no global user (fallback)
+
     if (!userLoading) {
       const cachedUser = await userCache.get();
       if (cachedUser) {
@@ -204,10 +198,9 @@ export default function ProfileScreen({ route, navigation }) {
         const ownProfile = viewingId === cachedUser.id;
         setIsOwnProfile(ownProfile);
         setLoading(false);
-        
         Promise.all([
-          loadProfile(viewingId), 
-          loadVideos(viewingId, ownProfile), 
+          loadProfile(viewingId),
+          loadVideos(viewingId, ownProfile),
           checkScholarStatus(viewingId)
         ]);
       }
@@ -272,7 +265,6 @@ export default function ProfileScreen({ route, navigation }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { Alert.alert('Error', 'Not logged in.'); return; }
-
       const ext = 'jpg';
       const fileName = `${user.id}_avatar.${ext}`;
       const formData = new FormData();
@@ -288,7 +280,7 @@ export default function ProfileScreen({ route, navigation }) {
       console.error('Upload error:', e);
     }
   }
-      
+
   async function handleChangeAvatar() {
     setAvatarModal(false);
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -336,32 +328,25 @@ export default function ProfileScreen({ route, navigation }) {
   async function performDownload(video) {
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') { 
-        Alert.alert('Permission Denied', 'Please allow access to your media library.'); 
-        return; 
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Please allow access to your media library.');
+        return;
       }
-      
       setIsDownloading(true);
       setDownloadProgress(0);
-      
       const fileUri = FileSystem.documentDirectory + `balagh_${video.id}.mp4`;
-      
       const downloadResumable = FileSystem.createDownloadResumable(
         video.video_url, fileUri, {},
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
           if (totalBytesExpectedToWrite > 0) setDownloadProgress(totalBytesWritten / totalBytesExpectedToWrite);
         }
       );
-      
       const result = await downloadResumable.downloadAsync();
       if (!result?.uri) throw new Error('Download failed');
-      
       await MediaLibrary.saveToLibraryAsync(result.uri);
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
-      
       setIsDownloading(false);
       downloadedVideoIds.add(video.id);
-      
       Alert.alert('Downloaded ✅', 'Video saved to your gallery!');
     } catch (e) {
       setIsDownloading(false);
@@ -370,24 +355,14 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }
 
-  // SAFETY CHECK added here
-  function handleLongPress(video) { 
-    if (!showVideoOptionsSheet) {
-      console.log('showVideoOptionsSheet not available');
-      return;
-    }
-    
+  function handleLongPress(video) {
+    if (!showVideoOptionsSheet) return;
     const hasDownloaded = downloadedVideoIds.has(video.id);
-    showVideoOptionsSheet(
-      video,
-      isOwnProfile,
-      hasDownloaded,
-      {
-        onPin: handlePinVideo,
-        onDelete: handleDeleteVideo,
-        onDownload: handleDownloadVideo,
-      }
-    );
+    showVideoOptionsSheet(video, isOwnProfile, hasDownloaded, {
+      onPin: handlePinVideo,
+      onDelete: handleDeleteVideo,
+      onDownload: handleDownloadVideo,
+    });
   }
 
   const onRefresh = useCallback(async () => { setRefreshing(true); await init(); setRefreshing(false); }, []);
@@ -470,23 +445,17 @@ export default function ProfileScreen({ route, navigation }) {
           <Text style={styles.statNum}>{formatCount(publicVideos.length)}</Text>
           <Text style={styles.statLabel}>Videos</Text>
         </View>
-        
         <View style={styles.statDivider} />
-        
         <AnimatedButton style={styles.statItem} onPress={() => navigation.navigate('FollowList', { userId: targetUserId ?? currentUser?.id, type: 'followers', username: profile?.username })}>
           <Text style={styles.statNum}>{formatCount(followersCount)}</Text>
           <Text style={styles.statLabel}>Followers</Text>
         </AnimatedButton>
-        
         <View style={styles.statDivider} />
-        
         <AnimatedButton style={styles.statItem} onPress={() => navigation.navigate('FollowList', { userId: targetUserId ?? currentUser?.id, type: 'following', username: profile?.username })}>
           <Text style={styles.statNum}>{formatCount(followingCount)}</Text>
           <Text style={styles.statLabel}>Following</Text>
         </AnimatedButton>
-        
         <View style={styles.statDivider} />
-        
         <View style={styles.statItem}>
           <Text style={styles.statNum}>{formatCount(totalLikes)}</Text>
           <Text style={styles.statLabel}>Likes</Text>
@@ -531,7 +500,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         {!isOwnProfile && (
@@ -553,7 +522,7 @@ export default function ProfileScreen({ route, navigation }) {
         keyExtractor={(item) => item.id}
         numColumns={3}
         ListHeaderComponent={renderHeader}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#7c3aed" progressViewOffset={35} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} progressViewOffset={35} />}
         renderItem={({ item, index }) => (
           <VideoGridItem item={item} onPress={() => openVideo(activeVideos, index)} onLongPress={handleLongPress} />
         )}
@@ -569,13 +538,7 @@ export default function ProfileScreen({ route, navigation }) {
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
 
-      <Modal
-        visible={avatarModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setAvatarModal(false)}
-        statusBarTranslucent
-      >
+      <Modal visible={avatarModal} transparent animationType="slide" onRequestClose={() => setAvatarModal(false)} statusBarTranslucent>
         <Pressable style={styles.modalBackdrop} onPress={() => setAvatarModal(false)} />
         <View style={styles.modalSheet}>
           <Text style={styles.modalTitle}>Profile Photo</Text>
@@ -593,13 +556,7 @@ export default function ProfileScreen({ route, navigation }) {
         </View>
       </Modal>
 
-      <Modal
-        visible={enlargeAvatar}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEnlargeAvatar(false)}
-        statusBarTranslucent
-      >
+      <Modal visible={enlargeAvatar} transparent animationType="fade" onRequestClose={() => setEnlargeAvatar(false)} statusBarTranslucent>
         <Pressable style={styles.enlargeBackdrop} onPress={() => setEnlargeAvatar(false)}>
           <View style={styles.enlargeCloseBtn}>
             <Text style={styles.enlargeCloseBtnText}>✕</Text>
@@ -614,51 +571,51 @@ export default function ProfileScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f0f0f' },
+  container: { flex: 1, backgroundColor: '#ffffff' },
   topBar: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 4,
-    backgroundColor: 'rgba(15, 15, 15, 0.5)', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+    backgroundColor: 'rgba(255,255,255,0.9)', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
   },
   topBarBtn: { padding: 8 },
-  topBarBtnText: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  headerSection: { backgroundColor: '#0f0f0f', paddingBottom: 4 },
+  topBarBtnText: { color: '#111', fontSize: 22, fontWeight: '700' },
+  headerSection: { backgroundColor: '#ffffff', paddingBottom: 4 },
   avatarSection: { alignItems: 'center', paddingTop: 8, paddingBottom: 12 },
-  scholarBadge: { marginTop: 8, backgroundColor: '#7c3aed', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  scholarBadge: { marginTop: 8, backgroundColor: COLORS.gold, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
   scholarBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   regularInfo: { alignItems: 'center', paddingHorizontal: 24, marginBottom: 10 },
-  displayName: { fontSize: 20, fontWeight: '800', color: '#fff', marginBottom: 2 },
-  usernameText: { fontSize: 14, color: '#94a3b8', marginBottom: 8 },
-  bioText: { fontSize: 14, color: '#cbd5e1', textAlign: 'center', lineHeight: 20 },
-  addBioText: { fontSize: 14, color: '#7c3aed', fontWeight: '600' },
-  scholarCard: { marginHorizontal: 16, marginBottom: 14, backgroundColor: '#1a1d27', borderRadius: 16, borderWidth: 1, borderColor: '#7c3aed44', overflow: 'hidden' },
-  scholarCardHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#7c3aed22', gap: 8 },
+  displayName: { fontSize: 20, fontWeight: '800', color: '#111', marginBottom: 2 },
+  usernameText: { fontSize: 14, color: '#888', marginBottom: 8 },
+  bioText: { fontSize: 14, color: '#444', textAlign: 'center', lineHeight: 20 },
+  addBioText: { fontSize: 14, color: COLORS.gold, fontWeight: '600' },
+  scholarCard: { marginHorizontal: 16, marginBottom: 14, backgroundColor: '#f9f9f9', borderRadius: 16, borderWidth: 1, borderColor: `${COLORS.gold}44`, overflow: 'hidden' },
+  scholarCardHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: `${COLORS.gold}18`, gap: 8 },
   scholarCardIcon: { fontSize: 18 },
-  scholarCardTitle: { fontSize: 15, fontWeight: '800', color: '#a78bfa' },
-  scholarCardDivider: { height: 1, backgroundColor: '#7c3aed33' },
+  scholarCardTitle: { fontSize: 15, fontWeight: '800', color: COLORS.goldDark },
+  scholarCardDivider: { height: 1, backgroundColor: `${COLORS.gold}33` },
   scholarCardBody: { paddingHorizontal: 16, paddingVertical: 12, gap: 10 },
   scholarRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  scholarRowLabel: { fontSize: 13, color: '#64748b', fontWeight: '600', flex: 1 },
-  scholarRowValue: { fontSize: 13, color: '#e2e8f0', fontWeight: '500', flex: 2, textAlign: 'right' },
+  scholarRowLabel: { fontSize: 13, color: '#888', fontWeight: '600', flex: 1 },
+  scholarRowValue: { fontSize: 13, color: '#222', fontWeight: '500', flex: 2, textAlign: 'right' },
   scholarBioRow: { gap: 4 },
-  scholarBioValue: { fontSize: 13, color: '#cbd5e1', lineHeight: 20 },
-  statsRow: { flexDirection: 'row', backgroundColor: '#1a1d27', borderRadius: 16, marginHorizontal: 16, marginBottom: 10, paddingVertical: 8, justifyContent: 'space-around', alignItems: 'center' },
+  scholarBioValue: { fontSize: 13, color: '#444', lineHeight: 20 },
+  statsRow: { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 16, marginHorizontal: 16, marginBottom: 10, paddingVertical: 8, justifyContent: 'space-around', alignItems: 'center' },
   statItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, minWidth: 70 },
-  statNum: { fontSize: 18, fontWeight: '800', color: '#fff' },
-  statLabel: { fontSize: 11, color: '#64748b', marginTop: 2 },
-  statDivider: { width: 1, height: 28, backgroundColor: '#2d3148' },
+  statNum: { fontSize: 18, fontWeight: '800', color: '#111' },
+  statLabel: { fontSize: 11, color: '#888', marginTop: 2 },
+  statDivider: { width: 1, height: 28, backgroundColor: '#ddd' },
   actionButtons: { paddingHorizontal: 16, marginBottom: 10 },
-  scholarApplyBtn: { backgroundColor: '#7c3aed', borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  scholarApplyBtn: { backgroundColor: COLORS.gold, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
   scholarApplyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  followBtn: { backgroundColor: '#7c3aed', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  followingBtn: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#7c3aed' },
+  followBtn: { backgroundColor: COLORS.gold, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  followingBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: COLORS.gold },
   followBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  followingBtnText: { color: '#a78bfa' },
-  tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1e1e1e' },
+  followingBtnText: { color: COLORS.goldDark },
+  tabs: { flexDirection: 'row', borderTopWidth: 0.5, borderTopColor: '#e5e5e5' },
   tab: { flex: 1, paddingVertical: 4, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  activeTab: { borderBottomColor: '#7c3aed' },
-  tabText: { fontSize: 20, opacity: 0.5 },
+  activeTab: { borderBottomColor: COLORS.gold },
+  tabText: { fontSize: 20, opacity: 0.35 },
   activeTabText: { opacity: 1 },
-  gridItem: { width: GRID_ITEM_SIZE, height: GRID_ITEM_SIZE * 1.2, margin: 0.5, backgroundColor: '#1a1a1a' },
+  gridItem: { width: GRID_ITEM_SIZE, height: GRID_ITEM_SIZE * 1.2, margin: 0.5, backgroundColor: '#f0f0f0' },
   gridThumb: { width: '100%', height: '100%' },
   gridOverlay: { position: 'absolute', bottom: 4, left: 4 },
   gridPlayCount: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
@@ -668,20 +625,20 @@ const styles = StyleSheet.create({
   privateLabelText: { fontSize: 14 },
   emptyGrid: { alignItems: 'center', paddingVertical: 60, gap: 12 },
   emptyGridIcon: { fontSize: 48 },
-  emptyGridText: { color: '#64748b', fontSize: 15, fontWeight: '600' },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#1a1d27', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40, paddingTop: 16 },
-  modalTitle: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 16 },
+  emptyGridText: { color: '#aaa', fontSize: 15, fontWeight: '600' },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  modalSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40, paddingTop: 16, borderTopWidth: 0.5, borderColor: '#eee' },
+  modalTitle: { color: '#111', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 16 },
   modalOption: { paddingVertical: 16, paddingHorizontal: 24 },
-  modalOptionText: { color: '#fff', fontSize: 16, fontWeight: '500' },
+  modalOptionText: { color: '#111', fontSize: 16, fontWeight: '500' },
   enlargeBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
   enlargedAvatar: { width: width - 40, height: width - 40, borderRadius: 12 },
   enlargeCloseBtn: { position: 'absolute', top: 50, right: 20, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   enlargeCloseBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  dlOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', pointerEvents: 'none' },
-  dlBox: { backgroundColor: '#1a1d27', borderRadius: 20, padding: 28, width: width * 0.75, alignItems: 'center', gap: 14 },
-  dlTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  dlBarBg: { width: '100%', height: 8, backgroundColor: '#2d3148', borderRadius: 4, overflow: 'hidden' },
-  dlBarFill: { height: '100%', backgroundColor: '#7c3aed', borderRadius: 4 },
-  dlPercent: { color: '#a78bfa', fontSize: 22, fontWeight: '800' },
+  dlOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.4)', pointerEvents: 'none' },
+  dlBox: { backgroundColor: '#fff', borderRadius: 20, padding: 28, width: width * 0.75, alignItems: 'center', gap: 14 },
+  dlTitle: { color: '#111', fontSize: 16, fontWeight: '700' },
+  dlBarBg: { width: '100%', height: 8, backgroundColor: '#eee', borderRadius: 4, overflow: 'hidden' },
+  dlBarFill: { height: '100%', backgroundColor: COLORS.gold, borderRadius: 4 },
+  dlPercent: { color: COLORS.goldDark, fontSize: 22, fontWeight: '800' },
 });

@@ -10,6 +10,7 @@ import AnimatedButton from './AnimatedButton';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import LiveVideoCard from '../components/LiveVideoCard';
 import { useVideoPlayerPool } from '../components/VideoPlayerPool';
+import { COLORS } from '../constants/theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -439,7 +440,7 @@ export default function HomeScreen({ navigation }) {
                   style={{ paddingHorizontal: 16, paddingVertical: 8, alignItems: 'center' }}
                 >
                   <Text style={{
-                    color: isFocusedTab ? '#ffffff' : 'rgba(255,255,255,0.6)',
+                    color: isFocusedTab ? COLORS.gold : 'rgba(255,255,255,0.6)',
                     fontSize: 15,
                     fontWeight: isFocusedTab ? '700' : '600',
                   }}>
@@ -450,7 +451,7 @@ export default function HomeScreen({ navigation }) {
                     alignSelf: 'center',
                     width: 30,
                     height: 3,
-                    backgroundColor: '#ffffff',
+                    backgroundColor: COLORS.gold,
                     borderRadius: 2,
                     opacity,
                   }} />
@@ -484,8 +485,8 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', gap: 12 },
-  loadingText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+  loadingContainer: { flex: 1, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { color: COLORS.textWhite, fontSize: 16, fontWeight: '600' },
   emptyIcon: { fontSize: 48 },
   emptySubtext: { color: '#64748b', fontSize: 14, textAlign: 'center', paddingHorizontal: 40 },
 });

@@ -26,6 +26,8 @@ import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
+import { LoginManager, AccessToken } from 'react-native-fbsdk-next';
+import { COLORS } from '../constants/theme';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -34,6 +36,7 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [facebookLoading, setFacebookLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [biometricType, setBiometricType] = useState(null);
   const [savedAccounts, setSavedAccounts] = useState([]);
@@ -365,6 +368,28 @@ export default function LoginScreen({ navigation }) {
     setGoogleLoading(false);
   }
 
+  async function handleFacebookLogin() {
+    setFacebookLoading(true);
+    try {
+      const result = await LoginManager.logInWithPermissions(['public_profile', 'email']);
+      if (result.isCancelled) { setFacebookLoading(false); return; }
+      const data = await AccessToken.getCurrentAccessToken();
+      if (!data) throw new Error('No access token');
+      const { data: authData, error } = await supabase.auth.signInWithIdToken({
+        provider: 'facebook',
+        token: data.accessToken,
+      });
+      if (error) throw error;
+      await userCache.clear();
+      await userCache.set(authData.user);
+      await refreshUser();
+      navigation.navigate('Main');
+    } catch (e) {
+      Alert.alert('Facebook Login Failed', e.message);
+    }
+    setFacebookLoading(false);
+  }
+
   const handleIdentifierFocus = () => {
     if (suppressDropdown.current) {
       suppressDropdown.current = false;
@@ -583,6 +608,10 @@ export default function LoginScreen({ navigation }) {
             {googleLoading ? <ActivityIndicator color="#a78bfa" /> : <Text style={styles.googleButtonText}>🔵  Continue with Google</Text>}
           </AnimatedButton>
 
+          <AnimatedButton style={styles.facebookButton} onPress={handleFacebookLogin} disabled={facebookLoading}>
+            {facebookLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.facebookButtonText}>🔵  Continue with Facebook</Text>}
+          </AnimatedButton>
+
           <AnimatedButton onPress={() => navigation.navigate('Signup')}>
             <Text style={styles.link}>
               Don't have an account?{' '}
@@ -669,17 +698,17 @@ export default function LoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1, backgroundColor: '#0f0f0f', alignItems: 'center',
+    flexGrow: 1, backgroundColor: COLORS.bgDark, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40,
   },
-  arabic: { fontSize: 24, color: '#a78bfa', marginBottom: 8 },
+  arabic: { fontSize: 24, color: COLORS.gold, marginBottom: 8 },
   title: { fontSize: 36, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#64748b', marginBottom: 36 },
   inputWrapper: { width: '100%', zIndex: 999, marginBottom: 14 },
   input: {
-    width: '100%', backgroundColor: '#1a1d27', borderWidth: 1,
-    borderColor: '#2d3148', borderRadius: 12,
-    padding: 16, color: '#ffffff', fontSize: 15,
+    width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1,
+    borderColor: COLORS.borderDark, borderRadius: 12,
+    padding: 16, color: COLORS.textWhite, fontSize: 15,
   },
   dropdown: {
     width: '100%', height: 200,
@@ -705,24 +734,29 @@ const styles = StyleSheet.create({
   passwordInput: { flex: 1, paddingVertical: 16, color: '#ffffff', fontSize: 15 },
   eyeBtn: { fontSize: 20, paddingLeft: 8 },
   button: {
-    width: '100%', backgroundColor: '#7c3aed', borderRadius: 12, padding: 16,
+    width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 16,
     alignItems: 'center', marginTop: 6, marginBottom: 20, zIndex: 1, minHeight: 52, justifyContent: 'center',
   },
-  buttonText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  buttonText: { color: COLORS.navy, fontSize: 16, fontWeight: '700' },
   dividerContainer: { width: '100%', flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#2d3148' },
-  dividerText: { color: '#64748b', marginHorizontal: 12, fontSize: 13 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.borderDark },
+  dividerText: { color: COLORS.navyLight, marginHorizontal: 12, fontSize: 13 },
   googleButton: {
-    width: '100%', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148',
+    width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark,
     borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 20, minHeight: 52, justifyContent: 'center',
   },
   googleButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
-  link: { color: '#64748b', fontSize: 14, marginTop: 4 },
-  linkBold: { color: '#a78bfa', fontWeight: '700' },
+  link: { color: COLORS.textGray, fontSize: 14, marginTop: 4 },
+  linkBold: { color: COLORS.gold, fontWeight: '700' },
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center', alignItems: 'center',
   },
+  facebookButton: {
+    width: '100%', backgroundColor: '#1877F2', borderRadius: 12, padding: 16,
+    alignItems: 'center', marginBottom: 20, minHeight: 52, justifyContent: 'center',
+  },
+  facebookButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
   modalContent: {
     backgroundColor: 'white', borderRadius: 20,
     padding: 30, width: '80%', alignItems: 'center',

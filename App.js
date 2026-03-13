@@ -28,6 +28,7 @@ import { useEffect, useState } from 'react';
 import React from 'react';
 import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
+import { COLORS } from './constants/theme';
 
 // ADD THIS IMPORT
 import { UserProvider } from './context/UserContext';
@@ -102,18 +103,18 @@ function MainTabs({ session }) {
     }
   };
 
-  return (
+ return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#0f0f0f',
-          borderTopColor: '#1e1e1e',
+          backgroundColor: COLORS.bottomNav,
+          borderTopColor: COLORS.navyLight,
           height: 57,
           paddingBottom: 8,
         },
-        tabBarActiveTintColor: '#a78bfa',
-        tabBarInactiveTintColor: '#4b5563',
+        tabBarActiveTintColor: COLORS.bottomNavActive,
+        tabBarInactiveTintColor: COLORS.bottomNavInactive,
       }}
     >
       <Tab.Screen
@@ -222,7 +223,7 @@ export default function App() {
   if (session === undefined) {
     return (
       <View style={{ flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color="#7c3aed" size="large" />
+        <ActivityIndicator color={COLORS.gold} size="large" />
       </View>
     );
   }

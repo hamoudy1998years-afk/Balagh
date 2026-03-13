@@ -15,6 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
+      "facebookAppId": "26245191448425849",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Bushrann to access your photos to update your profile picture.",
         "NSPhotoLibraryAddUsageDescription": "Allow Bushrann to save videos to your photo library.",
@@ -31,6 +32,7 @@
         "backgroundColor": "#1e4fa3"
       },
       "package": "com.bushrann.app",
+      "facebookAppId": "26245191448425849",
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
