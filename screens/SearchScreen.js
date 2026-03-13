@@ -3,6 +3,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
+import { COLORS } from '../constants/theme';
 
 const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
@@ -50,7 +51,7 @@ export default function SearchScreen() {
         <TextInput
           style={styles.searchInput}
           placeholder="Search videos, scholars..."
-          placeholderTextColor="#4b5563"
+          placeholderTextColor="#aaaaaa"
           value={query}
           onChangeText={handleSearch}
         />
@@ -78,7 +79,7 @@ export default function SearchScreen() {
       />
 
       {loading ? (
-        <ActivityIndicator color="#7c3aed" size="large" style={styles.loader} />
+        <ActivityIndicator color={COLORS.gold} size="large" style={styles.loader} />
       ) : results.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>🕌</Text>
@@ -110,30 +111,30 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f0f0f', paddingTop: 60 },
-  title: { fontSize: 24, fontWeight: '700', color: '#ffffff', paddingHorizontal: 16, marginBottom: 16 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1d27', borderRadius: 12, marginHorizontal: 16, paddingHorizontal: 12, marginBottom: 16, borderWidth: 1, borderColor: '#2d3148' },
+  container: { flex: 1, backgroundColor: '#ffffff', paddingTop: 60 },
+  title: { fontSize: 24, fontWeight: '700', color: '#111111', paddingHorizontal: 16, marginBottom: 16 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', borderRadius: 12, marginHorizontal: 16, paddingHorizontal: 12, marginBottom: 16, borderWidth: 0.5, borderColor: '#e5e5e5' },
   searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: { flex: 1, color: '#ffffff', fontSize: 15, paddingVertical: 14 },
-  clearBtn: { color: '#64748b', fontSize: 16, padding: 4 },
+  searchInput: { flex: 1, color: '#111111', fontSize: 15, paddingVertical: 14 },
+  clearBtn: { color: '#aaaaaa', fontSize: 16, padding: 4 },
   categoryList: { paddingHorizontal: 16, marginBottom: 16, flexGrow: 0 },
-  categoryChip: { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8 },
-  categoryChipActive: { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
-  categoryChipText: { color: '#64748b', fontSize: 13, fontWeight: '600' },
+  categoryChip: { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, marginRight: 8 },
+  categoryChipActive: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  categoryChipText: { color: '#888888', fontSize: 13, fontWeight: '600' },
   categoryChipTextActive: { color: '#ffffff' },
   loader: { marginTop: 60 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
-  emptyText: { color: '#ffffff', fontSize: 16, fontWeight: '600', marginBottom: 6 },
-  emptySubtext: { color: '#64748b', fontSize: 14 },
+  emptyText: { color: '#111111', fontSize: 16, fontWeight: '600', marginBottom: 6 },
+  emptySubtext: { color: '#888888', fontSize: 14 },
   resultsList: { paddingHorizontal: 16, paddingBottom: 40 },
-  resultCard: { flexDirection: 'row', backgroundColor: '#1a1d27', borderRadius: 12, padding: 12, marginBottom: 10, gap: 12, alignItems: 'center' },
-  resultThumbnail: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#2d3148', alignItems: 'center', justifyContent: 'center' },
+  resultCard: { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 12, padding: 12, marginBottom: 10, gap: 12, alignItems: 'center', borderWidth: 0.5, borderColor: '#e5e5e5' },
+  resultThumbnail: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#e5e5e5', alignItems: 'center', justifyContent: 'center' },
   resultThumbnailIcon: { fontSize: 28 },
   resultInfo: { flex: 1 },
-  resultCaption: { color: '#ffffff', fontSize: 14, fontWeight: '600', marginBottom: 8, lineHeight: 20 },
+  resultCaption: { color: '#111111', fontSize: 14, fontWeight: '600', marginBottom: 8, lineHeight: 20 },
   resultMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  categoryTag: { backgroundColor: '#4c1d95', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  categoryTagText: { color: '#a78bfa', fontSize: 11, fontWeight: '700' },
-  resultViews: { color: '#64748b', fontSize: 12 },
+  categoryTag: { backgroundColor: `${COLORS.gold}20`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  categoryTagText: { color: COLORS.goldDark, fontSize: 11, fontWeight: '700' },
+  resultViews: { color: '#888888', fontSize: 12 },
 });
