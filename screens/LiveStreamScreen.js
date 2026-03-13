@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList, Alert,
-  Keyboard, Platform, ActivityIndicator,
+  Keyboard, Platform, ActivityIndicator, BackHandler,
   Dimensions, PermissionsAndroid, AppState, Image, Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -124,6 +124,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const pingInterval = useRef(null);
   const currentStreamIdRef = useRef(null);
   const currentChannelRef = useRef(null);
+  const isLiveRef = useRef(false);
 
   // ✅ NEW: Use the viewer count hook (streamer doesn't track themselves)
   const { viewerCount } = useViewerCount(streamId);
@@ -147,12 +148,21 @@ export default function LiveStreamScreen({ navigation, route }) {
         setKeyboardHeight(0);
       });
 
+      const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (isLiveRef.current) {
+          setShowEndModal(true);
+          return true; // blocks the default back action
+        }
+        return false;
+      });
+
       return () => {
         if (appStateSubscription.current) {
           appStateSubscription.current.remove();
         }
         keyboardDidShow.remove();
         keyboardDidHide.remove();
+        backHandler.remove();
         cleanup();
       };
     }, []);
@@ -295,6 +305,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       });
 
       setIsLive(true);
+      isLiveRef.current = true;
       console.log('🔥 Engine exists:', engineRef.current !== null);
       setLoading(false);
 
