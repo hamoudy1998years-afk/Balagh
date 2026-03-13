@@ -7,8 +7,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
+import { COLORS } from '../constants/theme';
 
-// ─── Single notification row with swipe + long press ─────────────────────────
 function NotificationItem({ item, onDelete, onMarkRead }) {
   const translateX    = useRef(new Animated.Value(0)).current;
   const deleteOpacity = useRef(new Animated.Value(0)).current;
@@ -65,11 +65,11 @@ function NotificationItem({ item, onDelete, onMarkRead }) {
   const getMessage = () => {
     const name = item.actor?.username || 'Someone';
     switch (item.type) {
-      case 'like': return `${name} liked your video`;
-      case 'follow': return `${name} started following you`;
+      case 'like':    return `${name} liked your video`;
+      case 'follow':  return `${name} started following you`;
       case 'comment': return `${name} commented on your video`;
-      case 'reply': return `${name} replied to your comment`;
-      default: return `${name} interacted with you`;
+      case 'reply':   return `${name} replied to your comment`;
+      default:        return `${name} interacted with you`;
     }
   };
 
@@ -92,7 +92,6 @@ function NotificationItem({ item, onDelete, onMarkRead }) {
       <Animated.View style={[styles.deleteBackground, { opacity: deleteOpacity }]}>
         <Text style={styles.deleteBackgroundText}>🗑️ Delete</Text>
       </Animated.View>
-      {/* Keep as Animated.View with panHandlers — AnimatedButton wraps the inner content */}
       <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
         <AnimatedButton
           onPress={handlePress}
@@ -115,7 +114,6 @@ function NotificationItem({ item, onDelete, onMarkRead }) {
   );
 }
 
-// ─── Main screen ──────────────────────────────────────────────────────────────
 export default function NotificationsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [notifications, setNotifications] = useState([]);
@@ -185,8 +183,8 @@ export default function NotificationsScreen({ navigation }) {
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
-        <ActivityIndicator size="large" color="#FE2C55" />
+        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+        <ActivityIndicator size="large" color={COLORS.gold} />
         <Text style={styles.loadingText}>Loading notifications...</Text>
       </View>
     );
@@ -194,7 +192,7 @@ export default function NotificationsScreen({ navigation }) {
 
   return (
     <View style={styles.fullScreen}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       <View style={[styles.container, { paddingTop: insets.top }]}>
 
         <View style={styles.header}>
@@ -209,7 +207,7 @@ export default function NotificationsScreen({ navigation }) {
             )}
             {notifications.length > 0 && (
               <AnimatedButton onPress={handleDeleteAll} style={styles.headerBtn}>
-                <Text style={[styles.headerBtnText, { color: '#FE2C55' }]}>Clear all</Text>
+                <Text style={[styles.headerBtnText, { color: COLORS.live }]}>Clear all</Text>
               </AnimatedButton>
             )}
           </View>
@@ -236,7 +234,7 @@ export default function NotificationsScreen({ navigation }) {
               <NotificationItem item={item} onDelete={handleDelete} onMarkRead={handleMarkRead} navigation={navigation} />
             )}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FE2C55" colors={['#FE2C55']} />}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} colors={[COLORS.gold]} />}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
           />
@@ -247,34 +245,34 @@ export default function NotificationsScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  fullScreen: { flex: 1, backgroundColor: '#0f0f0f' },
-  container: { flex: 1, backgroundColor: '#0f0f0f' },
-  loadingContainer: { flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center', gap: 12 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222222' },
-  headerTitle: { fontSize: 20, fontWeight: '800', color: '#ffffff' },
-  unreadBadge: { fontSize: 14, fontWeight: '700', color: '#FE2C55' },
-  headerActions: { flexDirection: 'row', gap: 12 },
-  headerBtn: { paddingVertical: 4, paddingHorizontal: 8 },
-  headerBtnText: { fontSize: 13, color: '#aaaaaa', fontWeight: '600' },
-  hintBanner: { backgroundColor: '#1a1a1a', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#222222' },
-  hintBannerText: { fontSize: 12, color: '#777777', textAlign: 'center' },
-  deleteBackground: { ...StyleSheet.absoluteFillObject, backgroundColor: '#FE2C55', justifyContent: 'center', alignItems: 'center' },
+  fullScreen:        { flex: 1, backgroundColor: '#ffffff' },
+  container:         { flex: 1, backgroundColor: '#ffffff' },
+  loadingContainer:  { flex: 1, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  centered:          { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  header:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: '#e5e5e5' },
+  headerTitle:       { fontSize: 20, fontWeight: '800', color: '#111111' },
+  unreadBadge:       { fontSize: 14, fontWeight: '700', color: COLORS.gold },
+  headerActions:     { flexDirection: 'row', gap: 12 },
+  headerBtn:         { paddingVertical: 4, paddingHorizontal: 8 },
+  headerBtnText:     { fontSize: 13, color: '#888888', fontWeight: '600' },
+  hintBanner:        { backgroundColor: '#f5f5f5', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: '#e5e5e5' },
+  hintBannerText:    { fontSize: 12, color: '#aaaaaa', textAlign: 'center' },
+  deleteBackground:  { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.live, justifyContent: 'center', alignItems: 'center' },
   deleteBackgroundText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  notificationRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#0f0f0f' },
-  unreadRow: { backgroundColor: '#1a0a0d' },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FE2C55', marginRight: 8 },
-  iconContainer: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2a2a2a', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  icon: { fontSize: 20 },
-  textContent: { flex: 1 },
-  message: { fontSize: 14, color: '#aaaaaa', fontWeight: '500', lineHeight: 20 },
-  unreadMessage: { fontWeight: '700', color: '#ffffff' },
-  time: { fontSize: 12, color: '#777777', marginTop: 3 },
-  swipeHint: { marginLeft: 8 },
-  swipeHintText: { fontSize: 11, color: '#444444' },
-  separator: { height: 1, backgroundColor: '#1e1e1e', marginLeft: 72 },
-  emptyIcon: { fontSize: 52 },
-  emptyText: { fontSize: 17, fontWeight: '700', color: '#ffffff' },
-  emptySubtext: { fontSize: 14, color: '#777777', textAlign: 'center', paddingHorizontal: 40, lineHeight: 20 },
-  loadingText: { fontSize: 14, color: '#aaaaaa' },
+  notificationRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#ffffff' },
+  unreadRow:         { backgroundColor: `${COLORS.gold}10` },
+  unreadDot:         { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.gold, marginRight: 8 },
+  iconContainer:     { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  icon:              { fontSize: 20 },
+  textContent:       { flex: 1 },
+  message:           { fontSize: 14, color: '#888888', fontWeight: '500', lineHeight: 20 },
+  unreadMessage:     { fontWeight: '700', color: '#111111' },
+  time:              { fontSize: 12, color: '#aaaaaa', marginTop: 3 },
+  swipeHint:         { marginLeft: 8 },
+  swipeHintText:     { fontSize: 11, color: '#cccccc' },
+  separator:         { height: 0.5, backgroundColor: '#e5e5e5', marginLeft: 72 },
+  emptyIcon:         { fontSize: 52 },
+  emptyText:         { fontSize: 17, fontWeight: '700', color: '#111111' },
+  emptySubtext:      { fontSize: 14, color: '#888888', textAlign: 'center', paddingHorizontal: 40, lineHeight: 20 },
+  loadingText:       { fontSize: 14, color: '#888888' },
 });
