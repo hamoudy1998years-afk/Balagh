@@ -5,6 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { userCache } from '../utils/userCache';
+import { COLORS } from '../constants/theme';
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
@@ -18,7 +19,6 @@ export default function UploadScreen({ navigation }) {
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
 
-  // ── Go Live setup state ────────────────────────────────────────────────────
   const [showLiveSetup, setShowLiveSetup] = useState(false);
   const [liveTitle, setLiveTitle]         = useState('');
   const [maxQuestions, setMaxQuestions]   = useState('5');
@@ -33,14 +33,11 @@ export default function UploadScreen({ navigation }) {
   useEffect(() => { checkIfScholarInstant(); }, []);
 
   async function checkIfScholarInstant() {
-    // ✅ Show instantly from cache
     const cached = await userCache.get();
     if (cached?.is_scholar !== undefined) {
       setIsScholar(cached.is_scholar);
       setScholarChecked(true);
     }
-
-    // ✅ Then verify from DB in background
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     const { data } = await supabase.from('profiles').select('is_scholar').eq('id', user.id).single();
@@ -84,15 +81,10 @@ export default function UploadScreen({ navigation }) {
     try {
       const ext      = video.uri.split('.').pop() || 'mp4';
       const fileName = `${user.id}/${Date.now()}.${ext}`;
-
       const SUPABASE_URL = 'https://waurtjtnyinncbdhfydu.supabase.co';
 
       const formData = new FormData();
-      formData.append('', {
-        uri:  video.uri,
-        type: 'video/mp4',
-        name: fileName.split('/').pop(),
-      });
+      formData.append('', { uri: video.uri, type: 'video/mp4', name: fileName.split('/').pop() });
 
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -107,43 +99,29 @@ export default function UploadScreen({ navigation }) {
           }
         };
         xhr.onload = () => {
-          if (xhr.status === 200 || xhr.status === 201) {
-            resolve(JSON.parse(xhr.responseText));
-          } else {
-            reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
-          }
+          if (xhr.status === 200 || xhr.status === 201) resolve(JSON.parse(xhr.responseText));
+          else reject(new Error(`Upload failed (${xhr.status}): ${xhr.responseText}`));
         };
         xhr.onerror = () => reject(new Error('Network request failed'));
         xhr.send(formData);
       });
 
       const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${fileName}`;
-
       setProgressPercent(100);
       setProgressLabel('Saving...');
 
       const { error: dbError } = await supabase.from('videos').insert({
-        user_id:       user.id,
-        caption:       caption.trim(),
-        category,
-        video_url:     publicUrl,
-        thumbnail_url: null,
+        user_id: user.id, caption: caption.trim(), category,
+        video_url: publicUrl, thumbnail_url: null,
       });
-
       if (dbError) throw dbError;
 
-      setProgressPercent(0);
-      setProgressLabel('');
-      setUploading(false);
-      setVideo(null);
-      setCaption('');
-      setCategory('');
+      setProgressPercent(0); setProgressLabel(''); setUploading(false);
+      setVideo(null); setCaption(''); setCategory('');
       Alert.alert('Success! 🎉', 'Your video has been uploaded to Bushrann!');
 
     } catch (error) {
-      setUploading(false);
-      setProgressPercent(0);
-      setProgressLabel('');
+      setUploading(false); setProgressPercent(0); setProgressLabel('');
       console.error('Upload error:', error);
       Alert.alert('Upload failed', error.message);
     }
@@ -152,14 +130,9 @@ export default function UploadScreen({ navigation }) {
   function handleGoLive() { setShowLiveSetup(true); }
 
   function startLiveStream() {
-    if (!liveTitle.trim()) {
-      Alert.alert('Title required', 'Please enter a title for your live stream.');
-      return;
-    }
+    if (!liveTitle.trim()) { Alert.alert('Title required', 'Please enter a title for your live stream.'); return; }
     const max = parseInt(maxQuestions) || 5;
-    setShowLiveSetup(false);
-    setLiveTitle('');
-    setMaxQuestions('5');
+    setShowLiveSetup(false); setLiveTitle(''); setMaxQuestions('5');
     navigation.navigate('LiveStream', { title: liveTitle.trim(), maxQuestions: max });
   }
 
@@ -173,7 +146,7 @@ export default function UploadScreen({ navigation }) {
         <TextInput
           style={styles.input}
           placeholder="e.g. Friday Tafsir Lesson"
-          placeholderTextColor="#4b5563"
+          placeholderTextColor="#aaaaaa"
           value={liveTitle}
           onChangeText={setLiveTitle}
           maxLength={60}
@@ -210,7 +183,7 @@ export default function UploadScreen({ navigation }) {
       <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
 
       {isScholar === true && (
-          <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
+        <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
           <Text style={styles.liveDot}>🔴</Text>
           <Text style={styles.liveBtnText}>Go Live</Text>
           <View style={styles.scholarBadge}>
@@ -240,7 +213,7 @@ export default function UploadScreen({ navigation }) {
       <TextInput
         style={styles.input}
         placeholder="What is this video about?"
-        placeholderTextColor="#4b5563"
+        placeholderTextColor="#aaaaaa"
         value={caption}
         onChangeText={setCaption}
         multiline
@@ -264,32 +237,26 @@ export default function UploadScreen({ navigation }) {
         ))}
       </View>
 
-      {/* ── TikTok Style Upload Button ── */}
       <AnimatedButton
         style={[styles.uploadBtn, uploading && styles.uploadBtnDisabled]}
         onPress={uploadVideo}
         disabled={uploading}
       >
-        {/* Thin progress bar at the very bottom of the button */}
         {uploading && (
           <View style={styles.tiktokBarBg}>
             <View style={[styles.tiktokBarFill, { width: `${progressPercent}%` }]} />
           </View>
         )}
-
-        {/* Button content */}
         <View style={styles.uploadBtnContent}>
           <Text style={styles.uploadBtnText}>
             {uploading ? progressLabel : 'Upload to Bushrann ☪️'}
           </Text>
-          {uploading && (
-            <Text style={styles.uploadBtnPct}>{progressPercent}%</Text>
-          )}
+          {uploading && <Text style={styles.uploadBtnPct}>{progressPercent}%</Text>}
         </View>
       </AnimatedButton>
 
       {scholarChecked && isScholar === false && (
-          <View style={styles.scholarInfo}>
+        <View style={styles.scholarInfo}>
           <Text style={styles.scholarInfoIcon}>🎓</Text>
           <Text style={styles.scholarInfoText}>
             Are you a verified Islamic scholar? Contact us to get your Scholar badge and unlock live streaming.
@@ -301,54 +268,51 @@ export default function UploadScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:              { flex: 1, backgroundColor: '#0f0f0f' },
+  container:              { flex: 1, backgroundColor: '#ffffff' },
   content:                { padding: 24, paddingTop: 60 },
-  title:                  { fontSize: 24, fontWeight: '700', color: '#ffffff', marginBottom: 4 },
-  subtitle:               { fontSize: 14, color: '#64748b', marginBottom: 28 },
-  hint:                   { color: '#64748b', fontSize: 12, marginBottom: 10 },
-  liveBtn:                { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#ef4444', borderRadius: 14, padding: 16, marginBottom: 20, gap: 10 },
+  title:                  { fontSize: 24, fontWeight: '700', color: '#111111', marginBottom: 4 },
+  subtitle:               { fontSize: 14, color: '#888888', marginBottom: 28 },
+  hint:                   { color: '#888888', fontSize: 12, marginBottom: 10 },
+  liveBtn:                { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff5f5', borderWidth: 1, borderColor: COLORS.live, borderRadius: 14, padding: 16, marginBottom: 20, gap: 10 },
   liveDot:                { fontSize: 18 },
-  liveBtnText:            { color: '#ef4444', fontSize: 16, fontWeight: '700', flex: 1 },
-  scholarBadge:           { backgroundColor: '#ef4444', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  liveBtnText:            { color: COLORS.live, fontSize: 16, fontWeight: '700', flex: 1 },
+  scholarBadge:           { backgroundColor: COLORS.live, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
   scholarBadgeText:       { color: '#fff', fontSize: 11, fontWeight: '700' },
-  videoPicker:            { backgroundColor: '#1a1d27', borderRadius: 16, borderWidth: 2, borderColor: '#2d3148', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
+  videoPicker:            { backgroundColor: '#f5f5f5', borderRadius: 16, borderWidth: 2, borderColor: '#e5e5e5', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
   videoPlaceholder:       { padding: 40, alignItems: 'center' },
   videoPlaceholderIcon:   { fontSize: 48, marginBottom: 12 },
-  videoPlaceholderText:   { color: '#ffffff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  videoPlaceholderSub:    { color: '#64748b', fontSize: 13 },
+  videoPlaceholderText:   { color: '#111111', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  videoPlaceholderSub:    { color: '#888888', fontSize: 13 },
   videoSelected:          { padding: 24, alignItems: 'center' },
   videoSelectedIcon:      { fontSize: 40, marginBottom: 8 },
-  videoSelectedText:      { color: '#10b981', fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  videoSelectedName:      { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
-  tapToChange:            { color: '#4b5563', fontSize: 12 },
-  label:                  { color: '#94a3b8', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
-  input:                  { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 16, color: '#ffffff', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
-  charCount:              { color: '#4b5563', fontSize: 12, textAlign: 'right', marginTop: 4, marginBottom: 20 },
+  videoSelectedText:      { color: COLORS.success, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  videoSelectedName:      { color: '#888888', fontSize: 12, marginBottom: 8 },
+  tapToChange:            { color: '#aaaaaa', fontSize: 12 },
+  label:                  { color: '#888888', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
+  input:                  { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 12, padding: 16, color: '#111111', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  charCount:              { color: '#aaaaaa', fontSize: 12, textAlign: 'right', marginTop: 4, marginBottom: 20 },
   categories:             { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 32 },
-  categoryChip:           { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  categoryChipActive:     { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
-  categoryChipText:       { color: '#64748b', fontSize: 13, fontWeight: '600' },
+  categoryChip:           { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  categoryChipActive:     { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  categoryChipText:       { color: '#888888', fontSize: 13, fontWeight: '600' },
   categoryChipTextActive: { color: '#ffffff' },
-
-  // ── TikTok Style Button ────────────────────────────────────────────────────
-  uploadBtn:              { backgroundColor: '#7c3aed', borderRadius: 14, paddingVertical: 18, paddingHorizontal: 65, marginBottom: 20, overflow: 'hidden' },
-  uploadBtnDisabled:      { backgroundColor: '#4c1d95' },
+  uploadBtn:              { backgroundColor: COLORS.gold, borderRadius: 14, paddingVertical: 18, paddingHorizontal: 65, marginBottom: 20, overflow: 'hidden' },
+  uploadBtnDisabled:      { backgroundColor: COLORS.goldDark },
   uploadBtnContent:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   uploadBtnText:          { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   uploadBtnPct:           { color: '#ffffff', fontSize: 16, fontWeight: '800' },
-  tiktokBarBg:            { position: 'absolute', bottom: -15, left: -30, right: -30, height: 4, backgroundColor: 'rgba(255,255,255,0.2)' },
+  tiktokBarBg:            { position: 'absolute', bottom: -15, left: -30, right: -30, height: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
   tiktokBarFill:          { height: 4, backgroundColor: '#ffffff' },
-
-  scholarInfo:            { flexDirection: 'row', backgroundColor: '#1a1d27', borderRadius: 12, padding: 14, gap: 10, marginBottom: 40, alignItems: 'flex-start' },
+  scholarInfo:            { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 12, padding: 14, gap: 10, marginBottom: 40, alignItems: 'flex-start', borderWidth: 0.5, borderColor: '#e5e5e5' },
   scholarInfoIcon:        { fontSize: 20 },
-  scholarInfoText:        { color: '#64748b', fontSize: 13, lineHeight: 20, flex: 1 },
+  scholarInfoText:        { color: '#888888', fontSize: 13, lineHeight: 20, flex: 1 },
   maxQuestionsRow:        { flexDirection: 'row', gap: 10, marginBottom: 28, flexWrap: 'wrap' },
-  qChip:                  { backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
-  qChipActive:            { backgroundColor: '#4c1d95', borderColor: '#7c3aed' },
-  qChipText:              { color: '#64748b', fontSize: 15, fontWeight: '600' },
+  qChip:                  { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
+  qChipActive:            { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  qChipText:              { color: '#888888', fontSize: 15, fontWeight: '600' },
   qChipTextActive:        { color: '#ffffff' },
-  goLiveConfirmBtn:       { backgroundColor: '#ef4444', borderRadius: 14, padding: 18, alignItems: 'center', marginBottom: 12 },
+  goLiveConfirmBtn:       { backgroundColor: COLORS.live, borderRadius: 14, padding: 18, alignItems: 'center', marginBottom: 12 },
   goLiveConfirmBtnText:   { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  cancelBtn:              { borderWidth: 1, borderColor: '#2d3148', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 40 },
-  cancelBtnText:          { color: '#64748b', fontSize: 15 },
+  cancelBtn:              { borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 40 },
+  cancelBtnText:          { color: '#888888', fontSize: 15 },
 });
