@@ -1,6 +1,6 @@
 import {
   View, Text, StyleSheet, FlatList,
-  Image, Dimensions, Modal, Alert,
+  Image, Modal, Alert, useWindowDimensions,
   StatusBar, RefreshControl, Animated, Pressable, PanResponder,
 } from 'react-native';
 import React, { useState, useEffect as useEffectHook, useCallback, useRef } from 'react';
@@ -16,8 +16,6 @@ import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
 
-const { width } = Dimensions.get('window');
-const GRID_ITEM_SIZE = (width - 3) / 3;
 const downloadedVideoIds = new Set();
 
 function formatCount(n) {
@@ -559,7 +557,7 @@ export default function ProfileScreen({ route, navigation }) {
 
       <Modal visible={enlargeAvatar} transparent animationType="fade" onRequestClose={() => setEnlargeAvatar(false)} statusBarTranslucent>
         <Pressable style={styles.enlargeBackdrop} onPress={() => setEnlargeAvatar(false)}>
-          <View style={styles.enlargeCloseBtn}>
+          <View style={[styles.enlargeCloseBtn, { top: insets.top + 12 }]}>
             <Text style={styles.enlargeCloseBtnText}>✕</Text>
           </View>
           {profile?.avatar_url && (
@@ -616,7 +614,7 @@ const styles = StyleSheet.create({
   activeTab: { borderBottomColor: COLORS.gold },
   tabText: { fontSize: 20, opacity: 0.35 },
   activeTabText: { opacity: 1 },
-  gridItem: { width: GRID_ITEM_SIZE, height: GRID_ITEM_SIZE * 1.2, margin: 0.5, backgroundColor: '#f0f0f0' },
+  gridItem: { width: '33.33%', aspectRatio: 0.833, margin: 0.5, backgroundColor: '#f0f0f0' },
   gridThumb: { width: '100%', height: '100%' },
   gridOverlay: { position: 'absolute', bottom: 4, left: 4 },
   gridPlayCount: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
@@ -633,11 +631,11 @@ const styles = StyleSheet.create({
   modalOption: { paddingVertical: 16, paddingHorizontal: 24 },
   modalOptionText: { color: '#111', fontSize: 16, fontWeight: '500' },
   enlargeBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
-  enlargedAvatar: { width: width - 40, height: width - 40, borderRadius: 12 },
-  enlargeCloseBtn: { position: 'absolute', top: 50, right: 20, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  enlargedAvatar: { width: '90%', aspectRatio: 1, borderRadius: 12 },
+  enlargeCloseBtn: { position: 'absolute', right: 20, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   enlargeCloseBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   dlOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.4)', pointerEvents: 'none' },
-  dlBox: { backgroundColor: '#fff', borderRadius: 20, padding: 28, width: width * 0.75, alignItems: 'center', gap: 14 },
+  dlBox: { backgroundColor: '#fff', borderRadius: 20, padding: 28, width: '75%', alignItems: 'center', gap: 14 },
   dlTitle: { color: '#111', fontSize: 16, fontWeight: '700' },
   dlBarBg: { width: '100%', height: 8, backgroundColor: '#eee', borderRadius: 4, overflow: 'hidden' },
   dlBarFill: { height: '100%', backgroundColor: COLORS.gold, borderRadius: 4 },
