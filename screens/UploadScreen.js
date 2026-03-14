@@ -33,12 +33,15 @@ export default function UploadScreen({ navigation }) {
   const inputWrapperY = useRef(0);
 
   useEffect(() => {
-    const sub = Keyboard.addListener('keyboardDidShow', () => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => {
       setTimeout(() => {
         scrollRef.current?.scrollTo({ y: inputWrapperY.current - 345, animated: true });
       }, 100);
     });
-    return () => sub.remove();
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+    return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
   useEffect(() => { checkIfScholarInstant(); }, []);
