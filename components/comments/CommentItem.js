@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import UserAvatar from '../common/UserAvatar';
 import { TouchableOpacity } from 'react-native-gesture-handler';
+import { COLORS } from '../../constants/theme';
 
 export default function CommentItem({ 
   comment, 
@@ -275,150 +276,33 @@ export default function CommentItem({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-  },
-  replyContainer: {
-    paddingLeft: 72,
-    paddingVertical: 8,
-    backgroundColor: '#fafafa',
-  },
-  pinnedBadge: {
-    marginBottom: 8,
-  },
-  pinnedText: {
-    fontSize: 12,
-    color: '#FE2C55',
-    fontWeight: '600',
-  },
-  mainRow: {
-    flexDirection: 'row',
-  },
-  content: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    flexWrap: 'wrap',
-  },
-  username: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000',
-    marginRight: 6,
-  },
-  time: {
-    fontSize: 12,
-    color: '#999',
-  },
-  edited: {
-    fontSize: 11,
-    color: '#999',
-    marginLeft: 4,
-  },
-  text: {
-    fontSize: 15,
-    color: '#000',
-    lineHeight: 22,
-    marginBottom: 8,
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  leftActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  actionBtn: {
-    marginRight: 16,
-    paddingVertical: 4,
-  },
-  actionText: {
-    fontSize: 13,
-    color: '#666',
-    fontWeight: '600',
-  },
-  actionTextActive: {
-    color: '#FE2C55',
-  },
-  likeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  heartIcon: {
-    fontSize: 16,
-    marginRight: 4,
-  },
-  heartIconActive: {
-    color: '#FE2C55',
-  },
-  likeCount: {
-    fontSize: 13,
-    color: '#666',
-    fontWeight: '600',
-    minWidth: 20,
-  },
-  editContainer: {
-    marginBottom: 8,
-  },
-  editInput: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 15,
-    color: '#000',
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  editButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 8,
-    gap: 16,
-  },
-  cancelBtn: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  saveBtn: {
-    color: '#FE2C55',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  menuOverlay: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 8,
-    gap: 8,
-    backgroundColor: '#f8f8f8',
-    padding: 8,
-    borderRadius: 12,
-  },
-  menuItem: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  menuText: {
-    fontSize: 12,
-    color: '#333',
-    fontWeight: '500',
-  },
-  deleteText: {
-    color: '#FE2C55',
-  },
+  container: { paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff' },
+  replyContainer: { paddingLeft: 72, paddingVertical: 8, backgroundColor: '#fafafa' },
+  pinnedBadge: { marginBottom: 8 },
+  pinnedText: { fontSize: 12, color: COLORS.gold, fontWeight: '600' },
+  mainRow: { flexDirection: 'row' },
+  content: { flex: 1, marginLeft: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' },
+  username: { fontSize: 14, fontWeight: '700', color: '#000', marginRight: 6 },
+  time: { fontSize: 12, color: '#999' },
+  edited: { fontSize: 11, color: '#999', marginLeft: 4 },
+  text: { fontSize: 15, color: '#000', lineHeight: 22, marginBottom: 8 },
+  actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  leftActions: { flexDirection: 'row', alignItems: 'center' },
+  actionBtn: { marginRight: 16, paddingVertical: 4 },
+  actionText: { fontSize: 13, color: '#666', fontWeight: '600' },
+  actionTextActive: { color: COLORS.gold },
+  likeBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 8 },
+  heartIcon: { fontSize: 16, marginRight: 4 },
+  heartIconActive: { color: COLORS.live },
+  likeCount: { fontSize: 13, color: '#666', fontWeight: '600', minWidth: 20 },
+  editContainer: { marginBottom: 8 },
+  editInput: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 12, fontSize: 15, color: '#000', minHeight: 44, borderWidth: 1, borderColor: '#e0e0e0' },
+  editButtons: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8, gap: 16 },
+  cancelBtn: { color: '#666', fontSize: 14, fontWeight: '600' },
+  saveBtn: { color: COLORS.gold, fontSize: 14, fontWeight: '700' },
+  menuOverlay: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8, gap: 8, backgroundColor: '#f8f8f8', padding: 8, borderRadius: 12 },
+  menuItem: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e0e0e0' },
+  menuText: { fontSize: 12, color: '#333', fontWeight: '500' },
+  deleteText: { color: COLORS.live },
 });

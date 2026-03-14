@@ -5,6 +5,7 @@ import {
 import { useState, useRef } from 'react';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { COLORS } from '../constants/theme';
 
 const { width, height } = Dimensions.get('window');
 const CROP_SIZE = width - 60;
@@ -174,10 +175,10 @@ const styles = StyleSheet.create({
   topBtn: { minWidth: 70 },
   cancelText: { color: '#a0a0b0', fontSize: 15, fontWeight: '600' },
   doneBtn: {
-    backgroundColor: '#7c3aed', borderRadius: 20,
+    backgroundColor: COLORS.gold, borderRadius: 20,
     paddingHorizontal: 18, paddingVertical: 7, minWidth: 70, alignItems: 'center',
   },
-  doneText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  doneText: { color: COLORS.navy, fontSize: 15, fontWeight: '700' },
   hint: { color: '#505070', fontSize: 12, textAlign: 'center', marginTop: 10, fontStyle: 'italic' },
   cropArea: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   gestureLayer: { width, height, alignItems: 'center', justifyContent: 'center' },
@@ -185,6 +186,6 @@ const styles = StyleSheet.create({
   overlay: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.75)' },
   circleBorder: {
     position: 'absolute', width: CROP_SIZE, height: CROP_SIZE,
-    borderRadius: CROP_SIZE / 2, borderWidth: 2, borderColor: '#7c3aed',
+    borderRadius: CROP_SIZE / 2, borderWidth: 2, borderColor: COLORS.gold,
   },
 });

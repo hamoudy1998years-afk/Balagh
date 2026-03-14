@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import CommentItem from './CommentItem';
+import { COLORS } from '../../constants/theme';
 
 export default function CommentList({
   comments,
@@ -125,7 +126,7 @@ export default function CommentList({
       {/* Load more indicator */}
       {loadingMore && (
         <View style={styles.loadingMore}>
-          <ActivityIndicator size="small" color="#FE2C55" />
+          <ActivityIndicator size="small" color={COLORS.gold} />
           <Text style={styles.loadingText}>Loading more...</Text>
         </View>
       )}
@@ -140,49 +141,14 @@ export default function CommentList({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  emptyContainer: {
-    paddingVertical: 100,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 8,
-  },
-  repliesToggle: {
-    paddingLeft: 72,
-    paddingVertical: 8,
-    marginTop: -4,
-  },
-  repliesToggleText: {
-    fontSize: 13,
-    color: '#555',
-    fontWeight: '600',
-  },
-  loadingMore: {
-    paddingVertical: 20,
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 8,
-  },
-  endMessage: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  endText: {
-    fontSize: 12,
-    color: '#999',
-  },
+  container: { flex: 1 },
+  emptyContainer: { paddingVertical: 100, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { fontSize: 16, fontWeight: '600', color: '#666' },
+  emptySubtext: { fontSize: 14, color: '#999', marginTop: 8 },
+  repliesToggle: { paddingLeft: 72, paddingVertical: 8, marginTop: -4 },
+  repliesToggleText: { fontSize: 13, color: COLORS.gold, fontWeight: '600' },
+  loadingMore: { paddingVertical: 20, alignItems: 'center' },
+  loadingText: { fontSize: 12, color: '#999', marginTop: 8 },
+  endMessage: { alignItems: 'center', paddingVertical: 20 },
+  endText: { fontSize: 12, color: '#999' },
 });

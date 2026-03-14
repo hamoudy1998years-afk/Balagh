@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Image, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { COLORS } from '../constants/theme';
 
 export default function LiveVideoCard({ stream, onPress }) {
   const [pulseAnim] = useState(new Animated.Value(1));
@@ -84,7 +85,7 @@ const styles = StyleSheet.create({
     left: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ef4444',
+    backgroundColor: COLORS.live,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,

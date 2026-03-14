@@ -10,6 +10,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnimatedButton from './AnimatedButton';
+import { COLORS } from '../constants/theme';
 
 export default function EditProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -114,16 +115,16 @@ export default function EditProfileScreen({ navigation }) {
   // Scroll to a field when focused so it appears above keyboard
   function scrollToField(y) {
     setTimeout(() => {
-      scrollRef.current?.scrollTo({ y, animated: true });
-    }, 100);
+      scrollRef.current?.scrollTo({ y: y, animated: true });
+    }, 150);
   }
 
   if (loading) {
-    return <View style={epStyles.loadingContainer}><ActivityIndicator color="#7c3aed" size="large" /></View>;
+    return <View style={epStyles.loadingContainer}><ActivityIndicator color={COLORS.gold} size="large" /></View>;
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0f0f0f' }}>
+    <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
       <ScrollView
         ref={scrollRef}
         style={epStyles.container}
@@ -252,20 +253,20 @@ export default function EditProfileScreen({ navigation }) {
 }
 
 const epStyles = StyleSheet.create({
-  loadingContainer: { flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center' },
-  container: { flex: 1, backgroundColor: '#0f0f0f', paddingHorizontal: 24 },
+  loadingContainer: { flex: 1, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: COLORS.bgDark, paddingHorizontal: 24 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   backBtn: { padding: 4 },
-  backBtnText: { color: '#fff', fontSize: 24, fontWeight: '700' },
-  title: { fontSize: 20, fontWeight: '800', color: '#ffffff' },
-  scholarNotice: { backgroundColor: '#2d1b69', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 16, marginBottom: 16, alignItems: 'center' },
-  scholarNoticeText: { color: '#a78bfa', fontSize: 14, fontWeight: '700' },
-  sectionTitle: { color: '#7c3aed', fontSize: 13, fontWeight: '700', marginBottom: 10, marginTop: 4, textTransform: 'uppercase', letterSpacing: 1 },
-  label: { color: '#94a3b8', fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  input: { width: '100%', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 14, color: '#ffffff', fontSize: 15, marginBottom: 14 },
+  backBtnText: { color: COLORS.textWhite, fontSize: 24, fontWeight: '700' },
+  title: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite },
+  scholarNotice: { backgroundColor: `${COLORS.gold}22`, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 16, marginBottom: 16, alignItems: 'center' },
+  scholarNoticeText: { color: COLORS.gold, fontSize: 14, fontWeight: '700' },
+  sectionTitle: { color: COLORS.gold, fontSize: 13, fontWeight: '700', marginBottom: 10, marginTop: 4, textTransform: 'uppercase', letterSpacing: 1 },
+  label: { color: COLORS.textGray, fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  input: { width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 14, color: COLORS.textWhite, fontSize: 15, marginBottom: 14 },
   multilineInput: { height: 80, textAlignVertical: 'top' },
-  saveBtn: { width: '100%', backgroundColor: '#7c3aed', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10, marginTop: 6 },
-  saveBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  cancelBtn: { width: '100%', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 20 },
-  cancelBtnText: { color: '#64748b', fontSize: 16 },
+  saveBtn: { width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10, marginTop: 6 },
+  saveBtnText: { color: COLORS.navy, fontSize: 16, fontWeight: '700' },
+  cancelBtn: { width: '100%', borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 20 },
+  cancelBtnText: { color: COLORS.textGray, fontSize: 16 },
 });

@@ -2,6 +2,7 @@ import { View, Text, TextInput, StyleSheet, Alert, ScrollView } from 'react-nati
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
+import { COLORS } from '../constants/theme';
 
 export default function ApplyScholarScreen({ navigation }) {
   const [fullName,   setFullName]   = useState('');
@@ -74,15 +75,15 @@ export default function ApplyScholarScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f0f0f' },
+  container: { flex: 1, backgroundColor: COLORS.bgDark },
   content: { paddingHorizontal: 24, paddingTop: 80, paddingBottom: 40 },
-  title: { fontSize: 24, fontWeight: '700', color: '#ffffff', marginBottom: 8 },
-  subtitle: { fontSize: 14, color: '#64748b', marginBottom: 32, lineHeight: 20 },
-  label: { color: '#94a3b8', fontSize: 13, fontWeight: '600', marginBottom: 6 },
-  input: { width: '100%', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 16, color: '#ffffff', fontSize: 15, marginBottom: 20 },
+  title: { fontSize: 24, fontWeight: '700', color: COLORS.textWhite, marginBottom: 8 },
+  subtitle: { fontSize: 14, color: COLORS.textGray, marginBottom: 32, lineHeight: 20 },
+  label: { color: COLORS.textLight, fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  input: { width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 16, color: COLORS.textWhite, fontSize: 15, marginBottom: 20 },
   multiline: { height: 100, textAlignVertical: 'top' },
-  submitBtn: { width: '100%', backgroundColor: '#7c3aed', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
-  submitBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  cancelBtn: { width: '100%', borderWidth: 1, borderColor: '#2d3148', borderRadius: 12, padding: 16, alignItems: 'center' },
-  cancelBtnText: { color: '#64748b', fontSize: 16 },
+  submitBtn: { width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
+  submitBtnText: { color: COLORS.navy, fontSize: 16, fontWeight: '700' },
+  cancelBtn: { width: '100%', borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 16, alignItems: 'center' },
+  cancelBtnText: { color: COLORS.textGray, fontSize: 16 },
 });

@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, Animated, Pressable, PanResponder, Image,
 } from 'react-native';
 import { useDownload } from '../context/DownloadContext';
+import { COLORS } from '../constants/theme';
 
 const SHEET_HEIGHT = 400;
 
@@ -114,45 +115,23 @@ export default function GlobalDownloadSheet() {
 
 const styles = StyleSheet.create({
   overlayContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 9999,
-    elevation: 9999,
-    justifyContent: 'flex-end',
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 9999, elevation: 9999, justifyContent: 'flex-end',
   },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  sheet: {
-    backgroundColor: '#1a1d27',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingBottom: 40,
-  },
-  dragHandle: {
-    width: 36,
-    height: 5,
-    backgroundColor: '#4b5563',
-    borderRadius: 3,
-    alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 8,
-  },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
+  sheet: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
+  dragHandle: { width: 36, height: 5, backgroundColor: COLORS.textGray, borderRadius: 3, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   preview: { marginHorizontal: 16, marginBottom: 16, borderRadius: 12, overflow: 'hidden', height: 90 },
   previewImg: { width: '100%', height: '100%' },
   previewOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end', padding: 10 },
-  previewCaption: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  previewCaption: { color: COLORS.textWhite, fontSize: 13, fontWeight: '600' },
   option: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, gap: 16 },
-  optionIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2d3148', alignItems: 'center', justifyContent: 'center' },
+  optionIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.borderDark, alignItems: 'center', justifyContent: 'center' },
   optionEmoji: { fontSize: 20 },
-  optionText: { color: '#fff', fontSize: 16, fontWeight: '500' },
-  cancelOption: { marginTop: 8, borderTopWidth: 1, borderTopColor: '#2d3148', paddingVertical: 16, alignItems: 'center' },
-  cancelText: { color: '#64748b', fontSize: 16, fontWeight: '600' },
+  optionText: { color: COLORS.textWhite, fontSize: 16, fontWeight: '500' },
+  cancelOption: { marginTop: 8, borderTopWidth: 1, borderTopColor: COLORS.borderDark, paddingVertical: 16, alignItems: 'center' },
+  cancelText: { color: COLORS.textGray, fontSize: 16, fontWeight: '600' },
   downloadedOption: { opacity: 0.8 },
-  downloadedIcon: { backgroundColor: '#10b981' },
-  downloadedText: { color: '#10b981', fontWeight: '600' },
+  downloadedIcon: { backgroundColor: COLORS.success },
+  downloadedText: { color: COLORS.success, fontWeight: '600' },
 });

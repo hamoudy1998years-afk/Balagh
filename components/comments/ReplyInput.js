@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { View, TextInput, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { COLORS } from '../../constants/theme';
 
 export default function ReplyInput({
   value,
@@ -58,60 +59,14 @@ export default function ReplyInput({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    backgroundColor: '#fff',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  replyingText: {
-    fontSize: 13,
-    color: '#666',
-  },
-  username: {
-    fontWeight: '600',
-    color: '#333',
-  },
-  cancelBtn: {
-    fontSize: 13,
-    color: '#FE2C55',
-    fontWeight: '600',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  input: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 100,
-    backgroundColor: '#f1f1f2',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#000',
-  },
-  sendBtn: {
-    marginLeft: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#FE2C55',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  disabled: {
-    backgroundColor: '#ddd',
-  },
-  sendIcon: {
-    color: '#fff',
-    fontSize: 14,
-    marginLeft: 2,
-  },
+  container: { paddingHorizontal: 15, paddingVertical: 10, backgroundColor: '#fff' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  replyingText: { fontSize: 13, color: '#666' },
+  username: { fontWeight: '600', color: '#333' },
+  cancelBtn: { fontSize: 13, color: COLORS.gold, fontWeight: '600' },
+  inputRow: { flexDirection: 'row', alignItems: 'center' },
+  input: { flex: 1, minHeight: 40, maxHeight: 100, backgroundColor: '#f1f1f2', borderRadius: 20, paddingHorizontal: 15, paddingVertical: 10, fontSize: 14, color: '#000' },
+  sendBtn: { marginLeft: 10, width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.gold, justifyContent: 'center', alignItems: 'center' },
+  disabled: { backgroundColor: '#ddd' },
+  sendIcon: { color: COLORS.navy, fontSize: 14, marginLeft: 2 },
 });
