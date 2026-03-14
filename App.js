@@ -29,6 +29,7 @@ import React from 'react';
 import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
 import { COLORS } from './constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 
 // ADD THIS IMPORT
 import { UserProvider } from './context/UserContext';
@@ -73,7 +74,7 @@ function ProfileTabIcon({ color, size, focused }) {
           height: size,
           borderRadius: size / 2,
           borderWidth: focused ? 2 : 0,
-          borderColor: '#a78bfa',
+          borderColor: COLORS.gold,
         }}
         onError={() => setImageError(true)}
       />
@@ -108,11 +109,17 @@ function MainTabs({ session }) {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: COLORS.bottomNav,
-          borderTopColor: COLORS.navyLight,
-          height: 57,
-          paddingBottom: 8,
-        },
+        backgroundColor: 'rgba(17,24,39,0.95)',
+        borderTopColor: 'rgba(255,255,255,0.06)',
+        borderTopWidth: 1,
+        marginHorizontal: 12,
+        marginBottom: 12,
+        borderRadius: 22,
+        height: 60,
+        paddingBottom: 8,
+        position: 'absolute',
+        elevation: 0,
+      },
         tabBarActiveTintColor: COLORS.bottomNavActive,
         tabBarInactiveTintColor: COLORS.bottomNavInactive,
       }}
@@ -121,8 +128,8 @@ function MainTabs({ session }) {
         name="Home"
         component={HomeScreen}
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Text style={{ fontSize: size, color: color }}>🏠</Text>
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={size} color={color} />
           ),
         }}
         listeners={{
@@ -137,8 +144,8 @@ function MainTabs({ session }) {
         name="Upload/Live"
         component={UploadScreen}
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Text style={{ fontSize: size, color: color }}>➕</Text>
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'add-circle' : 'add-circle-outline'} size={size} color={color} />
           ),
           tabBarButton: (props) => (
             <TouchableOpacity
@@ -158,8 +165,8 @@ function MainTabs({ session }) {
         name="Notifications"
         component={NotificationsScreen}
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <Text style={{ fontSize: size, color: color }}>🔔</Text>
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={size} color={color} />
           ),
           tabBarButton: (props) => (
             <TouchableOpacity
