@@ -8,6 +8,7 @@ import {
   useWindowDimensions, Animated, Pressable, Alert, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { s, ms, screen } from '../utils/responsive';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import AnimatedButton from './AnimatedButton';
@@ -293,7 +294,7 @@ export default function VideoCard({
           <AnimatedButton onPress={() => navigation.navigate('UserProfile', { profileUserId: item.user_id })}>
             <View style={[styles.creatorAvatar, followed && styles.creatorAvatarFollowed]}>
               {avatarUrl
-                ? <Image source={{ uri: avatarUrl }} style={{ width: 48, height: 48, borderRadius: 24 }} />
+                ? <Image source={{ uri: avatarUrl }} style={{ width: s(48), height: s(48), borderRadius: s(24) }} />
                 : <Text style={styles.creatorAvatarText}>{avatarLetter}</Text>
               }
             </View>
@@ -334,20 +335,20 @@ const styles = StyleSheet.create({
   video: { width: '100%', height: '100%', position: 'absolute' },
   tapArea: { position: 'absolute', top: 0, left: 0, right: 80, bottom: 0, zIndex: 1 },
   heartOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' },
-  heartIcon: { fontSize: 100, opacity: 0.9 },
-  overlay: { position: 'absolute', bottom: 80, left: 16, right: 80 },
-  username: { color: '#ffffff', fontWeight: '700', fontSize: 15, marginBottom: 4 },
-  caption: { color: '#e2e8f0', fontSize: 13, lineHeight: 18, marginBottom: 4 },
+  heartIcon: { fontSize: ms(80), opacity: 0.9 },
+  overlay: { position: 'absolute', bottom: s(80), left: s(16), right: s(80) },
+  username: { color: '#ffffff', fontWeight: '700', fontSize: ms(15), marginBottom: 4 },
+  caption: { color: '#e2e8f0', fontSize: ms(13), lineHeight: ms(18), marginBottom: 4 },
   hashtagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
-  hashtag: { color: '#a78bfa', fontSize: 13, fontWeight: '600' },
-  actions: { position: 'absolute', right: 12, bottom: 100, alignItems: 'center' },
+  hashtag: { color: '#a78bfa', fontSize: ms(13), fontWeight: '600' },
+  actions: { position: 'absolute', right: s(12), bottom: s(100), alignItems: 'center' },
   actionBtn: { alignItems: 'center', marginBottom: 20 },
-  actionIcon: { fontSize: 32 },
-  actionCount: { color: '#fff', fontSize: 11, textAlign: 'center', marginTop: 2 },
+  actionIcon: { fontSize: ms(32) },
+  actionCount: { color: '#fff', fontSize: ms(11), textAlign: 'center', marginTop: 2 },
   creatorContainer: { alignItems: 'center', marginBottom: 24 },
-  creatorAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
+  creatorAvatar: { width: s(52), height: s(52), borderRadius: s(26), backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
   creatorAvatarFollowed: { borderColor: '#a78bfa', borderWidth: 2 },
-  creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: 20 },
+  creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: ms(20) },
   followBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#ff2d55', alignItems: 'center', justifyContent: 'center', marginTop: -11, borderWidth: 1.5, borderColor: '#0f0f0f' },
   followedBadge: { backgroundColor: '#10b981' },
   followBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800', lineHeight: 14 },
