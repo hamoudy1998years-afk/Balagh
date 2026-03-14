@@ -1,5 +1,5 @@
 import Video from 'react-native-video';
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
@@ -14,7 +14,7 @@ import AnimatedButton from './AnimatedButton';
 
 const downloadedVideoIds = new Set();
 
-function DownloadProgressOverlay({ visible, progress }) {
+const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress }) {
   if (!visible) return null;
   const pct = Math.round(progress * 100);
   return (
@@ -28,7 +28,7 @@ function DownloadProgressOverlay({ visible, progress }) {
       </View>
     </View>
   );
-}
+});
 
 // ── FIX: Accept username + avatarUrl as props — no DB fetch needed per card ───
 export default function VideoCard({
@@ -57,7 +57,7 @@ export default function VideoCard({
   const username = usernameProp ?? 'user';
   const avatarUrl = avatarUrlProp ?? null;
 
-  function requireAuth() {
+  const requireAuth = useCallback(() => {
     if (!currentUserId) {
       Alert.alert(
         'Join Bushrann',
@@ -70,7 +70,7 @@ export default function VideoCard({
       return false;
     }
     return true;
-  }
+  }, [currentUserId, navigation]);
 
   const lastTap = useRef(null);
   const tapTimer = useRef(null);
@@ -111,7 +111,7 @@ export default function VideoCard({
     });
   }, []);
 
-  async function handleLike() {
+  const handleLike = useCallback(async () => {
     if (!requireAuth()) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -122,9 +122,9 @@ export default function VideoCard({
       setLiked(true); setLikeCount(prev => prev + 1);
       await supabase.from('likes').insert({ user_id: user.id, video_id: item.id });
     }
-  }
+  }, [liked, item, requireAuth]);
 
-  async function handleFollow() {
+  const handleFollow = useCallback(async () => {
     if (!requireAuth()) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || user.id === item.user_id) return;
@@ -136,9 +136,10 @@ export default function VideoCard({
     } else {
       await supabase.from('follows').insert({ follower_id: user.id, following_id: item.user_id });
     }
-  }
+  }, [followed, item, onFollowChange, requireAuth]);
 
-  function handleTap() {
+
+  const handleTap = useCallback(() => {
     const now = Date.now();
     if (lastTap.current && now - lastTap.current < 300) {
       clearTimeout(tapTimer.current);
@@ -159,9 +160,9 @@ export default function VideoCard({
         lastTap.current = null;
       }, 300);
     }
-  }
+  }, [handleLike]);
 
-  function handleLongPress() {
+  const handleLongPress = useCallback(() => {
     showVideoOptionsSheet(
       item,
       false,
@@ -172,9 +173,9 @@ export default function VideoCard({
         onDelete: null,
       }
     );
-  }
+  }, [showVideoOptionsSheet, item, hasDownloaded]);
 
-  async function handleDownloadVideo() {
+  const handleDownloadVideo = useCallback(async () => {
     if (downloadedVideoIds.has(item.id)) return;
 
     try {
@@ -216,11 +217,11 @@ export default function VideoCard({
       Alert.alert('Error', 'Could not download the video. Please try again.');
       console.error('Download error:', e);
     }
-  }
+  }, [item]);
 
-  async function handleShare() {
+  const handleShare = useCallback(async () => {
     await Share.share({ message: `Watch "${item.caption}" on Balagh! ☪️` });
-  }
+  }, [item]);
 
   const avatarLetter = username[0]?.toUpperCase() ?? '?';
   const hashtags = item.caption?.match(/#\w+/g) ?? [];
