@@ -28,6 +28,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import { LoginManager, AccessToken } from 'react-native-fbsdk-next';
 import { COLORS } from '../constants/theme';
+import { s, ms } from '../utils/responsive';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -772,13 +773,13 @@ const styles = StyleSheet.create({
   pinError: { color: '#ff4444', marginBottom: 15, fontSize: 14 },
   keypad: {
     flexDirection: 'row', flexWrap: 'wrap',
-    justifyContent: 'center', width: 240, gap: 10, marginBottom: 20,
+    justifyContent: 'center', width: s(240), gap: 10, marginBottom: 20,
   },
   keypadButton: {
-    width: 70, height: 70, borderRadius: 35,
+    width: s(70), height: s(70), borderRadius: s(35),
     backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center',
   },
-  keypadButtonText: { fontSize: 24, color: '#333', fontWeight: '600' },
+  keypadButtonText: { fontSize: ms(24), color: '#333', fontWeight: '600' },
   cancelButton: { paddingVertical: 12, paddingHorizontal: 30 },
   cancelButtonText: { color: '#666', fontSize: 16 },
   accountModalOverlay: {

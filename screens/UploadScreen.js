@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
@@ -10,6 +11,7 @@ import { COLORS } from '../constants/theme';
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
 export default function UploadScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [video, setVideo]         = useState(null);
   const [caption, setCaption]     = useState('');
   const [category, setCategory]   = useState('');
@@ -35,7 +37,7 @@ export default function UploadScreen({ navigation }) {
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => {
       setTimeout(() => {
-        scrollRef.current?.scrollTo({ y: inputWrapperY.current - 345, animated: true });
+        scrollRef.current?.scrollTo({ y: inputWrapperY.current - 345 + insets.top, animated: true });
       }, 100);
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
@@ -152,7 +154,7 @@ export default function UploadScreen({ navigation }) {
 
   if (showLiveSetup) {
     return (
-      <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]}>
         <Text style={styles.title}>🔴 Go Live</Text>
         <Text style={styles.subtitle}>Set up your live stream</Text>
 
@@ -193,7 +195,7 @@ export default function UploadScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Upload Video</Text>
       <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
 
@@ -287,7 +289,7 @@ export default function UploadScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container:              { flex: 1, backgroundColor: '#ffffff' },
-  content: { padding: 24, paddingTop: 60 },
+  content: { padding: 24 },
   title:                  { fontSize: 24, fontWeight: '700', color: '#111111', marginBottom: 4 },
   subtitle:               { fontSize: 14, color: '#888888', marginBottom: 28 },
   hint:                   { color: '#888888', fontSize: 12, marginBottom: 10 },

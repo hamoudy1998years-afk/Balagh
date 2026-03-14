@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator } from 'react-native';
 import { useState, useRef, useCallback } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
@@ -8,6 +9,7 @@ import { COLORS } from '../constants/theme';
 const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
 export default function SearchScreen() {
+  const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -60,7 +62,7 @@ export default function SearchScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Search</Text>
+      <Text style={[styles.title, { paddingTop: insets.top + 16 }]}>Search</Text>
 
       <View style={styles.searchBar}>
         <Text style={styles.searchIcon}>🔍</Text>
@@ -119,7 +121,7 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#ffffff', paddingTop: 60 },
+  container: { flex: 1, backgroundColor: '#ffffff' },
   title: { fontSize: 24, fontWeight: '700', color: '#111111', paddingHorizontal: 16, marginBottom: 16 },
   searchBar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', borderRadius: 12, marginHorizontal: 16, paddingHorizontal: 12, marginBottom: 16, borderWidth: 0.5, borderColor: '#e5e5e5' },
   searchIcon: { fontSize: 16, marginRight: 8 },
