@@ -36,7 +36,7 @@ function LiveFeed({ navigation }) {
 
   useEffect(() => {
     loadStreams();
-    const interval = setInterval(loadStreams, 5000);
+    const interval = setInterval(loadStreams, 15000);
     const channel = supabase
       .channel('live_streams_home')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => loadStreams())
@@ -420,7 +420,7 @@ export default function HomeScreen({ navigation }) {
     }
   }, [navigation]);
 
-  const renderTabBar = (props) => {
+  const renderTabBar = useCallback((props) => {
     const { navigationState, position } = props;
     return (
       <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 10, paddingHorizontal: 16 }}>
@@ -465,7 +465,7 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
     );
-  };
+  }, [insets.top, index]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
@@ -475,7 +475,7 @@ export default function HomeScreen({ navigation }) {
         renderTabBar={renderTabBar}
         onIndexChange={handleIndexChange}
         initialLayout={{ width }}
-        lazy={false}
+        lazy={true}
         swipeEnabled={true}
         animationEnabled={true}
         tabBarPosition="top"
