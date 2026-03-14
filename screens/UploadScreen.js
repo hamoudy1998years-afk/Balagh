@@ -46,7 +46,7 @@ export default function UploadScreen({ navigation }) {
 
   useEffect(() => { checkIfScholarInstant(); }, []);
 
-  async function checkIfScholarInstant() {
+  const checkIfScholarInstant = useCallback(async () => {
     const cached = await userCache.get();
     if (cached?.is_scholar !== undefined) {
       setIsScholar(cached.is_scholar);
@@ -57,9 +57,9 @@ export default function UploadScreen({ navigation }) {
     const { data } = await supabase.from('profiles').select('is_scholar').eq('id', user.id).single();
     setIsScholar(data?.is_scholar ?? false);
     setScholarChecked(true);
-  }
+  }, []);
 
-  async function pickVideo() {
+  const pickVideo = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert(
@@ -75,9 +75,9 @@ export default function UploadScreen({ navigation }) {
       quality: 1,
     });
     if (!result.canceled) setVideo(result.assets[0]);
-  }
+  }, []);
 
-  async function uploadVideo() {
+  const uploadVideo = useCallback(async () => {
     if (!video)          { Alert.alert('No video', 'Please pick a video first.'); return; }
     if (!caption.trim()) { Alert.alert('No caption', 'Please add a caption.'); return; }
     if (!category)       { Alert.alert('No category', 'Please select a category.'); return; }
@@ -139,16 +139,16 @@ export default function UploadScreen({ navigation }) {
       console.error('Upload error:', error);
       Alert.alert('Upload failed', error.message);
     }
-  }
+  }, [video, caption, category]);
 
-  function handleGoLive() { setShowLiveSetup(true); }
+  const handleGoLive = useCallback(() => { setShowLiveSetup(true); }, []);
 
-  function startLiveStream() {
+  const startLiveStream = useCallback(() => {
     if (!liveTitle.trim()) { Alert.alert('Title required', 'Please enter a title for your live stream.'); return; }
     const max = parseInt(maxQuestions) || 5;
     setShowLiveSetup(false); setLiveTitle(''); setMaxQuestions('5');
     navigation.navigate('LiveStream', { title: liveTitle.trim(), maxQuestions: max });
-  }
+  }, [liveTitle, maxQuestions, navigation]);
 
   if (showLiveSetup) {
     return (
