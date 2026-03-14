@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,6 +29,17 @@ export default function UploadScreen({ navigation }) {
       scrollRef.current?.scrollTo({ y: 0, animated: false });
     }, [])
   );
+
+  const inputWrapperY = useRef(0);
+
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: inputWrapperY.current - 345, animated: true });
+      }, 100);
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => { checkIfScholarInstant(); }, []);
 
@@ -178,7 +189,8 @@ export default function UploadScreen({ navigation }) {
   }
 
   return (
-    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.content}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <Text style={styles.title}>Upload Video</Text>
       <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
 
@@ -210,17 +222,19 @@ export default function UploadScreen({ navigation }) {
       </AnimatedButton>
 
       <Text style={styles.label}>Caption</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="What is this video about?"
-        placeholderTextColor="#aaaaaa"
-        value={caption}
-        onChangeText={setCaption}
-        multiline
-        maxLength={200}
-        editable={!uploading}
-      />
-      <Text style={styles.charCount}>{caption.length}/200</Text>
+      <View style={styles.inputWrapper} onLayout={(e) => { inputWrapperY.current = e.nativeEvent.layout.y; }}>
+        <TextInput
+          style={styles.input}
+          placeholder="What is this video about?"
+          placeholderTextColor="#aaaaaa"
+          value={caption}
+          onChangeText={setCaption}
+          multiline
+          maxLength={200}
+          editable={!uploading}
+        />
+        <Text style={styles.charCount}>{caption.length}/200</Text>
+      </View>
 
       <Text style={styles.label}>Category</Text>
       <View style={styles.categories}>
@@ -264,12 +278,13 @@ export default function UploadScreen({ navigation }) {
         </View>
       )}
     </ScrollView>
+  </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container:              { flex: 1, backgroundColor: '#ffffff' },
-  content:                { padding: 24, paddingTop: 60 },
+  content: { padding: 24, paddingTop: 60 },
   title:                  { fontSize: 24, fontWeight: '700', color: '#111111', marginBottom: 4 },
   subtitle:               { fontSize: 14, color: '#888888', marginBottom: 28 },
   hint:                   { color: '#888888', fontSize: 12, marginBottom: 10 },
@@ -290,7 +305,8 @@ const styles = StyleSheet.create({
   tapToChange:            { color: '#aaaaaa', fontSize: 12 },
   label:                  { color: '#888888', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
   input:                  { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 12, padding: 16, color: '#111111', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
-  charCount:              { color: '#aaaaaa', fontSize: 12, textAlign: 'right', marginTop: 4, marginBottom: 20 },
+  inputWrapper: { marginBottom: 20 },
+  charCount: { color: '#aaaaaa', fontSize: 12, textAlign: 'right', marginTop: 4 },
   categories:             { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 32 },
   categoryChip:           { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   categoryChipActive:     { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
