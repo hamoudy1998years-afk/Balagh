@@ -12,6 +12,7 @@ export default function SearchScreen() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const flatListRef = useRef(null);
   const searchTimeout = useRef(null);
   const renderResultItem = useCallback(({ item }) => (
     <View style={styles.resultCard}>
