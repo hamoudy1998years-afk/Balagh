@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { userCache } from '../utils/userCache';
@@ -74,7 +75,8 @@ export default function UploadScreen({ navigation }) {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
       allowsEditing: false,
-      quality: 1,
+      quality: 0.8,
+      videoExportPreset: ImagePicker.VideoExportPreset.MediumQuality,
     });
     if (!result.canceled) setVideo(result.assets[0]);
   }, []);
@@ -83,6 +85,13 @@ export default function UploadScreen({ navigation }) {
     if (!video)          { Alert.alert('No video', 'Please pick a video first.'); return; }
     if (!caption.trim()) { Alert.alert('No caption', 'Please add a caption.'); return; }
     if (!category)       { Alert.alert('No category', 'Please select a category.'); return; }
+
+  // Content moderation check
+  const forbiddenWords = ['spam', 'hate', 'kill', 'sex', 'porn', 'die', 'terrorist', 'bomb'];
+  if (forbiddenWords.some(word => caption.toLowerCase().includes(word))) {
+    Alert.alert('Content Blocked', 'Inappropriate content detected. Please revise your caption.');
+    return;
+  }
 
     setUploading(true);
     setProgressPercent(0);
@@ -122,13 +131,29 @@ export default function UploadScreen({ navigation }) {
         xhr.send(formData);
       });
 
+      // Generate thumbnail
+      let thumbnailUrl = null;
+      try {
+        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(video.uri, { time: 1000 });
+        const thumbName = `${user.id}/${Date.now()}_thumb.jpg`;
+        const thumbForm = new FormData();
+        thumbForm.append('', { uri: thumbUri, type: 'image/jpeg', name: 'thumb.jpg' });
+        
+        await fetch(`${SUPABASE_URL}/storage/v1/object/thumbnails/${thumbName}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${session.access_token}`, 'x-upsert': 'false' },
+          body: thumbForm,
+        });
+        thumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/thumbnails/${thumbName}`;
+      } catch (e) { console.log('Thumb failed:', e); }
+
       const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${fileName}`;
       setProgressPercent(100);
       setProgressLabel('Saving...');
 
       const { error: dbError } = await supabase.from('videos').insert({
         user_id: user.id, caption: caption.trim(), category,
-        video_url: publicUrl, thumbnail_url: null,
+        video_url: publicUrl, thumbnail_url: thumbnailUrl,
       });
       if (dbError) throw dbError;
 

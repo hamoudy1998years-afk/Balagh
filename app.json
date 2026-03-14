@@ -3,7 +3,13 @@
     "name": "Bushrann",
     "slug": "Balagh",
     "scheme": "bushrann",
+    "deepLinking": true,
     "version": "1.0.0",
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/your-project-id"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,7 +21,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "facebookAppId": "26245191448425849",
+      "associatedDomains": ["applinks:bushrann.app"],
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Bushrann to access your photos to update your profile picture.",
         "NSPhotoLibraryAddUsageDescription": "Allow Bushrann to save videos to your photo library.",
@@ -32,7 +38,16 @@
         "backgroundColor": "#1e4fa3"
       },
       "package": "com.bushrann.app",
-      "facebookAppId": "26245191448425849",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            { "scheme": "https", "host": "bushrann.app", "pathPrefix": "/video" },
+            { "scheme": "bushrann", "host": "*" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
@@ -70,12 +85,22 @@
         }
       ],
       "expo-web-browser",
-      "react-native-video"
+      "react-native-video",
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "YOUR_APP_ID_HERE",
+          "clientToken": "YOUR_CLIENT_TOKEN_HERE",
+          "displayName": "Bushrann"
+        }
+      ]
     ],
     "extra": {
       "eas": {
         "projectId": "5804d13c-1244-4972-8b7a-083f99fbb885"
-      }
+      },
+      "privacyPolicyUrl": "https://bushrann.app/privacy",
+      "supportUrl": "mailto:support@bushrann.app"
     }
   }
 }

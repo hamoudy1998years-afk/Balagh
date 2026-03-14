@@ -193,9 +193,6 @@ export default function CommentsModal({
       enablePanDownToClose={true}
       enableContentPanningGesture={true}
       // Disable built-in keyboard handling — we manage it manually below
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
       backdropComponent={() => <CustomBackdrop onClose={closeModal} />}
       handleIndicatorStyle={styles.dragHandle}
       backgroundStyle={styles.sheetBackground}

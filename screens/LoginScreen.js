@@ -69,7 +69,6 @@ export default function LoginScreen({ navigation }) {
 
   useEffect(() => {
     (async () => {
-      await AsyncStorage.clear();
       const available = await isBiometricAvailable();
       if (available) {
         const types = await LocalAuthentication.supportedAuthenticationTypesAsync();

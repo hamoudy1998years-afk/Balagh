@@ -8,6 +8,7 @@ import {
   useWindowDimensions, Animated, Pressable, Alert, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 import { s, ms, screen } from '../utils/responsive';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -121,6 +122,7 @@ export default function VideoCard({
       await supabase.from('likes').delete().eq('user_id', user.id).eq('video_id', item.id);
     } else {
       setLiked(true); setLikeCount(prev => prev + 1);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await supabase.from('likes').insert({ user_id: user.id, video_id: item.id });
     }
   }, [liked, item, requireAuth]);
