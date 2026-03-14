@@ -12,7 +12,19 @@ export default function SearchScreen() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const flatListRef = useRef(null);
+  const searchTimeout = useRef(null);
+  const renderResultItem = useCallback(({ item }) => (
+    <View style={styles.resultCard}>
+      <View style={styles.resultThumbnail}><Text style={styles.resultThumbnailIcon}>🎬</Text></View>
+      <View style={styles.resultInfo}>
+        <Text style={styles.resultCaption} numberOfLines={2}>{item.caption}</Text>
+        <View style={styles.resultMeta}>
+          <View style={styles.categoryTag}><Text style={styles.categoryTagText}>{item.category}</Text></View>
+          <Text style={styles.resultViews}>{item.views_count ?? 0} views</Text>
+        </View>
+      </View>
+    </View>
+  ), []);
 
   useFocusEffect(
     useCallback(() => {
@@ -20,16 +32,19 @@ export default function SearchScreen() {
     }, [])
   );
 
-  async function handleSearch(text) {
-    setQuery(text);
-    if (text.trim().length < 2) { setResults([]); return; }
-    setLoading(true);
-    const { data } = await supabase.from('videos').select('*').ilike('caption', `%${text}%`).limit(20);
-    setResults(data ?? []);
-    setLoading(false);
-  }
+  const handleSearch = useCallback((text) => {
+      setQuery(text);
+      if (text.trim().length < 2) { setResults([]); return; }
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+      searchTimeout.current = setTimeout(async () => {
+        setLoading(true);
+        const { data } = await supabase.from('videos').select('*').ilike('caption', `%${text}%`).limit(20);
+        setResults(data ?? []);
+        setLoading(false);
+      }, 400);
+    }, [selectedCategory]);
 
-  async function handleCategory(cat) {
+  const handleCategory = useCallback(async (cat) => {
     setSelectedCategory(cat);
     setLoading(true);
     if (cat === 'All') {
@@ -40,7 +55,7 @@ export default function SearchScreen() {
       setResults(data ?? []);
     }
     setLoading(false);
-  }
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -92,18 +107,10 @@ export default function SearchScreen() {
           data={results}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.resultsList}
-          renderItem={({ item }) => (
-            <View style={styles.resultCard}>
-              <View style={styles.resultThumbnail}><Text style={styles.resultThumbnailIcon}>🎬</Text></View>
-              <View style={styles.resultInfo}>
-                <Text style={styles.resultCaption} numberOfLines={2}>{item.caption}</Text>
-                <View style={styles.resultMeta}>
-                  <View style={styles.categoryTag}><Text style={styles.categoryTagText}>{item.category}</Text></View>
-                  <Text style={styles.resultViews}>{item.views_count ?? 0} views</Text>
-                </View>
-              </View>
-            </View>
-          )}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          renderItem={renderResultItem}
         />
       )}
     </View>
