@@ -106,23 +106,24 @@ function MainTabs({ session }) {
 
  return (
     <Tab.Navigator
-      screenOptions={{
+      screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
-        backgroundColor: 'rgba(17,24,39,0.95)',
-        borderTopColor: 'rgba(255,255,255,0.06)',
-        borderTopWidth: 1,
-        marginHorizontal: 12,
-        marginBottom: 12,
-        borderRadius: 22,
-        height: 60,
-        paddingBottom: 8,
-        position: 'absolute',
-        elevation: 0,
-      },
+          backgroundColor: 'rgba(17,24,39,0.95)',
+          borderTopColor: 'rgba(255,255,255,0.06)',
+          borderTopWidth: 1,
+          marginHorizontal: 12,
+          marginBottom: 12,
+          borderRadius: 22,
+          height: 60,
+          paddingBottom: 8,
+          position: 'absolute',
+          elevation: 0,
+          display: route.name === 'Profile' ? 'none' : 'flex',
+        },
         tabBarActiveTintColor: COLORS.bottomNavActive,
         tabBarInactiveTintColor: COLORS.bottomNavInactive,
-      }}
+      })}
     >
       <Tab.Screen
         name="Home"
