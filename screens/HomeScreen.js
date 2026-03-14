@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Dimensions, Animated, RefreshControl, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { TabView } from 'react-native-tab-view';
 import { useIsFocused } from '@react-navigation/native';
@@ -11,8 +11,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import LiveVideoCard from '../components/LiveVideoCard';
 import { useVideoPlayerPool } from '../components/VideoPlayerPool';
 import { COLORS } from '../constants/theme';
-
-const { width, height } = Dimensions.get('window');
 
 // ── Simple in-memory feed cache ────────────────────────────────────────────────
 const feedCache = {
@@ -30,6 +28,8 @@ function isCacheValid(key) {
 
 // ── Live Streams Feed ──────────────────────────────────────────────────────────
 function LiveFeed({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const [streams, setStreams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -85,7 +85,7 @@ function LiveFeed({ navigation }) {
         data={streams}
         numColumns={2}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: 4, paddingTop: 80 }}
+        contentContainerStyle={{ padding: 4, paddingTop: insets.top + 60 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadStreams} tintColor="#ef4444" />}
         renderItem={({ item }) => (
           <View style={{ width: width / 2 - 8, margin: 4 }}>
@@ -106,6 +106,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [loading, setLoading] = useState(() => !feedCache[type]);
   const [refreshing, setRefreshing] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const { width, height } = useWindowDimensions();
   const [listHeight, setListHeight] = useState(height);
   const [myLikes, setMyLikes] = useState(() => feedCache.likes ?? []);
   const [myFollows, setMyFollows] = useState(() => feedCache.follows ?? []);
@@ -361,6 +362,7 @@ export default function HomeScreen({ navigation }) {
     { key: 'live', title: '🔴 Live' },
   ]);
 
+  const { width: screenWidth } = useWindowDimensions();
   const isFocused = useIsFocused();
   const followingRef = useRef(null);
   const foryouRef = useRef(null);
@@ -474,7 +476,7 @@ export default function HomeScreen({ navigation }) {
         renderScene={renderScene}
         renderTabBar={renderTabBar}
         onIndexChange={handleIndexChange}
-        initialLayout={{ width }}
+        initialLayout={{ width: screenWidth }}
         lazy={true}
         swipeEnabled={true}
         animationEnabled={true}
