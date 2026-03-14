@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 
-function NotificationItem({ item, onDelete, onMarkRead }) {
+const NotificationItem = React.memo(function NotificationItem({ item, onDelete, onMarkRead }) {
   const translateX    = useRef(new Animated.Value(0)).current;
   const deleteOpacity = useRef(new Animated.Value(0)).current;
   const rowScale      = useRef(new Animated.Value(1)).current;
@@ -112,7 +112,7 @@ function NotificationItem({ item, onDelete, onMarkRead }) {
       </Animated.View>
     </Animated.View>
   );
-}
+});
 
 export default function NotificationsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -121,6 +121,20 @@ export default function NotificationsScreen({ navigation }) {
   const [refreshing,    setRefreshing]    = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
   const flatListRef = useRef(null);
+
+  const handleDelete = useCallback(async (id) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+    await supabase.from('notifications').delete().eq('id', id);
+  }, []);
+
+  const handleMarkRead = useCallback(async (id) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+  }, []);
+
+  const renderNotificationItem = useCallback(({ item }) => (
+    <NotificationItem item={item} onDelete={handleDelete} onMarkRead={handleMarkRead} navigation={navigation} />
+  ), [handleDelete, handleMarkRead, navigation]);
 
   useFocusEffect(
     useCallback(() => {
@@ -134,7 +148,7 @@ export default function NotificationsScreen({ navigation }) {
 
   useEffect(() => { if (currentUserId) loadNotifications(); }, [currentUserId]);
 
-  const loadNotifications = async () => {
+  const loadNotifications = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('notifications')
@@ -149,26 +163,20 @@ export default function NotificationsScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUserId]);
 
-  const onRefresh = async () => { setRefreshing(true); await loadNotifications(); setRefreshing(false); };
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadNotifications();
+    setRefreshing(false);
+  }, [loadNotifications]);
 
-  const handleDelete = useCallback(async (id) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-    await supabase.from('notifications').delete().eq('id', id);
-  }, []);
-
-  const handleMarkRead = useCallback(async (id) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
-  }, []);
-
-  const handleMarkAllRead = async () => {
+  const handleMarkAllRead = useCallback(async () => {
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUserId);
-  };
+  }, [currentUserId]);
 
-  const handleDeleteAll = () => {
+  const handleDeleteAll = useCallback(() => {
     Alert.alert('Clear All Notifications', 'Are you sure you want to delete all notifications?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear All', style: 'destructive', onPress: async () => {
@@ -176,7 +184,7 @@ export default function NotificationsScreen({ navigation }) {
         await supabase.from('notifications').delete().eq('user_id', currentUserId);
       }},
     ]);
-  };
+  }, [currentUserId]);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
@@ -230,12 +238,13 @@ export default function NotificationsScreen({ navigation }) {
             ref={flatListRef}
             data={notifications}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <NotificationItem item={item} onDelete={handleDelete} onMarkRead={handleMarkRead} navigation={navigation} />
-            )}
+            renderItem={renderNotificationItem}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} colors={[COLORS.gold]} />}
             showsVerticalScrollIndicator={false}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={10}
+            windowSize={5}
             contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
           />
         )}
