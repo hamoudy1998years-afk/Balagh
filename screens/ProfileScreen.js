@@ -3,7 +3,7 @@ import {
   Image, Dimensions, Modal, Alert,
   StatusBar, RefreshControl, Animated, Pressable, PanResponder,
 } from 'react-native';
-import { useState, useEffect as useEffectHook, useCallback, useRef } from 'react';
+import React, { useState, useEffect as useEffectHook, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,7 +27,7 @@ function formatCount(n) {
   return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
 }
 
-function Avatar({ uri, username, size = 90, onPress }) {
+const Avatar = React.memo(function Avatar({ uri, username, size = 90, onPress }) {
   const letter = username?.[0]?.toUpperCase() ?? '?';
   return (
     <AnimatedButton onPress={onPress}>
@@ -40,9 +40,9 @@ function Avatar({ uri, username, size = 90, onPress }) {
       )}
     </AnimatedButton>
   );
-}
+});
 
-function VideoGridItem({ item, onPress, onLongPress }) {
+const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongPress }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   function handleLongPress() {
@@ -62,7 +62,7 @@ function VideoGridItem({ item, onPress, onLongPress }) {
       </AnimatedButton>
     </Animated.View>
   );
-}
+});
 
 function DownloadProgressOverlay({ visible, progress }) {
   if (!visible) return null;
@@ -174,7 +174,6 @@ export default function ProfileScreen({ route, navigation }) {
       Promise.all([
         loadProfile(viewingId),
         loadVideos(viewingId, ownProfile),
-        checkScholarStatus(viewingId)
       ]);
 
       if (!ownProfile) {
@@ -201,7 +200,6 @@ export default function ProfileScreen({ route, navigation }) {
         Promise.all([
           loadProfile(viewingId),
           loadVideos(viewingId, ownProfile),
-          checkScholarStatus(viewingId)
         ]);
       }
     }
@@ -211,6 +209,7 @@ export default function ProfileScreen({ route, navigation }) {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (data) {
       setProfile(data);
+      checkScholarStatus(userId, data.is_scholar);
       const [{ count: frsCount }, { count: fngCount }] = await Promise.all([
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId),
@@ -236,9 +235,8 @@ export default function ProfileScreen({ route, navigation }) {
     setLikedVideos(data?.map(l => l.videos).filter(Boolean) ?? []);
   }
 
-  async function checkScholarStatus(userId) {
-    const { data: profileData } = await supabase.from('profiles').select('is_scholar').eq('id', userId).single();
-    const scholar = profileData?.is_scholar === true;
+  async function checkScholarStatus(userId, isScholarValue) {
+    const scholar = isScholarValue === true;
     setIsScholar(scholar);
     if (scholar) {
       const { data: scholarInfo } = await supabase.from('scholar_applications').select('*')
@@ -355,7 +353,7 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }
 
-  function handleLongPress(video) {
+  const handleLongPress = useCallback((video) => {
     if (!showVideoOptionsSheet) return;
     const hasDownloaded = downloadedVideoIds.has(video.id);
     showVideoOptionsSheet(video, isOwnProfile, hasDownloaded, {
@@ -363,12 +361,12 @@ export default function ProfileScreen({ route, navigation }) {
       onDelete: handleDeleteVideo,
       onDownload: handleDownloadVideo,
     });
-  }
+  }, [showVideoOptionsSheet, isOwnProfile]);
 
   const onRefresh = useCallback(async () => { setRefreshing(true); await init(); setRefreshing(false); }, []);
-  const openVideo = (videos, index) => navigation.navigate('ProfileVideos', { videos, startIndex: index });
+  const openVideo = useCallback((videos, index) => navigation.navigate('ProfileVideos', { videos, startIndex: index }), [navigation]);
 
-  const renderHeader = () => (
+  const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
       <View style={styles.avatarSection}>
         <Avatar
@@ -494,7 +492,7 @@ export default function ProfileScreen({ route, navigation }) {
         </AnimatedButton>
       </View>
     </View>
-  );
+  ), [profile, isScholar, scholarData, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, activeTab, currentUser, targetUserId, navigation]);
 
   const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
 
@@ -534,6 +532,9 @@ export default function ProfileScreen({ route, navigation }) {
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 20, paddingTop: insets.top + 50 }}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={6}
+        windowSize={5}
       />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
