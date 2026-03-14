@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import AnimatedButton from './AnimatedButton';
+import { COLORS } from '../constants/theme';
 
 export default function SignupScreen({ navigation }) {
   const [username, setUsername] = useState('');
@@ -72,18 +73,45 @@ export default function SignupScreen({ navigation }) {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
-        <Text style={styles.title}>Balagh</Text>
+        <Text style={styles.title}>Bushrann</Text>
         <Text style={styles.subtitle}>Create your account</Text>
 
-        <TextInput style={styles.input} placeholder="Username *" placeholderTextColor="#4b5563" value={username} onChangeText={setUsername} autoCapitalize="none" autoComplete="off" autoCorrect={false} />
-        <TextInput style={styles.input} placeholder="Email (optional)" placeholderTextColor="#4b5563" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="off" autoCorrect={false} />
-        <TextInput style={styles.input} placeholder="Phone Number (required if no email)" placeholderTextColor="#4b5563" value={phone} onChangeText={setPhone} keyboardType="phone-pad" autoComplete="off" />
+        <TextInput
+          style={styles.input}
+          placeholder="Username *"
+          placeholderTextColor={COLORS.textGray}
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
+          autoComplete="off"
+          autoCorrect={false}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Email (optional)"
+          placeholderTextColor={COLORS.textGray}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="off"
+          autoCorrect={false}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Phone Number (required if no email)"
+          placeholderTextColor={COLORS.textGray}
+          value={phone}
+          onChangeText={setPhone}
+          keyboardType="phone-pad"
+          autoComplete="off"
+        />
 
         <View style={styles.passwordContainer}>
           <TextInput
             style={styles.passwordInput}
             placeholder="Password *"
-            placeholderTextColor="#4b5563"
+            placeholderTextColor={COLORS.textGray}
             value={password}
             onChangeText={setPassword}
             secureTextEntry={!showPassword}
@@ -117,29 +145,30 @@ export default function SignupScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1, backgroundColor: '#0f0f0f', alignItems: 'center',
+    flexGrow: 1, backgroundColor: COLORS.bgDark, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40,
   },
-  arabic: { fontSize: 24, color: '#a78bfa', marginBottom: 8 },
-  title: { fontSize: 36, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
-  subtitle: { fontSize: 14, color: '#64748b', marginBottom: 36 },
+  arabic: { fontSize: 24, color: COLORS.gold, marginBottom: 8 },
+  title: { fontSize: 36, fontWeight: 'bold', color: COLORS.textWhite, marginBottom: 4 },
+  subtitle: { fontSize: 14, color: COLORS.textGray, marginBottom: 36 },
   input: {
-    width: '100%', backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148',
-    borderRadius: 12, padding: 16, color: '#ffffff', fontSize: 15, marginBottom: 14,
+    width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1,
+    borderColor: COLORS.borderDark, borderRadius: 12,
+    padding: 16, color: COLORS.textWhite, fontSize: 15, marginBottom: 14,
   },
   passwordContainer: {
     width: '100%', flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148',
+    backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark,
     borderRadius: 12, paddingHorizontal: 16, marginBottom: 10,
   },
-  passwordInput: { flex: 1, paddingVertical: 16, color: '#ffffff', fontSize: 15 },
+  passwordInput: { flex: 1, paddingVertical: 16, color: COLORS.textWhite, fontSize: 15 },
   eyeBtn: { fontSize: 20, paddingLeft: 8 },
-  helperText: { width: '100%', color: '#4b5563', fontSize: 12, marginBottom: 20, lineHeight: 18 },
+  helperText: { width: '100%', color: COLORS.textGray, fontSize: 12, marginBottom: 20, lineHeight: 18 },
   button: {
-    width: '100%', backgroundColor: '#7c3aed', borderRadius: 12, padding: 16,
+    width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 16,
     alignItems: 'center', marginBottom: 20, minHeight: 52, justifyContent: 'center',
   },
-  buttonText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  link: { color: '#64748b', fontSize: 14 },
-  linkBold: { color: '#a78bfa', fontWeight: '700' },
+  buttonText: { color: COLORS.navy, fontSize: 16, fontWeight: '700' },
+  link: { color: COLORS.textGray, fontSize: 14 },
+  linkBold: { color: COLORS.gold, fontWeight: '700' },
 });
