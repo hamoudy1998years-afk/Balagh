@@ -26,6 +26,17 @@ export default function ApplyScholarScreen({ navigation }) {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); Alert.alert('Error', 'You must be logged in to apply.'); return; }
+
+    const { data: existing } = await supabase
+      .from('scholar_applications')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (existing) {
+      setLoading(false);
+      Alert.alert('Already Applied', 'You have already submitted a scholar application. Please wait for review.');
+      return;
+    }
     const { error } = await supabase.from('scholar_applications').insert({
       user_id: user.id,
       full_name: fullName.trim(),
