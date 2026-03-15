@@ -58,7 +58,14 @@ export default function SignupScreen({ navigation }) {
 
     if (hasPhone && data?.user) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      await supabase.from('profiles').update({ phone: phone.trim() }).eq('id', data.user.id);
+      const { error: phoneError } = await supabase
+        .from('profiles')
+        .update({ phone: phone.trim() })
+        .eq('id', data.user.id);
+      if (phoneError) {
+        console.warn('Phone save failed:', phoneError.message);
+        Alert.alert('Note', 'Account created but phone number could not be saved. You can update it in your profile.');
+      }
     }
 
     await saveAccount(username.trim(), authEmail, 'email');
