@@ -165,6 +165,7 @@ export default function VideoCard({
   }, [handleLike]);
 
   const handleLongPress = useCallback(() => {
+    if (!showVideoOptionsSheet) return;
     showVideoOptionsSheet(
       item,
       false,
