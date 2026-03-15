@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { useViewerTracking } from '../hooks/useViewerTracking';
 import { useViewerCount } from '../hooks/useViewerCount';
+import { COLORS } from '../constants/theme';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
@@ -565,7 +566,7 @@ export default function WatchLiveScreen({ navigation, route }) {
                 <View style={[styles.chatInputRow, { marginBottom: keyboardHeight > 0 ? keyboardHeight : 0 }]}>
                   <TextInput style={styles.chatInput} value={questionInput} onChangeText={setQuestionInput}
                     placeholder="Type your question..." placeholderTextColor="#64748b" multiline maxLength={200} />
-                  <AnimatedButton style={[styles.sendBtn, questionsLeft <= 0 && { backgroundColor: '#4c1d95' }]}
+                  <AnimatedButton style={[styles.sendBtn, questionsLeft <= 0 && { backgroundColor: COLORS.goldDark }]}
                     onPress={submitQuestion} disabled={questionsLeft <= 0}>
                     <Text style={styles.sendBtnText}>Ask</Text>
                   </AnimatedButton>
@@ -597,7 +598,7 @@ const styles = StyleSheet.create({
   timeoutContainer: { ...StyleSheet.absoluteFillObject, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center', gap: 16, zIndex: 5, padding: 32 },
   timeoutTitle:     { color: '#ef4444', fontSize: 20, fontWeight: '700', textAlign: 'center' },
   timeoutText:      { color: '#94a3b8', fontSize: 14, textAlign: 'center', marginBottom: 16 },
-  retryBtn:         { backgroundColor: '#7c3aed', borderRadius: 12, paddingHorizontal: 32, paddingVertical: 14, minWidth: 200, alignItems: 'center' },
+  retryBtn:         { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 32, paddingVertical: 14, minWidth: 200, alignItems: 'center' },
   retryBtnText:     { color: '#fff', fontWeight: '700', fontSize: 16 },
   floatingReaction: { position: 'absolute', fontSize: 32, zIndex: 100 },
   topBar:       { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 8, zIndex: 10 },
@@ -609,19 +610,19 @@ const styles = StyleSheet.create({
   viewerText:   { color: '#fff', fontSize: 13, fontWeight: '600' },
   closeBtn:     { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   closeBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  questionBanner:      { position: 'absolute', top: 100, left: 16, right: 16, backgroundColor: 'rgba(124,58,237,0.9)', borderRadius: 14, padding: 14, zIndex: 20 },
-  questionBannerLabel: { color: '#e9d5ff', fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  questionBanner:      { position: 'absolute', top: 100, left: 16, right: 16, backgroundColor: 'rgba(245,166,35,0.9)', borderRadius: 14, padding: 14, zIndex: 20 },
+  questionBannerLabel: { color: '#fff', fontSize: 12, fontWeight: '700', marginBottom: 4 },
   questionBannerText:  { color: '#fff', fontSize: 15, fontWeight: '600' },
   bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12 },
   tabs:          { flexDirection: 'row', gap: 8, marginBottom: 8 },
   tab:           { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)' },
-  tabActive:     { backgroundColor: '#7c3aed' },
+  tabActive:     { backgroundColor: COLORS.gold },
   tabText:       { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
   tabTextActive: { color: '#fff' },
   chatList:    { maxHeight: height * 0.25, marginBottom: 8 },
   chatMessage: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4 },
   chatUsername: { 
-    color: '#a78bfa', 
+    color: COLORS.gold, 
     fontWeight: '700', 
     fontSize: 13,
     textShadowColor: 'rgba(0,0,0,0.8)',
@@ -637,14 +638,14 @@ const styles = StyleSheet.create({
   },
   chatInputRow:         { flexDirection: 'row', gap: 8, marginBottom: 8 },
   chatInput: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, color: 'rgba(255,255,255,0.9)', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  sendBtn:              { backgroundColor: '#7c3aed', borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
+  sendBtn:              { backgroundColor: COLORS.gold, borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
   sendBtnText:          { color: '#fff', fontWeight: '700', fontSize: 13 },
   questionInputContainer: { marginBottom: 8 },
   questionHint:           { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
   reactionsRow:  { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 8 },
   reactionBtn:   { padding: 8 },
   reactionEmoji: { fontSize: 26 },
-  goBackBtn:     { backgroundColor: '#7c3aed', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12, marginTop: 8 },
+  goBackBtn:     { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12, marginTop: 8 },
   goBackBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   connectingOverlay: {
     position: 'absolute',
