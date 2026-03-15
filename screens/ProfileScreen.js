@@ -250,10 +250,12 @@ export default function ProfileScreen({ route, navigation }) {
     if (!currentUser || isOwnProfile) return;
     if (following) {
       setFollowing(false); setFollowersCount(prev => prev - 1);
-      await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', targetUserId);
+      const { error } = await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', targetUserId);
+      if (error) { setFollowing(true); setFollowersCount(prev => prev + 1); Alert.alert('Error', 'Could not unfollow. Please try again.'); }
     } else {
       setFollowing(true); setFollowersCount(prev => prev + 1);
-      await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: targetUserId });
+      const { error } = await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: targetUserId });
+      if (error) { setFollowing(false); setFollowersCount(prev => prev - 1); Alert.alert('Error', 'Could not follow. Please try again.'); }
     }
   }
 
