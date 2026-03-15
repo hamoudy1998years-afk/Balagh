@@ -24,16 +24,12 @@ import { useBiometricAuth } from './hooks/useBiometricAuth';
 import FollowListScreen from './screens/FollowListScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import AvatarCropScreen from './screens/AvatarCropScreen';
-import VideoDetailScreen from './screens/VideoDetailScreen';
-import { useEffect, useState, useRef } from 'react';
-import { Animated } from 'react-native';
+import { useEffect, useState } from 'react';
 import React from 'react';
 import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
 import { COLORS } from './constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import ErrorBoundary from './components/ErrorBoundary';
 
 // ADD THIS IMPORT
 import { UserProvider } from './context/UserContext';
@@ -88,7 +84,7 @@ function ProfileTabIcon({ color, size, focused }) {
   return <Text style={{ fontSize: size, color: color }}>👤</Text>;
 }
 
-function MainTabs({ session, deepLinkData }) {
+function MainTabs({ session }) {
   const [homeKey, setHomeKey] = useState(0);
   const navigation = useNavigation();
 
@@ -130,7 +126,7 @@ function MainTabs({ session, deepLinkData }) {
     >
       <Tab.Screen
         name="Home"
-        children={() => <HomeScreen deepLinkData={deepLinkData} />}
+        component={HomeScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'home' : 'home-outline'} size={size} color={color} />
@@ -211,9 +207,6 @@ function MainTabs({ session, deepLinkData }) {
 
 export default function App() {
   const [session, setSession] = useState(undefined);
-  const [deepLinkData, setDeepLinkData] = useState(null);
-  const [appReady, setAppReady] = useState(false);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
 
   useEffect(() => {
@@ -231,34 +224,7 @@ export default function App() {
       }
     });
 
-        // Deep link handler
-    const handleDeepLink = (event) => {
-      const url = event.url;
-      if (url.includes('/video/')) {
-        const videoId = url.split('/video/')[1];
-        setDeepLinkData({ type: 'video', id: videoId });
-      }
-    };
-
-    Linking.addEventListener('url', handleDeepLink);
-    Linking.getInitialURL().then((url) => {
-      if (url) handleDeepLink({ url });
-    });
-
-        // Simulate splash fade
-    setTimeout(() => {
-      setAppReady(true);
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }).start();
-    }, 1500);
-
-    return () => {
-      subscription.unsubscribe();
-      // Linking.removeAllListeners('url'); // Removed - not supported in expo-linking
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   if (session === undefined) {
@@ -271,24 +237,16 @@ export default function App() {
 
   return (
     // ADD UserProvider HERE - wraps everything
-        <>
-      <Animated.View style={{ flex: 1, opacity: fadeAnim, backgroundColor: '#0f0f0f', position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }} pointerEvents="none">
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={COLORS.gold} size="large" />
-        </View>
-      </Animated.View>
-      <ErrorBoundary>
     <UserProvider>
       <DownloadProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <SafeAreaProvider>
             <StatusBar style="light" translucent backgroundColor="transparent" />
             <BottomSheetModalProvider>
-              <ErrorBoundary>
-                <NavigationContainer linking={{ prefixes: ['bushrann://', 'https://bushrann.app'] }}>
+              <NavigationContainer>
                 <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
                   <Stack.Screen name="Main">
-                    {() => <MainTabs session={session} deepLinkData={deepLinkData} />}
+                    {() => <MainTabs session={session} />}
                   </Stack.Screen>
                   <Stack.Screen name="Login" component={LoginScreen} />
                   <Stack.Screen name="Signup" component={SignupScreen} />
@@ -303,17 +261,13 @@ export default function App() {
                   <Stack.Screen name="Settings" component={SettingsScreen} />
                   <Stack.Screen name="UserProfile" component={ProfileScreen} />
                   <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
-                  <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
                 </Stack.Navigator>
                 <GlobalVideoOptionsSheet />
-                  </NavigationContainer>
-                </ErrorBoundary>
-              </BottomSheetModalProvider>
+              </NavigationContainer>
+            </BottomSheetModalProvider>
           </SafeAreaProvider>
         </GestureHandlerRootView>
       </DownloadProvider>
-        </UserProvider>
-      </ErrorBoundary>
-    </>
+    </UserProvider>
   );
 }

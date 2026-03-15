@@ -1,14 +1,13 @@
 import Video from 'react-native-video';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import CommentsModal, { useComments } from './CommentsModal';
+import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
   useWindowDimensions, Animated, Pressable, Alert, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 import { s, ms, screen } from '../utils/responsive';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -122,7 +121,6 @@ export default function VideoCard({
       await supabase.from('likes').delete().eq('user_id', user.id).eq('video_id', item.id);
     } else {
       setLiked(true); setLikeCount(prev => prev + 1);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await supabase.from('likes').insert({ user_id: user.id, video_id: item.id });
     }
   }, [liked, item, requireAuth]);
@@ -325,13 +323,7 @@ export default function VideoCard({
         </AnimatedButton>
       </View>
 
-      <CommentsModal 
-        visible={showComments} 
-        onClose={() => setShowComments(false)} 
-        videoId={item.id} 
-        navigation={navigation}
-        isCreator={currentUserId === item.user_id}
-      />
+      <CommentsModal visible={showComments} onClose={() => setShowComments(false)} videoId={item.id} navigation={navigation} />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
     </View>

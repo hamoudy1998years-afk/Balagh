@@ -19,9 +19,9 @@ import { useRecentViewers } from '../hooks/useRecentViewers';
 import { useEngagedViewers } from '../hooks/useEngagedViewers';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import RNFS from 'react-native-fs';
-import { AGORA_APP_ID } from '@env';
 
 const { width, height } = Dimensions.get('window');
+const AGORA_APP_ID = '3be4f80ee12e40708afe7ced6308ef9d';
 
 // 🔧 FIXED: Removed trailing space
 const THUMBNAIL_SERVER_URL = 'https://balagh-server-production.up.railway.app';

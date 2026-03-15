@@ -20,8 +20,7 @@ const feedCache = {
   follows: null,
   ts: {},
 };
-const CACHE_TTL = 60 * 1000;
-const PAGE_SIZE = 10;
+const CACHE_TTL = 60 * 1000; // 1 minute — serve cache, refresh in background
 
 function isCacheValid(key) {
   return feedCache[key] !== null && feedCache.ts[key] && Date.now() - feedCache.ts[key] < CACHE_TTL;
@@ -48,7 +47,7 @@ function LiveFeed({ navigation }) {
     };
   }, []);
 
-  async function loadStreams(isRefreshing = false) {
+  async function loadStreams() {
     const tenSecondsAgo = new Date(Date.now() - 10 * 1000).toISOString();
     const { data } = await supabase
       .from('live_streams')
@@ -56,8 +55,8 @@ function LiveFeed({ navigation }) {
       .eq('is_live', true)
       .gt('last_ping', tenSecondsAgo)
       .order('created_at', { ascending: false });
-    setRefreshing(false);
-    if (!isRefreshing) setLoading(false);
+    setStreams(data ?? []);
+    setLoading(false);
     setRefreshing(false);
   }
 
@@ -87,7 +86,7 @@ function LiveFeed({ navigation }) {
         numColumns={2}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 4, paddingTop: insets.top + 60 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadStreams(true)} tintColor="#ef4444" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadStreams} tintColor="#ef4444" />}
         renderItem={({ item }) => (
           <View style={{ width: width / 2 - 8, margin: 4 }}>
             <LiveVideoCard
@@ -111,8 +110,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [listHeight, setListHeight] = useState(height);
   const [myLikes, setMyLikes] = useState(() => feedCache.likes ?? []);
   const [myFollows, setMyFollows] = useState(() => feedCache.follows ?? []);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
 
   const [isTabActive, setIsTabActive] = useState(
     () => !!(isFocusedRef?.current && activeIndexRef?.current === tabIndex)
@@ -122,15 +119,15 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const playerPool = useVideoPlayerPool();
   const prevIndexRef = useRef(0);
 
+  // ── Imperative handle ──────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     refresh: async () => {
       setActiveIndex(0);
       prevIndexRef.current = -1;
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      // Force fresh fetch, skip cache
       feedCache[type] = null;
       feedCache.ts[type] = null;
-      setPage(0);
-      setHasMore(true);
       loadVideos();
       loadMyInteractions();
     },
@@ -139,6 +136,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     },
   }));
 
+  // ── Load first video when videos array arrives ─────────────────────────────
   useEffect(() => {
     if (videos.length === 0) return;
     if (prevIndexRef.current === -1) prevIndexRef.current = 0;
@@ -148,6 +146,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     setActiveIndex(0);
   }, [videos]);
 
+  // ── Manage player pool when active index changes ───────────────────────────
   useEffect(() => {
     if (videos.length === 0) return;
 
@@ -177,8 +176,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     };
   }, [activeIndex, videos]);
 
-  let isMounted = true;
-
+  // ── Pause / resume when tab focus changes ─────────────────────────────────
   useEffect(() => {
     if (isTabActive) {
       try { playerPool.playCurrent(); } catch (e) {}
@@ -187,28 +185,26 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     }
   }, [isTabActive]);
 
+  // ── Load data on mount ─────────────────────────────────────────────────────
   useEffect(() => {
+    // If cache is valid, show it instantly and refresh in background
     if (isCacheValid(type)) {
       setVideos(feedCache[type]);
       setMyLikes(feedCache.likes ?? []);
       setMyFollows(feedCache.follows ?? []);
       setLoading(false);
+      // Background refresh
       loadVideos(true);
       loadMyInteractions(true);
     } else {
       loadVideos();
       loadMyInteractions();
     }
-    
-    return () => {
-      isMounted = false;
-    };
   }, [type]);
 
-  async function loadVideos(background = false, offset = 0) {
+  // ── FIX 1: Single query with profile join — no more attachUsernames ────────
+  async function loadVideos(background = false) {
     if (!background) setLoading(true);
-
-    const limit = PAGE_SIZE;
 
     if (type === 'following') {
       const { data: { user } } = await supabase.auth.getUser();
@@ -233,38 +229,30 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .in('user_id', followingIds)
         .neq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
+        .limit(20);
 
-      const result = offset === 0 ? (data ?? []) : [...videos, ...(data ?? [])];
-      if (isMounted) {
+      const result = data ?? [];
       feedCache.following = result;
       feedCache.ts.following = Date.now();
       setVideos(result);
-      setHasMore(data?.length === PAGE_SIZE);
-      }
 
     } else {
       const { data } = await supabase
         .from('videos')
         .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
         .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
+        .limit(20);
 
-      const shuffled = offset === 0 ? (data ?? []).sort(() => Math.random() - 0.5) : [...videos, ...(data ?? [])];
-      if (isMounted) {
-        feedCache.foryou = shuffled;
-        feedCache.ts.foryou = Date.now();
-        setVideos(shuffled);
-        setHasMore(data?.length === PAGE_SIZE);
-      }
+      const shuffled = (data ?? []).sort(() => Math.random() - 0.5);
+      feedCache.foryou = shuffled;
+      feedCache.ts.foryou = Date.now();
+      setVideos(shuffled);
     }
 
-    if (isMounted) {
-      setPage(Math.floor(offset / PAGE_SIZE));
-      setLoading(false);
-    }
+    setLoading(false);
   }
 
+  // ── FIX 3: Load likes + follows in parallel with Promise.all ──────────────
   async function loadMyInteractions(background = false) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -293,9 +281,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     setRefreshing(true);
     feedCache[type] = null;
     feedCache.ts[type] = null;
-    setPage(0);
-    setHasMore(true);
-    await Promise.all([loadVideos(false, 0), loadMyInteractions()]);
+    await Promise.all([loadVideos(), loadMyInteractions()]);
     setRefreshing(false);
   }
 
@@ -341,6 +327,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
               onFollowChange={updateMyFollows}
               navigation={navigation}
               cardHeight={listHeight}
+              // ── FIX 4: Pass profile data as props — no fetch needed in VideoCard
               username={item.profiles?.username ?? 'user'}
               avatarUrl={item.profiles?.avatar_url ?? null}
             />
@@ -350,8 +337,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}
-        onEndReached={() => hasMore && loadVideos(false, (page + 1) * PAGE_SIZE)}
-        onEndReachedThreshold={0.5}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -367,27 +352,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   );
 });
 
-function SearchButton({ navigation }) {
-  const [loading, setLoading] = useState(false);
-  
-  const handlePress = async () => {
-    setLoading(true);
-    navigation.navigate('Search');
-    setTimeout(() => setLoading(false), 500);
-  };
-  
-  return (
-    <AnimatedButton onPress={handlePress} disabled={loading}>
-      {loading ? (
-        <ActivityIndicator size="small" color={COLORS.gold} />
-      ) : (
-        <Text style={{ fontSize: 22 }}>🔍</Text>
-      )}
-    </AnimatedButton>
-  );
-}
-
-export default function HomeScreen({ navigation, route, deepLinkData }) {
+// ── Home Screen ────────────────────────────────────────────────────────────────
+export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(1);
   const [routes] = useState([
@@ -418,13 +384,6 @@ export default function HomeScreen({ navigation, route, deepLinkData }) {
       else if (index === 1) foryouRef.current?.refresh();
     };
   }, [index]);
-
-    // Handle deep link video navigation
-  useEffect(() => {
-    if (deepLinkData?.type === 'video') {
-      navigation.navigate('VideoDetail', { videoId: deepLinkData.id });
-    }
-  }, [deepLinkData]);
 
   const handleIndexChange = useCallback((newIndex) => {
     setIndex(newIndex);
@@ -502,7 +461,9 @@ export default function HomeScreen({ navigation, route, deepLinkData }) {
               );
             })}
           </View>
-          <SearchButton navigation={navigation} />
+          <AnimatedButton onPress={() => navigation.navigate('Search')}>
+            <Text style={{ fontSize: 22 }}>🔍</Text>
+          </AnimatedButton>
         </View>
       </View>
     );

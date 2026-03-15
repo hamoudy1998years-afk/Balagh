@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator } from 'react-native';
 import { useState, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -61,10 +61,7 @@ export default function SearchScreen() {
   }, []);
 
   return (
-      <KeyboardAvoidingView 
-        style={styles.container} 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+    <View style={styles.container}>
       <Text style={[styles.title, { paddingTop: insets.top + 16 }]}>Search</Text>
 
       <View style={styles.searchBar}>
@@ -119,7 +116,7 @@ export default function SearchScreen() {
           renderItem={renderResultItem}
         />
       )}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

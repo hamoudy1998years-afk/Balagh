@@ -2,11 +2,7 @@
   "name": "balagh-root",
   "version": "1.0.0",
   "scripts": {
-    "postinstall": "patch-package",
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web"
+    "start": "cd server && node server.js"
   },
   "engines": {
     "node": "18.x"
@@ -21,15 +17,12 @@
     "@react-navigation/native": "^7.1.33",
     "@react-navigation/native-stack": "^7.14.4",
     "@supabase/supabase-js": "^2.98.0",
-    "babel-preset-expo": "^55.0.11",
-    "expo": "55",
+    "expo": "^55.0.5",
     "expo-auth-session": "~55.0.7",
     "expo-camera": "~55.0.9",
     "expo-crypto": "~55.0.9",
     "expo-dev-client": "~55.0.11",
-    "expo-dev-menu": "^55.0.14",
     "expo-file-system": "~55.0.10",
-    "expo-haptics": "~55.0.8",
     "expo-image-manipulator": "~55.0.9",
     "expo-image-picker": "~55.0.11",
     "expo-local-authentication": "~55.0.8",
@@ -44,11 +37,10 @@
     "react": "19.2.0",
     "react-native": "0.83.2",
     "react-native-agora": "^4.6.2",
-    "react-native-dotenv": "^3.4.11",
     "react-native-fbsdk-next": "^13.4.3",
     "react-native-fs": "^2.20.0",
-    "react-native-gesture-handler": "^2.30.0",
-    "react-native-reanimated": "^4.2.2",
+    "react-native-gesture-handler": "~2.30.0",
+    "react-native-reanimated": "4.2.1",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
     "react-native-svg": "15.15.3",
@@ -57,11 +49,6 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.10",
-    "patch-package": "^8.0.1",
-    "postinstall-postinstall": "^2.1.0",
     "typescript": "~5.9.2"
-  },
-  "overrides": {
-    "react-native-worklets": "0.8.0-nightly-20260122-45349f895"
   }
 }
