@@ -83,6 +83,11 @@ export default function UploadScreen({ navigation }) {
     if (!video)          { Alert.alert('No video', 'Please pick a video first.'); return; }
     if (!caption.trim()) { Alert.alert('No caption', 'Please add a caption.'); return; }
     if (!category)       { Alert.alert('No category', 'Please select a category.'); return; }
+    const MAX_SIZE = 500 * 1024 * 1024; // 500MB
+    if (video.fileSize && video.fileSize > MAX_SIZE) {
+      Alert.alert('File Too Large', 'Please select a video under 500MB.');
+      return;
+    }
 
     setUploading(true);
     setProgressPercent(0);
