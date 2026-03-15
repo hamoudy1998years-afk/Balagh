@@ -47,6 +47,10 @@ export default function ApplyScholarScreen({ navigation }) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <AnimatedButton onPress={() => navigation.goBack()} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+        <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
+      </AnimatedButton>
+
       <Text style={styles.title}>Apply as Scholar</Text>
       <Text style={styles.subtitle}>Fill in your details to apply for a scholar badge</Text>
 
