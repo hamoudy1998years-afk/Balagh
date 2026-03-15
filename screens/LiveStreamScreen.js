@@ -21,7 +21,7 @@ import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import RNFS from 'react-native-fs';
 
 const { width, height } = Dimensions.get('window');
-const AGORA_APP_ID = '3be4f80ee12e40708afe7ced6308ef9d';
+const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 
 // 🔧 FIXED: Removed trailing space
 const THUMBNAIL_SERVER_URL = 'https://balagh-server-production.up.railway.app';

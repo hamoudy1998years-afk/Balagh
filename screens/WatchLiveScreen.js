@@ -17,7 +17,7 @@ import { useViewerTracking } from '../hooks/useViewerTracking';
 import { useViewerCount } from '../hooks/useViewerCount';
 
 const { width, height } = Dimensions.get('window');
-const AGORA_APP_ID = '3be4f80ee12e40708afe7ced6308ef9d';
+const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 const REACTIONS = ['❤️', '🤲', '☪️', '🌟', '👍'];
 const HOST_TIMEOUT_MS = 30000; // ⏱️ TIMEOUT: 30 seconds
 
