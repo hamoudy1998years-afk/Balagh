@@ -53,7 +53,14 @@ const NotificationItem = React.memo(function NotificationItem({ item, onDelete, 
     ]);
   };
 
-  const handlePress = () => { if (!item.is_read) onMarkRead(item.id); };
+  const handlePress = () => {
+    if (!item.is_read) onMarkRead(item.id);
+    if (item.type === 'follow') {
+      navigation.navigate('Profile', { userId: item.actor?.id });
+    } else if (item.video_id) {
+      navigation.navigate('VideoDetail', { video: { id: item.video_id } });
+    }
+  };
 
   const getIcon = () => {
     switch (item.type) {
