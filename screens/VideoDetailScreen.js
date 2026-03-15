@@ -55,6 +55,7 @@ export default function VideoDetailScreen({ navigation }) {
           initialFollowed={false}
           username={video.profiles?.username ?? 'user'}
           avatarUrl={video.profiles?.avatar_url ?? null}
+          navigation={navigation}
         />
       )}
     </View>
