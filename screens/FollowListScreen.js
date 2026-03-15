@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { COLORS } from '../constants/theme';
 
 // ─── Single user row ──────────────────────────────────────────────────────────
 function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
@@ -272,7 +273,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   followBtn: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: COLORS.gold,
     borderRadius: 8,
     paddingVertical: 7,
     paddingHorizontal: 16,
@@ -281,7 +282,7 @@ const styles = StyleSheet.create({
   followingBtn: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#7c3aed',
+    borderColor: COLORS.gold,
   },
   followBtnText: {
     color: '#fff',
@@ -289,7 +290,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   followingBtnText: {
-    color: '#a78bfa',
+    color: COLORS.goldDark,
   },
   separator: {
     height: 1,
