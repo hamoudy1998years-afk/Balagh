@@ -66,22 +66,22 @@ export default function ApplyScholarScreen({ navigation }) {
       <Text style={styles.subtitle}>Fill in your details to apply for a scholar badge</Text>
 
       <Text style={styles.label}>Full Name *</Text>
-      <TextInput style={styles.input} value={fullName} onChangeText={setFullName} placeholderTextColor="#4b5563" placeholder="Your full name" />
+      <TextInput style={styles.input} value={fullName} onChangeText={setFullName} placeholderTextColor="#4b5563" placeholder="Your full name" maxLength={80} />
 
       <Text style={styles.label}>Age *</Text>
-      <TextInput style={styles.input} value={age} onChangeText={setAge} placeholderTextColor="#4b5563" placeholder="Your age" keyboardType="number-pad" />
+      <TextInput style={styles.input} value={age} onChangeText={setAge} placeholderTextColor="#4b5563" placeholder="Your age" keyboardType="number-pad" maxLength={3} />
 
       <Text style={styles.label}>Location</Text>
-      <TextInput style={styles.input} value={location} onChangeText={setLocation} placeholderTextColor="#4b5563" placeholder="City, Country" />
+      <TextInput style={styles.input} value={location} onChangeText={setLocation} placeholderTextColor="#4b5563" placeholder="City, Country" maxLength={100} />
 
       <Text style={styles.label}>Education *</Text>
-      <TextInput style={[styles.input, styles.multiline]} value={education} onChangeText={setEducation} placeholderTextColor="#4b5563" placeholder="Your educational background" multiline />
+      <TextInput style={[styles.input, styles.multiline]} value={education} onChangeText={setEducation} placeholderTextColor="#4b5563" placeholder="Your educational background" multiline maxLength={500} />
 
       <Text style={styles.label}>Area of Expertise *</Text>
-      <TextInput style={styles.input} value={expertise} onChangeText={setExpertise} placeholderTextColor="#4b5563" placeholder="e.g. Fiqh, Tafsir, Hadith" />
+      <TextInput style={styles.input} value={expertise} onChangeText={setExpertise} placeholderTextColor="#4b5563" placeholder="e.g. Fiqh, Tafsir, Hadith" maxLength={150} />
 
       <Text style={styles.label}>Bio</Text>
-      <TextInput style={[styles.input, styles.multiline]} value={bio} onChangeText={setBio} placeholderTextColor="#4b5563" placeholder="Tell us about yourself" multiline />
+      <TextInput style={[styles.input, styles.multiline]} value={bio} onChangeText={setBio} placeholderTextColor="#4b5563" placeholder="Tell us about yourself" multiline maxLength={500} />
 
       <AnimatedButton style={styles.submitBtn} onPress={handleApply} disabled={loading}>
         <Text style={styles.submitBtnText}>{loading ? 'Submitting...' : 'Submit Application'}</Text>
