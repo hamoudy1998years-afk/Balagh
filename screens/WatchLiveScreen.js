@@ -359,7 +359,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   }
 
   async function sendMessage() {
-    if (!chatInput.trim() || !stream.id) return;
+    if (!chatInput.trim() || !stream.id || !currentUser) return;
     const msg = chatInput.trim();
     setChatInput('');
 
@@ -376,7 +376,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   }
 
   async function submitQuestion() {
-    if (!questionInput.trim()) return;
+    if (!questionInput.trim() || !currentUser) return;
     
     // Check if questions are allowed for this stream
     const { data: streamData } = await supabase
