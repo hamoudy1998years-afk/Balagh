@@ -20,7 +20,7 @@ export default function ApplyScholarScreen({ navigation }) {
     }
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) { setLoading(false); Alert.alert('Error', 'You must be logged in to apply.'); return; }
     const { error } = await supabase.from('scholar_applications').insert({
       user_id: user.id,
       full_name: fullName.trim(),
