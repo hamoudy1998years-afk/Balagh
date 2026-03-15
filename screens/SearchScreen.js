@@ -41,7 +41,9 @@ export default function SearchScreen() {
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
       searchTimeout.current = setTimeout(async () => {
         setLoading(true);
-        const { data } = await supabase.from('videos').select('*').ilike('caption', `%${text}%`).limit(20);
+        const sanitized = text.replace(/[%_\\]/g, '\\$&').trim();
+        const { data, error } = await supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`).limit(20);
+        if (error) { console.warn('Search error:', error.message); setResults([]); setLoading(false); return; }
         setResults(data ?? []);
         setLoading(false);
       }, 400);
@@ -51,7 +53,8 @@ export default function SearchScreen() {
     setSelectedCategory(cat);
     setLoading(true);
     if (cat === 'All') {
-      const { data } = await supabase.from('videos').select('*').limit(20);
+      const { data, error } = await supabase.from('videos').select('*').limit(20);
+      if (error) { console.warn('Category error:', error.message); setResults([]); setLoading(false); return; }
       setResults(data ?? []);
     } else {
       const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(20);
