@@ -231,7 +231,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
       const followingIds = follows.map(f => f.following_id);
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('videos')
         .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
         .in('user_id', followingIds)
@@ -239,18 +239,20 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .order('created_at', { ascending: false })
         .limit(20);
 
+      if (error) { console.warn('Following feed error:', error.message); setLoading(false); return; }
       const result = data ?? [];
       feedCache.following = result;
       feedCache.ts.following = Date.now();
       setVideos(result);
 
     } else {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('videos')
         .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
         .order('created_at', { ascending: false })
         .limit(20);
 
+      if (error) { console.warn('ForYou feed error:', error.message); setLoading(false); return; }
       const shuffled = (data ?? []).sort(() => Math.random() - 0.5);
       feedCache.foryou = shuffled;
       feedCache.ts.foryou = Date.now();
@@ -269,6 +271,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       supabase.from('likes').select('video_id').eq('user_id', user.id),
       supabase.from('follows').select('following_id').eq('follower_id', user.id),
     ]);
+    if (likesRes.error) console.warn('Likes error:', likesRes.error.message);
+    if (followsRes.error) console.warn('Follows error:', followsRes.error.message);
 
     const likes = likesRes.data?.map(l => l.video_id) ?? [];
     const follows = followsRes.data?.map(f => f.following_id) ?? [];
