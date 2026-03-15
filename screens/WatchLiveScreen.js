@@ -21,23 +21,6 @@ const AGORA_APP_ID = '3be4f80ee12e40708afe7ced6308ef9d';
 const REACTIONS = ['❤️', '🤲', '☪️', '🌟', '👍'];
 const HOST_TIMEOUT_MS = 30000; // ⏱️ TIMEOUT: 30 seconds
 
-async function getAgoraToken(channelName, uid, role) {
-  try {
-    const response = await fetch('https://balagh-gsn5.onrender.com/get-token ', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channelName, uid, role }),
-    });
-
-    const data = await response.json();
-    console.log('Token received from server:', data.token.substring(0, 20) + '...');
-    return data.token;
-  } catch (error) {
-    console.error('Failed to get token:', error);
-    return null;
-  }
-}
-
 export default function WatchLiveScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { stream } = route.params;
