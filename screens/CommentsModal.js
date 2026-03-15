@@ -63,7 +63,7 @@ export default function CommentsModal({
   const [justRepliedTo,  setJustRepliedTo]  = useState(null);
 
   const bottomSheetRef = useRef(null);
-  const snapPoints     = ['68%'];
+  const snapPoints = ['68%', '92%'];
 
   // ─── Auth ────────────────────────────────────────────────────────────────
   useEffect(() => {
