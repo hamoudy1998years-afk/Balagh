@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { userCache } from '../utils/userCache';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
+import { clearFeedCache } from './HomeScreen';
 
 const ACCENT     = COLORS.gold;
 const ACCENT_DIM = `${COLORS.gold}18`;
@@ -264,6 +265,7 @@ export default function SettingsScreen({ navigation }) {
   async function confirmLogout() {
     setShowLogoutModal(false);
     await userCache.clear();
+    clearFeedCache();
     await supabase.auth.signOut({ scope: 'local' });
   }
 

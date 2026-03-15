@@ -22,6 +22,14 @@ const feedCache = {
 };
 const CACHE_TTL = 60 * 1000; // 1 minute — serve cache, refresh in background
 
+export function clearFeedCache() {
+  feedCache.foryou = null;
+  feedCache.following = null;
+  feedCache.likes = null;
+  feedCache.follows = null;
+  feedCache.ts = {};
+}
+
 function isCacheValid(key) {
   return feedCache[key] !== null && feedCache.ts[key] && Date.now() - feedCache.ts[key] < CACHE_TTL;
 }
