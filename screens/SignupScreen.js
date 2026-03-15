@@ -81,6 +81,10 @@ export default function SignupScreen({ navigation }) {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <AnimatedButton onPress={() => navigation.goBack()} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+          <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
+        </AnimatedButton>
+
         <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
         <Text style={styles.title}>Bushrann</Text>
         <Text style={styles.subtitle}>Create your account</Text>
