@@ -13,8 +13,6 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import AnimatedButton from './AnimatedButton';
 
-const downloadedVideoIds = new Set();
-
 const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress }) {
   if (!visible) return null;
   const pct = Math.round(progress * 100);
@@ -52,7 +50,7 @@ export default function VideoCard({
   const [showPauseIcon, setShowPauseIcon] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [hasDownloaded, setHasDownloaded] = useState(() => downloadedVideoIds.has(item.id));
+  const [hasDownloaded, setHasDownloaded] = useState(false);
 
   // ── Use props directly — no more per-card DB fetch ─────────────────────────
   const username = usernameProp ?? 'user';
@@ -179,7 +177,7 @@ export default function VideoCard({
   }, [showVideoOptionsSheet, item, hasDownloaded]);
 
   const handleDownloadVideo = useCallback(async () => {
-    if (downloadedVideoIds.has(item.id)) return;
+    if (hasDownloaded) return;
 
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
@@ -211,7 +209,6 @@ export default function VideoCard({
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
 
       setIsDownloading(false);
-      downloadedVideoIds.add(item.id);
       setHasDownloaded(true);
 
       Alert.alert('Downloaded ✅', 'Video saved to your gallery!');
