@@ -125,6 +125,8 @@ export default function LiveStreamScreen({ navigation, route }) {
   const currentStreamIdRef = useRef(null);
   const currentChannelRef = useRef(null);
   const isLiveRef = useRef(false);
+  const chatChannelRef = useRef(null);
+  const questionsChannelRef = useRef(null);
 
   // ✅ NEW: Use the viewer count hook (streamer doesn't track themselves)
   const { viewerCount } = useViewerCount(streamId);
@@ -341,6 +343,14 @@ export default function LiveStreamScreen({ navigation, route }) {
       clearInterval(pingInterval.current);
       pingInterval.current = null;
     }
+    if (chatChannelRef.current) {
+      await supabase.removeChannel(chatChannelRef.current);
+      chatChannelRef.current = null;
+    }
+    if (questionsChannelRef.current) {
+      await supabase.removeChannel(questionsChannelRef.current);
+      questionsChannelRef.current = null;
+    }
     if (engineRef.current) {
       engineRef.current.leaveChannel();
       engineRef.current.release();
@@ -349,7 +359,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   function subscribeToChat(sid) {
-    supabase
+    chatChannelRef.current = supabase
       .channel(`live_messages_${sid}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_messages', filter: `stream_id=eq.${sid}` },
         (payload) => {
@@ -360,7 +370,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   function subscribeToQuestions(sid) {
-    supabase
+    questionsChannelRef.current = supabase
       .channel(`live_questions_${sid}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'live_questions', filter: `stream_id=eq.${sid}` },
         () => loadQuestions(sid))
