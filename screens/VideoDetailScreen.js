@@ -22,8 +22,22 @@ export default function VideoDetailScreen({ navigation }) {
       .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
       .eq('id', videoId)
       .single();
-    if (error || !data) setError(true);
-    setVideo(data);
+    if (error || !data) { setError(true); setLoading(false); return; }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    let liked = false;
+    let followed = false;
+
+    if (user) {
+      const [{ data: likeData }, { data: followData }] = await Promise.all([
+        supabase.from('likes').select('id').eq('user_id', user.id).eq('video_id', data.id).maybeSingle(),
+        supabase.from('follows').select('id').eq('follower_id', user.id).eq('following_id', data.user_id).maybeSingle(),
+      ]);
+      liked = !!likeData;
+      followed = !!followData;
+    }
+
+    setVideo({ ...data, initialLiked: liked, initialFollowed: followed });
     setLoading(false);
   }
 
@@ -57,8 +71,8 @@ export default function VideoDetailScreen({ navigation }) {
           isActive={true}
           isVisible={true}
           isTabActive={true}
-          initialLiked={false}
-          initialFollowed={false}
+          initialLiked={video.initialLiked ?? false}
+          initialFollowed={video.initialFollowed ?? false}
           username={video.profiles?.username ?? 'user'}
           avatarUrl={video.profiles?.avatar_url ?? null}
           navigation={navigation}
