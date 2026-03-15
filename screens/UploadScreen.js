@@ -97,7 +97,7 @@ export default function UploadScreen({ navigation }) {
     try {
       const ext      = video.uri.split('.').pop() || 'mp4';
       const fileName = `${user.id}/${Date.now()}.${ext}`;
-      const SUPABASE_URL = 'https://waurtjtnyinncbdhfydu.supabase.co';
+      const SUPABASE_URL = supabase.supabaseUrl;
 
       const formData = new FormData();
       formData.append('', { uri: video.uri, type: 'video/mp4', name: fileName.split('/').pop() });
