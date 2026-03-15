@@ -615,6 +615,20 @@ export default function LoginScreen({ navigation }) {
           </View>}
           </AnimatedButton>
 
+          <AnimatedButton onPress={() => {
+            Alert.alert('Reset Password', 'Enter your email to receive a reset link.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Send', onPress: async () => {
+                if (!identifier.trim()) { Alert.alert('Enter your email first'); return; }
+                const { error } = await supabase.auth.resetPasswordForEmail(identifier.trim());
+                if (error) Alert.alert('Error', error.message);
+                else Alert.alert('Sent! ✉️', 'Check your email for the reset link.');
+              }},
+            ]);
+          }}>
+            <Text style={[styles.link, { color: COLORS.gold }]}>Forgot Password?</Text>
+          </AnimatedButton>
+
           <AnimatedButton onPress={() => navigation.navigate('Signup')}>
             <Text style={styles.link}>
               Don't have an account?{' '}
