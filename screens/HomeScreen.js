@@ -253,7 +253,12 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .limit(20);
 
       if (error) { console.warn('ForYou feed error:', error.message); setLoading(false); return; }
-      const shuffled = (data ?? []).sort(() => Math.random() - 0.5);
+      const arr = [...(data ?? [])];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      const shuffled = arr;
       feedCache.foryou = shuffled;
       feedCache.ts.foryou = Date.now();
       setVideos(shuffled);
