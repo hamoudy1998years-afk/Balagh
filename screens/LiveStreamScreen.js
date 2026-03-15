@@ -102,7 +102,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const { title = 'Live Stream', maxQuestions = 5 } = route?.params ?? {};
 
   const [isLive, setIsLive] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [streamId, setStreamId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [questions, setQuestions] = useState([]);
