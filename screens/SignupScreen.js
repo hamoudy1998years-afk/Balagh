@@ -15,6 +15,7 @@ export default function SignupScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const { saveAccount } = useBiometricAuth();
 
@@ -27,6 +28,7 @@ export default function SignupScreen({ navigation }) {
     if (!username.trim()) { Alert.alert('Missing Field', 'Please enter a username.'); return; }
     if (!password.trim()) { Alert.alert('Missing Field', 'Please enter a password.'); return; }
     if (password.trim().length < 6) { Alert.alert('Weak Password', 'Password must be at least 6 characters.'); return; }
+    if (password.trim() !== confirmPassword.trim()) { Alert.alert('Password Mismatch', 'Passwords do not match.'); return; }
 
     const hasRealEmail = email.trim().length > 0 && email.includes('@');
     const hasPhone = phone.trim().length > 0;
@@ -128,6 +130,19 @@ export default function SignupScreen({ navigation }) {
           <AnimatedButton onPress={() => setShowPassword((prev) => !prev)}>
             <Text style={styles.eyeBtn}>{showPassword ? '🙈' : '👁️'}</Text>
           </AnimatedButton>
+        </View>
+
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={styles.passwordInput}
+            placeholder="Confirm Password *"
+            placeholderTextColor={COLORS.textGray}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry={!showPassword}
+            autoComplete="off"
+            textContentType="none"
+          />
         </View>
 
         <Text style={styles.helperText}>
