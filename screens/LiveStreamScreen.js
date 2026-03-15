@@ -388,7 +388,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function sendMessage() {
-    if (!chatInput.trim() || !streamId) return;
+    if (!chatInput.trim() || !streamId || !currentUser) return;
     const msg = chatInput.trim();
     setChatInput('');
     await supabase.from('live_messages').insert({
