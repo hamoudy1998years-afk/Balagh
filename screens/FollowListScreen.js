@@ -16,15 +16,17 @@ function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
     if (isOwnAccount) return;
     if (following) {
       setFollowing(false);
-      await supabase.from('follows').delete()
+      const { error } = await supabase.from('follows').delete()
         .eq('follower_id', currentUserId)
         .eq('following_id', item.id);
+      if (error) setFollowing(true);
     } else {
       setFollowing(true);
-      await supabase.from('follows').insert({
+      const { error } = await supabase.from('follows').insert({
         follower_id: currentUserId,
         following_id: item.id,
       });
+      if (error) setFollowing(false);
     }
   }
 
