@@ -79,9 +79,14 @@ export default function EditProfileScreen({ navigation }) {
   }
 
   async function handleSave() {
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) { Alert.alert('Invalid Username', 'Username cannot be empty.'); return; }
+    if (trimmedUsername.length < 3) { Alert.alert('Invalid Username', 'Username must be at least 3 characters.'); return; }
+    if (!/^[a-zA-Z0-9._]+$/.test(trimmedUsername)) { Alert.alert('Invalid Username', 'Username can only contain letters, numbers, dots, and underscores.'); return; }
+
     setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (!user || userError) { setSaving(false); Alert.alert('Error', 'Could not verify your session. Please try again.'); return; }
     try {
       if (isScholar) {
         const { error: profileError } = await supabase.from('profiles').update({ username: username.trim() }).eq('id', user.id);
