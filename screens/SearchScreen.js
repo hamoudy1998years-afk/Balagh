@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image } from 'react-native';
 import { useState, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -18,7 +18,17 @@ export default function SearchScreen({ navigation }) {
   const searchTimeout = useRef(null);
   const renderResultItem = useCallback(({ item }) => (
     <AnimatedButton onPress={() => navigation.navigate('VideoDetail', { video: item })} style={styles.resultCard}>
-      <View style={styles.resultThumbnail}><Text style={styles.resultThumbnailIcon}>🎬</Text></View>
+      <View style={styles.resultThumbnail}>
+        {item.thumbnail_url || item.video_url ? (
+          <Image
+            source={{ uri: item.thumbnail_url || item.video_url }}
+            style={{ width: 64, height: 64, borderRadius: 10 }}
+            resizeMode="cover"
+          />
+        ) : (
+          <Text style={styles.resultThumbnailIcon}>🎬</Text>
+        )}
+      </View>
       <View style={styles.resultInfo}>
         <Text style={styles.resultCaption} numberOfLines={2}>{item.caption}</Text>
         <View style={styles.resultMeta}>
