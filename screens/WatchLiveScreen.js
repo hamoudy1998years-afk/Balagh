@@ -65,7 +65,10 @@ export default function WatchLiveScreen({ navigation, route }) {
   const flatListRef = useRef(null);
   const reactionId = useRef(0);
   const isCleaningUp = useRef(false);
-  const hostWaitTimeoutRef = useRef(null); // ⏱️ TIMEOUT: Ref to store timeout ID
+  const hostWaitTimeoutRef = useRef(null);
+  const chatChannelRef = useRef(null);
+  const questionsChannelRef = useRef(null);
+  const streamChannelRef = useRef(null);
 
   // ✅ NEW: Use the viewer tracking hooks
   useViewerTracking(stream.id, false, currentUser, retryCount); // Track this viewer (isStreamer = false)
@@ -281,6 +284,9 @@ export default function WatchLiveScreen({ navigation, route }) {
     // ✅ REMOVED: No more decrement_viewer_count RPC call
     // The useViewerTracking hook now handles removing this user from stream_viewers table
     // (it runs cleanup on unmount)
+    if (chatChannelRef.current) { await supabase.removeChannel(chatChannelRef.current); chatChannelRef.current = null; }
+    if (questionsChannelRef.current) { await supabase.removeChannel(questionsChannelRef.current); questionsChannelRef.current = null; }
+    if (streamChannelRef.current) { await supabase.removeChannel(streamChannelRef.current); streamChannelRef.current = null; }
 
     if (engineRef.current) {
       try {
@@ -294,8 +300,8 @@ export default function WatchLiveScreen({ navigation, route }) {
   }
 
   function subscribeToChat() {
-    const channel = supabase.channel(`watch_messages_${stream.id}`);
-    channel
+    chatChannelRef.current = supabase.channel(`watch_messages_${stream.id}`);
+    chatChannelRef.current
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
@@ -309,8 +315,8 @@ export default function WatchLiveScreen({ navigation, route }) {
   }
 
   function subscribeToQuestions() {
-    const channel = supabase.channel(`watch_questions_${stream.id}`);
-    channel
+    questionsChannelRef.current = supabase.channel(`watch_questions_${stream.id}`);
+    questionsChannelRef.current
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
@@ -327,8 +333,8 @@ export default function WatchLiveScreen({ navigation, route }) {
   }
 
   function subscribeToStream() {
-    const channel = supabase.channel(`watch_stream_${stream.id}`);
-    channel
+    streamChannelRef.current = supabase.channel(`watch_stream_${stream.id}`);
+    streamChannelRef.current
       .on('postgres_changes', { 
         event: 'DELETE', 
         schema: 'public', 
