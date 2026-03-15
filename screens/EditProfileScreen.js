@@ -236,12 +236,14 @@ export default function EditProfileScreen({ navigation }) {
             <TextInput
               style={[epStyles.input, epStyles.multilineInput]}
               value={bio}
-              onChangeText={setBio}
+              onChangeText={(text) => { if (text.length <= 150) setBio(text); }}
               placeholderTextColor="#4b5563"
               placeholder="Tell the world about yourself..."
               multiline
+              maxLength={150}
               onFocus={() => scrollToField(200)}
             />
+            <Text style={{ color: COLORS.textGray, fontSize: 12, textAlign: 'right', marginTop: -10, marginBottom: 14 }}>{bio.length}/150</Text>
           </>
         )}
 
