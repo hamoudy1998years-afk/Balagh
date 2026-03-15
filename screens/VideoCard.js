@@ -325,7 +325,7 @@ export default function VideoCard({
         </AnimatedButton>
       </View>
 
-      <CommentsModal visible={showComments} onClose={() => setShowComments(false)} videoId={item.id} navigation={navigation} />
+      <CommentsModal visible={showComments} onClose={() => setShowComments(false)} videoId={item.id} navigation={navigation} isCreator={currentUserId === item.user_id} />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
     </View>
