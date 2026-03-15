@@ -116,7 +116,9 @@ export default function AvatarCropScreen({ route, navigation }) {
     } catch (e) {
         console.error('Crop error:', e);
         setProcessing(false);
-        navigation.goBack();
+        Alert.alert('Crop Failed', 'Could not crop the image. Please try again.', [
+          { text: 'OK', onPress: () => navigation.goBack() }
+        ]);
     }
   }
 
