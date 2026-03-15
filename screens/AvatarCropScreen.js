@@ -90,7 +90,7 @@ export default function AvatarCropScreen({ route, navigation }) {
         // Step 2 — calculate crop
         const coverScale = Math.max(CROP_SIZE / imgW, CROP_SIZE / imgH);
         const totalScale = coverScale * currentScale.current;
-        const cropSize = Math.round(CROP_SIZE / totalScale);
+        const cropSize = Math.max(1, Math.round(CROP_SIZE / totalScale));
 
         const centerX = imgW / 2 - currentX.current / totalScale;
         const centerY = imgH / 2 - currentY.current / totalScale;
