@@ -336,6 +336,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       await supabase.from('live_streams').delete().eq('id', streamId);
     }
     await cleanup();
+    navigation.goBack();
   }
 
   async function cleanup() {
