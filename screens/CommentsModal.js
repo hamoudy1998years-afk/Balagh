@@ -272,7 +272,6 @@ export default function CommentsModal({
               value={newComment}
               onChangeText={(t) => setNewComment(t.slice(0, COMMENT_MAX))}
               onSubmit={handleSubmitComment}
-              keyboardHeight={0}
               placeholder="Add comment..."
             />
           )}
