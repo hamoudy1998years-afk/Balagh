@@ -1,7 +1,7 @@
 import {
   View, Text, StyleSheet, FlatList,
   Image, Modal, Alert, useWindowDimensions,
-  StatusBar, RefreshControl, Animated, Pressable, PanResponder,
+  StatusBar, RefreshControl, Animated, Pressable,
 } from 'react-native';
 import React, { useState, useEffect as useEffectHook, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
