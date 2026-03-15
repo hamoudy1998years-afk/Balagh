@@ -9,7 +9,7 @@ export default function AnimatedButton({ children, style, onPress, onLongPress, 
     isLongPress.current = false;
     Animated.timing(opacity, {
       toValue: 0.55,
-      duration: 0,
+      duration: 80,
       useNativeDriver: true,
     }).start();
   }
@@ -17,7 +17,7 @@ export default function AnimatedButton({ children, style, onPress, onLongPress, 
   function handlePressOut() {
     Animated.timing(opacity, {
       toValue: 1,
-      duration: 0,
+      duration: 150,
       useNativeDriver: true,
     }).start();
   }
