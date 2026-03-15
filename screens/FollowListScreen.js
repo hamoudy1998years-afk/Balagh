@@ -51,7 +51,7 @@ function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
       </View>
 
       {/* ✅ FIXED: hide follow button on own account AND when viewing your own list */}
-      {!isOwnAccount && !isViewingOwnList && (
+      {!isOwnAccount && (
         <TouchableOpacity
           style={[styles.followBtn, following && styles.followingBtn]}
           onPress={handleFollow}
