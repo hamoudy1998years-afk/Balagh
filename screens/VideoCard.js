@@ -91,7 +91,13 @@ export default function VideoCard({
   useEffect(() => {
     if (isActive) {
       setPaused(false);
-      hasPlayed.current = true;
+      if (!hasPlayed.current) {
+        hasPlayed.current = true;
+        supabase.from('videos')
+          .update({ views_count: (item.views_count ?? 0) + 1 })
+          .eq('id', item.id)
+          .then(() => {});
+      }
     }
   }, [isActive]);
 
