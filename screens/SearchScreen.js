@@ -42,7 +42,9 @@ export default function SearchScreen() {
       searchTimeout.current = setTimeout(async () => {
         setLoading(true);
         const sanitized = text.replace(/[%_\\]/g, '\\$&').trim();
-        const { data, error } = await supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`).limit(20);
+        let query = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
+        if (selectedCategory !== 'All') query = query.eq('category', selectedCategory);
+        const { data, error } = await query.limit(20);
         if (error) { console.warn('Search error:', error.message); setResults([]); setLoading(false); return; }
         setResults(data ?? []);
         setLoading(false);
