@@ -37,30 +37,36 @@ export const useComments = (videoId) => {
   const [page, setPage] = useState(0);
 
   const fetchComments = useCallback(async (pageNum = 0, isLoadMore = false) => {
-    const { data, error } = await supabase
-      .from('comments')
-      .select('*, profiles:user_id(id, username, avatar_url), replies:replies(count)')
-      .eq('video_id', videoId)
-      .is('parent_id', null)
-      .order('created_at', { ascending: false })
-      .range(pageNum * 20, (pageNum + 1) * 20 - 1);
+  const { data, error } = await supabase
+    .from('comments')
+    .select('*')
+    .eq('video_id', videoId)
+    .is('parent_id', null)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+    .range(pageNum * 20, (pageNum + 1) * 20 - 1);
 
-    if (error) return;
+  if (error || !data) return;
 
-    if (isLoadMore) {
-      setComments(prev => [...prev, ...(data || [])]);
-    } else {
-      setComments(data || []);
-    }
-    setHasMore((data || []).length === 20);
-  }, [videoId]);
+  // Fetch profiles separately
+  const userIds = [...new Set(data.map(c => c.user_id))];
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, username, avatar_url')
+    .in('id', userIds);
 
-  useEffect(() => {
-    if (videoId) {
-      setLoading(true);
-      fetchComments(0).finally(() => setLoading(false));
-    }
-  }, [videoId, fetchComments]);
+  const commentsWithProfiles = data.map(c => ({
+    ...c,
+    profiles: profiles?.find(p => p.id === c.user_id) || { username: 'Unknown', avatar_url: null }
+  }));
+
+  if (isLoadMore) {
+    setComments(prev => [...prev, ...commentsWithProfiles]);
+  } else {
+    setComments(commentsWithProfiles);
+  }
+  setHasMore(data.length === 20);
+}, [videoId]);
 
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore) return;
@@ -71,6 +77,13 @@ export const useComments = (videoId) => {
       setLoadingMore(false);
     });
   }, [loadingMore, hasMore, page, fetchComments]);
+
+  useEffect(() => {
+    if (videoId) {
+      setLoading(true);
+      fetchComments(0).finally(() => setLoading(false));
+    }
+  }, [videoId]);
 
   const postComment = useCallback(async (content, parentId = null) => {
   setPosting(true);
