@@ -8,7 +8,7 @@ import { COLORS } from '../constants/theme';
 
 const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
-export default function SearchScreen() {
+export default function SearchScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -17,7 +17,7 @@ export default function SearchScreen() {
   const flatListRef = useRef(null);
   const searchTimeout = useRef(null);
   const renderResultItem = useCallback(({ item }) => (
-    <View style={styles.resultCard}>
+    <AnimatedButton onPress={() => navigation.navigate('VideoDetail', { video: item })} style={styles.resultCard}>
       <View style={styles.resultThumbnail}><Text style={styles.resultThumbnailIcon}>🎬</Text></View>
       <View style={styles.resultInfo}>
         <Text style={styles.resultCaption} numberOfLines={2}>{item.caption}</Text>
@@ -26,8 +26,8 @@ export default function SearchScreen() {
           <Text style={styles.resultViews}>{item.views_count ?? 0} views</Text>
         </View>
       </View>
-    </View>
-  ), []);
+    </AnimatedButton>
+  ), [navigation]);
 
   useFocusEffect(
     useCallback(() => {
