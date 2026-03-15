@@ -2,9 +2,11 @@
   "name": "balagh-root",
   "version": "1.0.0",
   "scripts": {
-    "start": "cd server && node server.js",
+    "postinstall": "patch-package",
+    "start": "expo start",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "web": "expo start --web"
   },
   "engines": {
     "node": "18.x"
@@ -46,7 +48,7 @@
     "react-native-fbsdk-next": "^13.4.3",
     "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "^2.30.0",
-    "react-native-reanimated": "^4.2.1",
+    "react-native-reanimated": "^4.2.2",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
     "react-native-svg": "15.15.3",
@@ -55,6 +57,11 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.10",
+    "patch-package": "^8.0.1",
+    "postinstall-postinstall": "^2.1.0",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "react-native-worklets": "0.8.0-nightly-20260122-45349f895"
   }
 }

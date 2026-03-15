@@ -1,7 +1,7 @@
 import Video from 'react-native-video';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import CommentsModal from './CommentsModal';
+import CommentsModal, { useComments } from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
@@ -325,7 +325,13 @@ export default function VideoCard({
         </AnimatedButton>
       </View>
 
-      <CommentsModal visible={showComments} onClose={() => setShowComments(false)} videoId={item.id} navigation={navigation} />
+      <CommentsModal 
+        visible={showComments} 
+        onClose={() => setShowComments(false)} 
+        videoId={item.id} 
+        navigation={navigation}
+        isCreator={currentUserId === item.user_id}
+      />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
     </View>

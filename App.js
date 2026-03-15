@@ -277,6 +277,7 @@ export default function App() {
           <ActivityIndicator color={COLORS.gold} size="large" />
         </View>
       </Animated.View>
+      <ErrorBoundary>
     <UserProvider>
       <DownloadProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
@@ -312,6 +313,7 @@ export default function App() {
         </GestureHandlerRootView>
       </DownloadProvider>
         </UserProvider>
+      </ErrorBoundary>
     </>
   );
 }

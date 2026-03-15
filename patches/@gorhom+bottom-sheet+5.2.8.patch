@@ -1,0 +1,173 @@
+diff --git a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js
+index 0bdd216..2b7a704 100644
+--- a/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js
++++ b/node_modules/@gorhom/bottom-sheet/lib/module/hooks/useAnimatedKeyboard.js
+@@ -2,8 +2,8 @@
+ 
+ import { useCallback, useEffect, useRef } from 'react';
+ import { Keyboard, Platform } from 'react-native';
+-import { runOnUI, useAnimatedReaction, useSharedValue } from 'react-native-reanimated';
+-import { KEYBOARD_STATUS, SCREEN_HEIGHT } from '../constants';
++import { runOnUI, useSharedValue } from 'react-native-reanimated';
++
+ const KEYBOARD_EVENT_MAPPER = {
+   KEYBOARD_SHOW: Platform.select({
+     ios: 'keyboardWillShow',
+@@ -16,105 +16,76 @@ const KEYBOARD_EVENT_MAPPER = {
+     default: ''
+   })
+ };
++
+ const INITIAL_STATE = {
+-  status: KEYBOARD_STATUS.UNDETERMINED,
++  status: 0, // UNDETERMINED
+   height: 0,
+   heightWithinContainer: 0,
+   easing: 'keyboard',
+   duration: 500
+ };
++
+ export const useAnimatedKeyboard = () => {
+-  //#region variables
+   const textInputNodesRef = useRef(new Set());
+   const state = useSharedValue(INITIAL_STATE);
+   const temporaryCachedState = useSharedValue(null);
+-  //#endregion
+ 
+-  //#region worklets
++  // Move worklet to runOnUI
+   const handleKeyboardEvent = useCallback((status, height, duration, easing, bottomOffset) => {
+-    'worklet';
++    runOnUI(() => {
++      'worklet';
++      const currentState = state.value;
+ 
+-    const currentState = state.get();
++      if (status === 1 && !currentState.target) { // SHOWN = 1
++        temporaryCachedState.value = {
++          status,
++          height,
++          duration,
++          easing
++        };
++        return;
++      }
+ 
+-    /**
+-     * if the keyboard event was fired before the `onFocus` on TextInput,
+-     * then we cache the event, and wait till the `target` is been set
+-     * to be updated then fire this function again.
+-     */
+-    if (status === KEYBOARD_STATUS.SHOWN && !currentState.target) {
+-      temporaryCachedState.set({
+-        status,
+-        height,
+-        duration,
+-        easing
+-      });
+-      return;
+-    }
++      temporaryCachedState.value = null;
+ 
+-    /**
+-     * clear temporary cached state.
+-     */
+-    temporaryCachedState.set(null);
++      let adjustedHeight = status === 1 ? height : currentState.height;
+ 
+-    /**
+-     * if keyboard status is hidden, then we keep old height.
+-     */
+-    let adjustedHeight = status === KEYBOARD_STATUS.SHOWN ? height : currentState.height;
++      if (bottomOffset) {
++        adjustedHeight = adjustedHeight + bottomOffset;
++      }
+       
+-    /**
+-     * if keyboard had an bottom offset -android bottom bar-, then
+-     * we add that offset to the keyboard height.
+-     */
+-    if (bottomOffset) {
+-      adjustedHeight = adjustedHeight + bottomOffset;
+-    }
+-    state.set(state => ({
+-      status,
+-      easing,
+-      duration,
+-      height: adjustedHeight,
+-      target: state.target,
+-      heightWithinContainer: state.heightWithinContainer
+-    }));
+-  }, [state, temporaryCachedState]);
+-  //#endregion
++      state.value = {
++        status,
++        easing,
++        duration,
++        height: adjustedHeight,
++        target: currentState.target,
++        heightWithinContainer: currentState.heightWithinContainer
++      };
++    })();
++  }, []);
+ 
+-  //#region effects
+   useEffect(() => {
+     const handleOnKeyboardShow = event => {
+-      runOnUI(handleKeyboardEvent)(KEYBOARD_STATUS.SHOWN, event.endCoordinates.height, event.duration, event.easing, SCREEN_HEIGHT - event.endCoordinates.height - event.endCoordinates.screenY);
++      handleKeyboardEvent(1, event.endCoordinates.height, event.duration, event.easing, 
++        Platform.select({ ios: 0, android: 0 }) // Remove SCREEN_HEIGHT calculation
++      );
+     };
+     const handleOnKeyboardHide = event => {
+-      runOnUI(handleKeyboardEvent)(KEYBOARD_STATUS.HIDDEN, event.endCoordinates.height, event.duration, event.easing);
++      handleKeyboardEvent(0, 0, event.duration, event.easing);
+     };
++    
+     const showSubscription = Keyboard.addListener(KEYBOARD_EVENT_MAPPER.KEYBOARD_SHOW, handleOnKeyboardShow);
+     const hideSubscription = Keyboard.addListener(KEYBOARD_EVENT_MAPPER.KEYBOARD_HIDE, handleOnKeyboardHide);
++    
+     return () => {
+       showSubscription.remove();
+       hideSubscription.remove();
+     };
+   }, [handleKeyboardEvent]);
+ 
+-  /**
+-   * This reaction is needed to handle the issue with multiline text input.
+-   *
+-   * @link https://github.com/gorhom/react-native-bottom-sheet/issues/411
+-   */
+-  useAnimatedReaction(() => state.value.target, (result, previous) => {
+-    if (!result || result === previous) {
+-      return;
+-    }
+-    const cachedState = temporaryCachedState.get();
+-    if (!cachedState) {
+-      return;
+-    }
+-    handleKeyboardEvent(cachedState.status, cachedState.height, cachedState.duration, cachedState.easing);
+-  }, [temporaryCachedState, handleKeyboardEvent]);
+-  //#endregion
+-
+   return {
+     state,
+     textInputNodesRef
+   };
+ };
+\ No newline at end of file
+-//# sourceMappingURL=useAnimatedKeyboard.js.map
+\ No newline at end of file
+diff --git a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts
+index 24cdee0..2810bff 100644
+--- a/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts
++++ b/node_modules/@gorhom/bottom-sheet/src/hooks/useAnimatedKeyboard.ts
+@@ -148,7 +148,7 @@ export const useAnimatedKeyboard = () => {
+    * @link https://github.com/gorhom/react-native-bottom-sheet/issues/411
+    */
+   useAnimatedReaction(
+-    () => state.value.target,
++    () => state.get().target,
+     (result, previous) => {
+       if (!result || result === previous) {
+         return;
