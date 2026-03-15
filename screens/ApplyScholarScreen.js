@@ -18,13 +18,18 @@ export default function ApplyScholarScreen({ navigation }) {
       Alert.alert('Missing Fields', 'Please fill in all required fields.');
       return;
     }
+    const ageNum = parseInt(age);
+    if (isNaN(ageNum) || ageNum < 18 || ageNum > 100) {
+      Alert.alert('Invalid Age', 'Please enter a valid age between 18 and 100.');
+      return;
+    }
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); Alert.alert('Error', 'You must be logged in to apply.'); return; }
     const { error } = await supabase.from('scholar_applications').insert({
       user_id: user.id,
       full_name: fullName.trim(),
-      age: parseInt(age),
+      age: ageNum,
       location: location.trim(),
       education: education.trim(),
       expertise: expertise.trim(),
