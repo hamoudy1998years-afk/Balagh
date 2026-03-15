@@ -29,22 +29,25 @@ const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ vi
   );
 });
 
-// ── FIX: Accept username + avatarUrl as props — no DB fetch needed per card ───
 export default function VideoCard({
   item, player, isActive, isVisible, isTabActive = true,
   initialLiked = false, initialFollowed = false,
   onFollowChange, navigation, cardHeight,
-  username: usernameProp,   // ✅ passed from HomeScreen
-  avatarUrl: avatarUrlProp, // ✅ passed from HomeScreen
+  username: usernameProp,
+  avatarUrl: avatarUrlProp,
 }) {
 
   const { width } = useWindowDimensions();
   const { showVideoOptionsSheet } = useDownload();
+  
+  // STATES
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(item.likes_count ?? 0);
+  const [isLiking, setIsLiking] = useState(false); // FIX #2: Prevent double-tap
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [paused, setPaused] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [showPauseIcon, setShowPauseIcon] = useState(false);
@@ -52,31 +55,52 @@ export default function VideoCard({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
 
-  // ── Use props directly — no more per-card DB fetch ─────────────────────────
   const username = usernameProp ?? 'user';
   const avatarUrl = avatarUrlProp ?? null;
 
+  // FIX #1: Sync with parent prop when it changes
+  useEffect(() => { 
+    setLiked(initialLiked); 
+  }, [initialLiked]);
+
+  // FIX #3: Realtime subscription - updates count when others like
+  useEffect(() => {
+    const channel = supabase
+      .channel(`video-${item.id}`)
+      .on('postgres_changes', 
+        { event: 'UPDATE', schema: 'public', table: 'videos', filter: `id=eq.${item.id}` },
+        (payload) => {
+          setLikeCount(payload.new.likes_count);
+        }
+      )
+      .subscribe();
+      
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [item.id]);
+
   const requireAuth = useCallback(() => {
-    if (!currentUserId) {
-      Alert.alert(
-        'Join Bushrann',
-        'Login or create an account to interact with content.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Login', onPress: () => navigation.navigate('Login') },
-        ]
-      );
-      return false;
-    }
-    return true;
-  }, [currentUserId, navigation]);
+  if (authLoading) return false; // Add this line first
+  if (!currentUserId) {
+    Alert.alert(
+      'Join Bushrann',
+      'Login or create an account to interact with content.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Login', onPress: () => navigation.navigate('Login') },
+      ]
+    );
+    return false;
+  }
+  return true;
+}, [currentUserId, authLoading, navigation]); // Add authLoading here too
 
   const lastTap = useRef(null);
   const tapTimer = useRef(null);
   const hasPlayed = useRef(false);
   const insets = useSafeAreaInsets();
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       setPaused(true);
@@ -87,7 +111,6 @@ export default function VideoCard({
     };
   }, [player]);
 
-  // When scrolling to a video — always unpause it
   useEffect(() => {
     if (isActive) {
       setPaused(false);
@@ -101,7 +124,6 @@ export default function VideoCard({
     }
   }, [isActive]);
 
-  // When switching tabs back — resume whatever video is currently active
   useEffect(() => {
     if (isTabActive && isActive) {
       setPaused(false);
@@ -110,25 +132,53 @@ export default function VideoCard({
 
   useEffect(() => { setFollowed(initialFollowed); }, [initialFollowed]);
 
-  // Only fetch current user ID — lightweight, cached by Supabase client
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setCurrentUserId(data.user?.id ?? null);
+      setAuthLoading(false);
     });
   }, []);
 
+  // FIX #4: Completely rewritten handleLike
   const handleLike = useCallback(async () => {
-    if (!requireAuth()) return;
-    if (liked) {
-      setLiked(false); setLikeCount(prev => prev - 1);
-      const { error } = await supabase.from('likes').delete().eq('user_id', currentUserId).eq('video_id', item.id);
-      if (error) { setLiked(true); setLikeCount(prev => prev + 1); }
-    } else {
-      setLiked(true); setLikeCount(prev => prev + 1);
-      const { error } = await supabase.from('likes').insert({ user_id: currentUserId, video_id: item.id });
-      if (error) { setLiked(false); setLikeCount(prev => prev - 1); }
+    // Check auth AND prevent double-tap
+    if (!requireAuth() || isLiking) return;
+    
+    setIsLiking(true);
+    
+    const newLiked = !liked;
+    const countChange = newLiked ? 1 : -1;
+    
+    // Optimistic update (immediate UI feedback)
+    setLiked(newLiked);
+    setLikeCount(prev => prev + countChange);
+    
+    try {
+      if (newLiked) {
+        // Insert like - trigger will update count
+        const { error } = await supabase
+          .from('likes')
+          .insert({ user_id: currentUserId, video_id: item.id });
+          
+        if (error) throw error;
+      } else {
+        // Delete like - trigger will update count
+        const { error } = await supabase
+          .from('likes')
+          .delete()
+          .match({ user_id: currentUserId, video_id: item.id });
+          
+        if (error) throw error;
+      }
+    } catch (error) {
+      // Revert on error
+      console.log('Like error:', error);
+      setLiked(liked);
+      setLikeCount(prev => prev - countChange);
+    } finally {
+      setIsLiking(false);
     }
-  }, [liked, item, requireAuth, currentUserId]);
+  }, [liked, item, requireAuth, currentUserId, isLiking]);
 
   const handleFollow = useCallback(async () => {
     if (!requireAuth()) return;
@@ -143,7 +193,6 @@ export default function VideoCard({
       await supabase.from('follows').insert({ follower_id: user.id, following_id: item.user_id });
     }
   }, [followed, item, onFollowChange, requireAuth]);
-
 
   const handleTap = useCallback(() => {
     const now = Date.now();
@@ -268,7 +317,7 @@ export default function VideoCard({
       />
 
       <TouchableOpacity
-        style={styles.tapArea}
+        style={styles.tapAreaFull}
         onPress={handleTap}
         onLongPress={handleLongPress}
         delayLongPress={500}
@@ -318,11 +367,11 @@ export default function VideoCard({
           <Text style={styles.actionIcon}>{liked ? '❤️' : '🤍'}</Text>
           <Text style={styles.actionCount}>{likeCount}</Text>
         </AnimatedButton>
-        <AnimatedButton style={styles.actionBtn} onPress={() => { if (requireAuth()) setShowComments(true); }}>
+        <AnimatedButton onPress={() => { if (requireAuth()) setShowComments(true); }} style={styles.actionBtn}>
           <Text style={styles.actionIcon}>💬</Text>
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>
-        <AnimatedButton style={styles.actionBtn} onPress={handleShare}>
+        <AnimatedButton onPress={handleShare} style={styles.actionBtn}>
           <Text style={styles.actionIcon}>↗️</Text>
           <Text style={styles.actionCount}>Share</Text>
         </AnimatedButton>
@@ -338,29 +387,106 @@ export default function VideoCard({
 const styles = StyleSheet.create({
   card: { width: '100%', backgroundColor: '#000' },
   video: { width: '100%', height: '100%', position: 'absolute' },
-  tapArea: { position: 'absolute', top: 0, left: 0, right: 80, bottom: 0, zIndex: 1 },
-  heartOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' },
+  tapAreaFull: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    zIndex: 1 
+  },
+  heartOverlay: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    zIndex: 2, 
+    pointerEvents: 'none' 
+  },
   heartIcon: { fontSize: ms(80), opacity: 0.9 },
-  overlay: { position: 'absolute', bottom: s(80), left: s(16), right: s(80) },
+  overlay: { 
+    position: 'absolute', 
+    bottom: s(80), 
+    left: s(16), 
+    right: s(80),
+    zIndex: 3
+  },
   username: { color: '#ffffff', fontWeight: '700', fontSize: ms(15), marginBottom: 4 },
   caption: { color: '#e2e8f0', fontSize: ms(13), lineHeight: ms(18), marginBottom: 4 },
   hashtagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
   hashtag: { color: '#a78bfa', fontSize: ms(13), fontWeight: '600' },
-  actions: { position: 'absolute', right: s(12), bottom: s(100), alignItems: 'center' },
+  actions: { 
+    position: 'absolute', 
+    right: s(12), 
+    bottom: s(100), 
+    alignItems: 'center', 
+    width: s(56),
+    zIndex: 10
+  },
   actionBtn: { alignItems: 'center', marginBottom: 20 },
   actionIcon: { fontSize: ms(32) },
   actionCount: { color: '#fff', fontSize: ms(11), textAlign: 'center', marginTop: 2 },
   creatorContainer: { alignItems: 'center', marginBottom: 24 },
-  creatorAvatar: { width: s(52), height: s(52), borderRadius: s(26), backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
+  creatorAvatar: { 
+    width: s(52), 
+    height: s(52), 
+    borderRadius: s(26), 
+    backgroundColor: '#7c3aed', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    borderWidth: 2, 
+    borderColor: '#ffffff' 
+  },
   creatorAvatarFollowed: { borderColor: '#a78bfa', borderWidth: 2 },
   creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: ms(20) },
-  followBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#ff2d55', alignItems: 'center', justifyContent: 'center', marginTop: -11, borderWidth: 1.5, borderColor: '#0f0f0f' },
+  followBadge: { 
+    width: 22, 
+    height: 22, 
+    borderRadius: 11, 
+    backgroundColor: '#ff2d55', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginTop: -11, 
+    borderWidth: 1.5, 
+    borderColor: '#0f0f0f' 
+  },
   followedBadge: { backgroundColor: '#10b981' },
   followBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800', lineHeight: 14 },
-  dlOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', pointerEvents: 'none' },
-  dlBox: { backgroundColor: '#1a1d27', borderRadius: 20, padding: 28, width: '75%', alignItems: 'center', gap: 14 },
+  dlOverlay: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    zIndex: 99, 
+    backgroundColor: 'rgba(0,0,0,0.55)', 
+    pointerEvents: 'none' 
+  },
+  dlBox: { 
+    backgroundColor: '#1a1d27', 
+    borderRadius: 20, 
+    padding: 28, 
+    width: '75%', 
+    alignItems: 'center', 
+    gap: 14 
+  },
   dlTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  dlBarBg: { width: '100%', height: 8, backgroundColor: '#2d3148', borderRadius: 4, overflow: 'hidden' },
-  dlBarFill: { height: '100%', backgroundColor: '#7c3aed', borderRadius: 4 },
+  dlBarBg: { 
+    width: '100%', 
+    height: 8, 
+    backgroundColor: '#2d3148', 
+    borderRadius: 4, 
+    overflow: 'hidden' 
+  },
+  dlBarFill: { 
+    height: '100%', 
+    backgroundColor: '#7c3aed', 
+    borderRadius: 4 
+  },
   dlPercent: { color: '#a78bfa', fontSize: 22, fontWeight: '800' },
 });

@@ -248,7 +248,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     } else {
       const { data, error } = await supabase
         .from('videos')
-        .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+        .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
         .order('created_at', { ascending: false })
         .limit(20);
 
