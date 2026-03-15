@@ -82,6 +82,7 @@ export default function VideoCard({
   useEffect(() => {
     return () => {
       setPaused(true);
+      if (tapTimer.current) clearTimeout(tapTimer.current);
       if (player?.current) {
         try { player.current.seek(0); } catch (e) {}
       }
