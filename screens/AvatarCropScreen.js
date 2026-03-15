@@ -16,7 +16,6 @@ export default function AvatarCropScreen({ route, navigation }) {
   const { imageUri } = route.params;
   const insets = useSafeAreaInsets();
   const [processing, setProcessing] = useState(false);
-  const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
 
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
@@ -69,11 +68,6 @@ export default function AvatarCropScreen({ route, navigation }) {
       lastDistance.current = null;
     },
   })).current;
-
-  function onImageLoad(e) {
-    const { width: w, height: h } = e.nativeEvent.source;
-    setImageSize({ width: w, height: h });
-  }
 
   async function handleCrop() {
     try {
@@ -148,7 +142,6 @@ export default function AvatarCropScreen({ route, navigation }) {
             source={{ uri: imageUri }}
             style={[styles.image, { transform: [{ translateX }, { translateY }, { scale }] }]}
             resizeMode="cover"
-            onLoad={onImageLoad}
           />
         </View>
 
