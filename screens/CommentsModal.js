@@ -305,15 +305,15 @@ const CommentList = ({
         <View style={styles.commentHeader}>
           <Text style={styles.username}>{comment.profiles?.username || 'Unknown'}</Text>
           {comment.is_pinned && <Text style={styles.pinnedBadge}>📌 Pinned</Text>}
-          <Text style={styles.timestamp}>
-            {new Date(comment.created_at).toLocaleDateString()}
-          </Text>
         </View>
 
-        <Text style={styles.commentText}>{comment.content}</Text>
+        <Text style={styles.commentText}>{comment.text}</Text>
 
         <View style={styles.commentRow}>
           <View style={styles.commentActions}>
+            <Text style={styles.timestamp}>
+              {new Date(comment.created_at).toLocaleDateString()}
+            </Text>
             {!isReply && (
               <TouchableWithoutFeedback onPress={() => onReply(comment)}>
                 <View style={styles.actionButton}>
@@ -877,8 +877,9 @@ const styles = StyleSheet.create({
   username: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#000',
+    color: '#666',
     marginRight: 8,
+    marginBottom: -8,
   },
   pinnedBadge: {
     fontSize: 11,
@@ -891,9 +892,10 @@ const styles = StyleSheet.create({
   },
   commentText: {
     fontSize: 14,
-    color: '#333',
+    color: '#000',
     lineHeight: 20,
-    marginBottom: 8,
+    marginBottom: 2,
+    fontWeight: '500',
   },
   commentActions: {
     flexDirection: 'row',
@@ -1058,7 +1060,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 4,
     paddingLeft: 8,
-    marginTop: -65,
+    marginTop: -5,
   },
   heartIcon: {
     fontSize: 20,
