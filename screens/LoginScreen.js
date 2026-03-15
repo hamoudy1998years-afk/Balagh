@@ -609,7 +609,10 @@ export default function LoginScreen({ navigation }) {
           </AnimatedButton>
 
           <AnimatedButton style={styles.facebookButton} onPress={handleFacebookLogin} disabled={facebookLoading}>
-            {facebookLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.facebookButtonText}>🔵  Continue with Facebook</Text>}
+            {facebookLoading ? <ActivityIndicator color="#fff" /> : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <MaterialCommunityIcons name="facebook" size={22} color="#fff" />
+            <Text style={styles.facebookButtonText}>Continue with Facebook</Text>
+          </View>}
           </AnimatedButton>
 
           <AnimatedButton onPress={() => navigation.navigate('Signup')}>
