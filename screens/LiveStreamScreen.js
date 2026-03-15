@@ -19,6 +19,7 @@ import { useRecentViewers } from '../hooks/useRecentViewers';
 import { useEngagedViewers } from '../hooks/useEngagedViewers';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import RNFS from 'react-native-fs';
+import { COLORS } from '../constants/theme';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
@@ -449,7 +450,7 @@ export default function LiveStreamScreen({ navigation, route }) {
               <Switch
                 value={allowQuestions}
                 onValueChange={setAllowQuestions}
-                trackColor={{ false: '#767577', true: '#7c3aed' }}
+                trackColor={{ false: '#767577', true: COLORS.gold }}
                 thumbColor={allowQuestions ? '#fff' : '#f4f3f4'}
               />
             </View>
@@ -681,8 +682,8 @@ const styles = StyleSheet.create({
   viewerText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   endBtn: { marginLeft: 'auto', backgroundColor: 'rgba(239,68,68,0.9)', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
   endBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  questionBanner: { position: 'absolute', top: 100, left: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#7c3aed', zIndex: 20 },
-  questionBannerLabel: { color: '#a78bfa', fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  questionBanner: { position: 'absolute', top: 100, left: 16, right: 16, backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: COLORS.gold, zIndex: 20 },
+  questionBannerLabel: { color: COLORS.gold, fontSize: 12, fontWeight: '700', marginBottom: 4 },
   questionBannerText: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 10 },
   questionBannerActions: { flexDirection: 'row', gap: 10 },
   answeredBtn: { flex: 1, backgroundColor: '#10b981', borderRadius: 8, padding: 8, alignItems: 'center' },
@@ -692,25 +693,25 @@ const styles = StyleSheet.create({
   bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12 },
   tabs: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   tab: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)' },
-  tabActive: { backgroundColor: '#7c3aed' },
+  tabActive: { backgroundColor: COLORS.gold },
   tabText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
   tabTextActive: { color: '#fff' },
   chatList: { maxHeight: height * 0.25, marginBottom: 8 },
   chatMessage: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4 },
-  chatUsername: { color: '#a78bfa', fontWeight: '700', fontSize: 13 },
+  chatUsername: { color: COLORS.gold, fontWeight: '700', fontSize: 13 },
   chatText: { color: '#fff', fontSize: 13 },
   chatInputRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   chatInput: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, color: 'rgba(255,255,255,0.9)', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  sendBtn: { backgroundColor: '#7c3aed', borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
+  sendBtn: { backgroundColor: COLORS.gold, borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
   sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   emptyQuestions: { padding: 20, alignItems: 'center' },
   emptyQuestionsText: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 4 },
   emptyQuestionsSubtext: { color: '#64748b', fontSize: 13, textAlign: 'center' },
   questionItem: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 12, marginBottom: 8 },
-  questionItemSelected: { borderWidth: 1, borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,0.2)' },
-  questionUsername: { color: '#a78bfa', fontSize: 12, fontWeight: '700', marginBottom: 3 },
+  questionItemSelected: { borderWidth: 1, borderColor: COLORS.gold, backgroundColor: 'rgba(245,166,35,0.2)' },
+  questionUsername: { color: COLORS.gold, fontSize: 12, fontWeight: '700', marginBottom: 3 },
   questionText: { color: '#fff', fontSize: 14 },
-  questionSelectedBadge: { color: '#a78bfa', fontSize: 11, marginTop: 4, fontWeight: '600' },
+  questionSelectedBadge: { color: COLORS.gold, fontSize: 11, marginTop: 4, fontWeight: '600' },
   cameraControls: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8 },
   flipBtnBottom: { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 10, flexDirection: 'row', alignItems: 'center' },
   flipBtnBottomText: { color: '#fff', fontSize: 14, fontWeight: '600' },
@@ -762,7 +763,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#7c3aed',
+    backgroundColor: COLORS.gold,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -796,7 +797,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   viewerListTabActive: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: COLORS.gold,
   },
   viewerListTabText: {
     color: 'rgba(255,255,255,0.6)',
@@ -818,7 +819,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   preStreamSubtitle: {
-    color: '#a78bfa',
+    color: COLORS.gold,
     fontSize: 16,
     marginBottom: 30,
   },
