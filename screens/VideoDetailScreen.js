@@ -1,26 +1,28 @@
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import VideoCard from '../components/VideoCard.js';
 import { COLORS } from '../constants/theme';
 
-export default function VideoDetailScreen() {
+export default function VideoDetailScreen({ navigation }) {
   const route = useRoute();
   const { videoId } = route.params;
   const [video, setVideo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     loadVideo();
   }, [videoId]);
 
   async function loadVideo() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('videos')
       .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
       .eq('id', videoId)
       .single();
+    if (error || !data) setError(true);
     setVideo(data);
     setLoading(false);
   }
@@ -29,6 +31,14 @@ export default function VideoDetailScreen() {
     return (
       <View style={styles.container}>
         <ActivityIndicator color={COLORS.gold} size="large" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text style={{ color: '#fff', fontSize: 16 }}>Video not found.</Text>
       </View>
     );
   }
