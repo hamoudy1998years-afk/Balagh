@@ -10,11 +10,11 @@ import { COLORS } from '../constants/theme';
 const { width, height } = Dimensions.get('window');
 const CROP_SIZE = width - 60;
 const SIDE = (width - CROP_SIZE) / 2;
-const VERT = (height - CROP_SIZE) / 2 - 80;
 
 export default function AvatarCropScreen({ route, navigation }) {
   const { imageUri } = route.params;
   const insets = useSafeAreaInsets();
+  const VERT = (height - CROP_SIZE) / 2 - insets.top;
   const [processing, setProcessing] = useState(false);
 
   const translateX = useRef(new Animated.Value(0)).current;
