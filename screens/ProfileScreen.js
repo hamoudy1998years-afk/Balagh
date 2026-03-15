@@ -145,10 +145,8 @@ export default function ProfileScreen({ route, navigation }) {
   );
 
   useEffectHook(() => {
-    if (globalUser && !currentUser) {
-      init();
-    }
-  }, [globalUser, userLoading]);
+    hasLoaded.current = false;
+  }, [targetUserId]);
 
   async function init() {
     setProfile(null);
