@@ -64,6 +64,7 @@ export default function CommentsModal({
 
   const bottomSheetRef = useRef(null);
   const snapPoints = ['68%', '92%'];
+  const COMMENT_MAX = 300;
 
   // ─── Auth ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -261,7 +262,7 @@ export default function CommentsModal({
           {replyingTo ? (
             <ReplyInput
               value={replyText}
-              onChangeText={setReplyText}
+              onChangeText={(t) => setReplyText(t.slice(0, COMMENT_MAX))}
               onSubmit={handleSubmitReply}
               onCancel={cancelReply}
               replyingTo={replyingTo}
@@ -269,7 +270,7 @@ export default function CommentsModal({
           ) : (
             <CommentInput
               value={newComment}
-              onChangeText={setNewComment}
+              onChangeText={(t) => setNewComment(t.slice(0, COMMENT_MAX))}
               onSubmit={handleSubmitComment}
               keyboardHeight={0}
               placeholder="Add comment..."
