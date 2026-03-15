@@ -18,6 +18,7 @@ import {
   Image,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.68;
@@ -82,7 +83,7 @@ export const useComments = (videoId) => {
   };
 
   // Try 'content' first, if fails we'll know
-  insertData.content = content;
+  insertData.text = content;
 
   console.log('Inserting data:', insertData);
 
@@ -129,12 +130,12 @@ export const useComments = (videoId) => {
   const editComment = useCallback(async (commentId, newContent) => {
     const { error } = await supabase
       .from('comments')
-      .update({ content: newContent, edited_at: new Date().toISOString() })
+      .update({ text: newContent, edited_at: new Date().toISOString() })
       .eq('id', commentId);
     
     if (!error) {
       setComments(prev => prev.map(c => 
-        c.id === commentId ? { ...c, content: newContent } : c
+        c.id === commentId ? { ...c, text: newContent } : c
       ));
     }
     return !error;
@@ -311,28 +312,36 @@ const CommentList = ({
 
         <Text style={styles.commentText}>{comment.content}</Text>
 
-        <View style={styles.commentActions}>
-          <TouchableWithoutFeedback onPress={() => onLike(comment.id)}>
-            <View style={styles.actionButton}>
-              <Text style={[styles.actionIcon, comment.user_liked && styles.likedIcon]}>
-                {comment.user_liked ? '♥' : '♡'}
-              </Text>
-              <Text style={styles.actionCount}>{comment.likes_count || 0}</Text>
-            </View>
-          </TouchableWithoutFeedback>
-
-          {!isReply && (
-            <TouchableWithoutFeedback onPress={() => onReply(comment)}>
+        <View style={styles.commentRow}>
+          <View style={styles.commentActions}>
+            {!isReply && (
+              <TouchableWithoutFeedback onPress={() => onReply(comment)}>
+                <View style={styles.actionButton}>
+                  <Text style={styles.actionIcon}>💬</Text>
+                  <Text style={styles.actionText}>Reply</Text>
+                </View>
+              </TouchableWithoutFeedback>
+            )}
+            <TouchableWithoutFeedback onPress={() => setActiveMenuId(activeMenuId === comment.id ? null : comment.id)}>
               <View style={styles.actionButton}>
-                <Text style={styles.actionIcon}>💬</Text>
-                <Text style={styles.actionText}>Reply</Text>
+                <Text style={styles.actionIcon}>⋮</Text>
               </View>
             </TouchableWithoutFeedback>
-          )}
+          </View>
 
-          <TouchableWithoutFeedback onPress={() => setActiveMenuId(activeMenuId === comment.id ? null : comment.id)}>
-            <View style={styles.actionButton}>
-              <Text style={styles.actionIcon}>⋮</Text>
+          {/* Heart on far right */}
+          <TouchableWithoutFeedback onPress={() => onLike(comment.id)}>
+            <View style={styles.likeButton}>
+              <Ionicons 
+                name={comment.user_liked ? 'heart' : 'heart-outline'} 
+                size={20} 
+                color={comment.user_liked ? '#ff3040' : '#666'} 
+              />
+              <Text style={styles.actionCount}>
+                {comment.likes_count >= 10000 
+                  ? `${Math.floor(comment.likes_count / 1000)}k`
+                  : comment.likes_count || 0}
+              </Text>
             </View>
           </TouchableWithoutFeedback>
         </View>
@@ -907,6 +916,7 @@ const styles = StyleSheet.create({
   actionCount: {
     fontSize: 12,
     color: '#666',
+    marginLeft: 10,
   },
   actionText: {
     fontSize: 12,
@@ -1037,6 +1047,26 @@ const styles = StyleSheet.create({
   cancelEdit: {
     fontSize: 13,
     color: '#0095f6',
+  },
+  commentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  likeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingLeft: 8,
+    marginTop: -65,
+  },
+  heartIcon: {
+    fontSize: 20,
+    color: '#666',
+  },
+  unlikedIcon: {
+    fontSize: 20,
+    color: '#666',
   },
 });
 
