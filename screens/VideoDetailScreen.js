@@ -1,4 +1,4 @@
-import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -45,6 +45,12 @@ export default function VideoDetailScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <TouchableOpacity
+        onPress={() => navigation.goBack()}
+        style={{ position: 'absolute', top: 48, left: 16, zIndex: 99 }}
+      >
+        <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>←</Text>
+      </TouchableOpacity>
       {video && (
         <VideoCard
           item={video}
