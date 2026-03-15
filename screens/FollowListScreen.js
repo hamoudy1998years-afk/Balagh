@@ -155,7 +155,7 @@ export default function FollowListScreen({ route, navigation }) {
           <Text style={styles.backBtnText}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
-          {type === 'followers' ? 'Followers' : 'Following'}
+          {username ? `@${username}'s ${type === 'followers' ? 'Followers' : 'Following'}` : (type === 'followers' ? 'Followers' : 'Following')}
         </Text>
         <View style={{ width: 40 }} />
       </View>
