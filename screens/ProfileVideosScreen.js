@@ -2,7 +2,6 @@ import { View, StyleSheet, FlatList, Text, useWindowDimensions, StatusBar } from
 import { useState, useRef } from 'react';
 import VideoCard from './VideoCard';
 import AnimatedButton from './AnimatedButton';
-import { useFocusEffect } from '@react-navigation/native';
 
 export default function ProfileVideosScreen({ route, navigation }) {
   const { height, width } = useWindowDimensions();
