@@ -2,7 +2,7 @@ import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
-import VideoCard from '../components/LiveVideoCard.js';
+import VideoCard from '../components/VideoCard.js';
 import { COLORS } from '../constants/theme';
 
 export default function VideoDetailScreen() {
