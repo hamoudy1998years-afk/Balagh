@@ -114,16 +114,16 @@ export default function VideoCard({
 
   const handleLike = useCallback(async () => {
     if (!requireAuth()) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
     if (liked) {
       setLiked(false); setLikeCount(prev => prev - 1);
-      await supabase.from('likes').delete().eq('user_id', user.id).eq('video_id', item.id);
+      const { error } = await supabase.from('likes').delete().eq('user_id', currentUserId).eq('video_id', item.id);
+      if (error) { setLiked(true); setLikeCount(prev => prev + 1); }
     } else {
       setLiked(true); setLikeCount(prev => prev + 1);
-      await supabase.from('likes').insert({ user_id: user.id, video_id: item.id });
+      const { error } = await supabase.from('likes').insert({ user_id: currentUserId, video_id: item.id });
+      if (error) { setLiked(false); setLikeCount(prev => prev - 1); }
     }
-  }, [liked, item, requireAuth]);
+  }, [liked, item, requireAuth, currentUserId]);
 
   const handleFollow = useCallback(async () => {
     if (!requireAuth()) return;
