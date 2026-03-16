@@ -11,6 +11,7 @@ import { Linking } from 'react-native';
 import ModernDialog from './ModernDialog';
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
+const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
 
 export default function UploadScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -201,7 +202,7 @@ export default function UploadScreen({ navigation }) {
       setProgressLabel('Saving...');
 
       const { error: dbError } = await supabase.from('videos').insert({
-        user_id: user.id, caption: caption.trim(), category,
+        user_id: user.id, caption: sanitize(caption), category,
         video_url: publicUrl, thumbnail_url: null,
       });
       if (dbError) throw dbError;
