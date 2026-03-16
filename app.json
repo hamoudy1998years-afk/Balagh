@@ -14,7 +14,7 @@
       "backgroundColor": "#0a1172"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "facebookAppId": "26245191448425849",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Bushrann to access your photos to update your profile picture.",
