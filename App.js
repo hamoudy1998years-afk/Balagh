@@ -33,6 +33,7 @@ import { COLORS } from './constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
+import ErrorBoundary from './components/ErrorBoundary';
 
 
 // ADD THIS IMPORT
@@ -312,7 +313,7 @@ export default function App() {
   }
 
   return (
-    // ADD UserProvider HERE - wraps everything
+    <ErrorBoundary>
     <UserProvider>
       <DownloadProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
@@ -347,5 +348,6 @@ export default function App() {
         </GestureHandlerRootView>
       </DownloadProvider>
     </UserProvider>
+    </ErrorBoundary>
   );
 }
