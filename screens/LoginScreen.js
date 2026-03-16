@@ -4,7 +4,6 @@ import {
   TextInput,
   TouchableWithoutFeedback,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   ScrollView,
   FlatList,
@@ -30,6 +29,7 @@ import * as SecureStore from 'expo-secure-store';
 import { LoginManager, AccessToken } from 'react-native-fbsdk-next';
 import { COLORS } from '../constants/theme';
 import { s, ms } from '../utils/responsive';
+import ModernDialog from './ModernDialog';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -50,6 +50,15 @@ export default function LoginScreen({ navigation }) {
   const [isCreatingPin, setIsCreatingPin] = useState(false);
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
+
+  // ModernDialog state
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
 
   // Animation value for eye icon
   const eyeOpacity = useRef(new Animated.Value(0)).current;
@@ -159,10 +168,12 @@ export default function LoginScreen({ navigation }) {
         }
 
         setLoading(false);
-        Alert.alert(
-          '⚡ Enable Instant Login',
-          'Create a 4-digit PIN to skip Google sign-in next time. Takes 10 seconds.',
-          [
+        setDialog({
+          visible: true,
+          title: '⚡ Enable Instant Login',
+          message: 'Create a 4-digit PIN to skip Google sign-in next time. Takes 10 seconds.',
+          type: 'info',
+          buttons: [
             {
               text: 'Set Up Now',
               onPress: () => {
@@ -174,11 +185,11 @@ export default function LoginScreen({ navigation }) {
             },
             {
               text: 'Use Google',
+              style: 'cancel',
               onPress: () => handleGoogleLogin(),
-              style: 'cancel'
             }
           ]
-        );
+        });
       }
     } catch (e) {
       console.log('handleAccountSelect error:', e);
@@ -213,7 +224,13 @@ export default function LoginScreen({ navigation }) {
 
   async function handleLogin() {
     if (!identifier.trim() || !password.trim()) {
-      Alert.alert('Missing Fields', 'Please enter your email/username and password.');
+      setDialog({
+        visible: true,
+        title: 'Missing Fields',
+        message: 'Please enter your email/username and password.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
 
@@ -224,7 +241,13 @@ export default function LoginScreen({ navigation }) {
       email = await resolveEmail(identifier);
     } catch (e) {
       setLoading(false);
-      Alert.alert('Login Failed', e.message);
+      setDialog({
+        visible: true,
+        title: 'Login Failed',
+        message: e.message,
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
 
@@ -232,7 +255,13 @@ export default function LoginScreen({ navigation }) {
     setLoading(false);
 
     if (error) {
-      Alert.alert('Login Failed', error.message);
+      setDialog({
+        visible: true,
+        title: 'Login Failed',
+        message: error.message,
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
 
@@ -247,10 +276,12 @@ export default function LoginScreen({ navigation }) {
       const alreadySaved = await hasCredentials(email);
       if (!alreadySaved) {
         const label = biometricType === 'face' ? 'Face ID' : 'Fingerprint';
-        Alert.alert(
-          `Enable ${label} Sign-In?`,
-          `Next time, just tap your account and use your ${label.toLowerCase()} — no typing needed.`,
-          [
+        setDialog({
+          visible: true,
+          title: `Enable ${label} Sign-In?`,
+          message: `Next time, just tap your account and use your ${label.toLowerCase()} — no typing needed.`,
+          type: 'info',
+          buttons: [
             {
               text: 'Not now',
               style: 'cancel',
@@ -269,7 +300,7 @@ export default function LoginScreen({ navigation }) {
               },
             },
           ]
-        );
+        });
       } else {
         await refreshAccountsList();
         navigation.navigate('Main');
@@ -294,7 +325,13 @@ export default function LoginScreen({ navigation }) {
     if (error) {
       setGoogleLoading(false);
       silentReAuth.current = false;
-      Alert.alert('Google Login Failed', error.message);
+      setDialog({
+        visible: true,
+        title: 'Google Login Failed',
+        message: error.message,
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
 
@@ -314,7 +351,13 @@ export default function LoginScreen({ navigation }) {
       if (!access_token) {
         setGoogleLoading(false);
         silentReAuth.current = false;
-        Alert.alert('Google Login Failed', 'Could not retrieve session. Please try again.');
+        setDialog({
+          visible: true,
+          title: 'Google Login Failed',
+          message: 'Could not retrieve session. Please try again.',
+          type: 'error',
+          buttons: [{ text: 'OK' }]
+        });
         return;
       }
 
@@ -353,12 +396,14 @@ export default function LoginScreen({ navigation }) {
       setTimeout(async () => {
         const bioAvailable = await isBiometricAvailable();
 
-        Alert.alert(
-          '⚡ Enable Instant Login?',
-          bioAvailable
+        setDialog({
+          visible: true,
+          title: '⚡ Enable Instant Login?',
+          message: bioAvailable
             ? 'Create a 4-digit PIN to skip Google sign-in next time. Just tap your account and use Face ID or fingerprint.'
             : 'Create a 4-digit PIN to skip Google sign-in next time.',
-          [
+          type: 'info',
+          buttons: [
             {
               text: 'Set Up Now',
               onPress: () => {
@@ -371,11 +416,11 @@ export default function LoginScreen({ navigation }) {
             },
             {
               text: 'Later',
+              style: 'cancel',
               onPress: () => navigation.navigate('Main'),
-              style: 'cancel'
             }
           ]
-        );
+        });
       }, 500);
     }
 
@@ -401,7 +446,13 @@ export default function LoginScreen({ navigation }) {
       await refreshUser();
       navigation.navigate('Main');
     } catch (e) {
-      Alert.alert('Facebook Login Failed', e.message);
+      setDialog({
+        visible: true,
+        title: 'Facebook Login Failed',
+        message: e.message,
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
     }
     setFacebookLoading(false);
   }
@@ -520,6 +571,54 @@ export default function LoginScreen({ navigation }) {
         }
       }
     }
+  };
+
+  const showResetPasswordDialog = () => {
+    setDialog({
+      visible: true,
+      title: 'Reset Password',
+      message: 'Enter your email to receive a reset link.',
+      type: 'info',
+      buttons: [
+        { 
+          text: 'Cancel', 
+          style: 'cancel'
+        },
+        { 
+          text: 'Send', 
+          onPress: async () => {
+            if (!identifier.trim()) { 
+              setDialog({
+                visible: true,
+                title: 'Error',
+                message: 'Enter your email first',
+                type: 'warning',
+                buttons: [{ text: 'OK' }]
+              });
+              return; 
+            }
+            const { error } = await supabase.auth.resetPasswordForEmail(identifier.trim());
+            if (error) {
+              setDialog({
+                visible: true,
+                title: 'Error',
+                message: error.message,
+                type: 'error',
+                buttons: [{ text: 'OK' }]
+              });
+            } else {
+              setDialog({
+                visible: true,
+                title: 'Sent! ✉️',
+                message: 'Check your email for the reset link.',
+                type: 'success',
+                buttons: [{ text: 'OK' }]
+              });
+            }
+          }
+        },
+      ]
+    });
   };
 
   return (
@@ -646,17 +745,7 @@ export default function LoginScreen({ navigation }) {
             </View>}
             </AnimatedButton>
 
-            <AnimatedButton onPress={() => {
-              Alert.alert('Reset Password', 'Enter your email to receive a reset link.', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Send', onPress: async () => {
-                  if (!identifier.trim()) { Alert.alert('Enter your email first'); return; }
-                  const { error } = await supabase.auth.resetPasswordForEmail(identifier.trim());
-                  if (error) Alert.alert('Error', error.message);
-                  else Alert.alert('Sent! ✉️', 'Check your email for the reset link.');
-                }},
-              ]);
-            }}>
+            <AnimatedButton onPress={showResetPasswordDialog}>
               <Text style={[styles.link, { color: COLORS.gold }]}>Forgot Password?</Text>
             </AnimatedButton>
 
@@ -738,6 +827,16 @@ export default function LoginScreen({ navigation }) {
                 </View>
               </View>
             </Modal>
+
+            {/* ModernDialog */}
+            <ModernDialog
+              visible={dialog.visible}
+              title={dialog.title}
+              message={dialog.message}
+              type={dialog.type}
+              buttons={dialog.buttons}
+              onDismiss={() => setDialog({ ...dialog, visible: false })}
+            />
           </ScrollView>
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
@@ -785,7 +884,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16, 
     color: '#ffffff', 
     fontSize: 15,
-    paddingRight: 40, // Space for eye icon
+    paddingRight: 40,
   },
   eyeButton: {
     position: 'absolute',

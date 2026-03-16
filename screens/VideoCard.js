@@ -5,13 +5,14 @@ import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
-  useWindowDimensions, Animated, Pressable, Alert, Image,
+  useWindowDimensions, Animated, Pressable, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { s, ms, screen } from '../utils/responsive';
+import { s, ms } from '../utils/responsive';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import AnimatedButton from './AnimatedButton';
+import ModernDialog from './ModernDialog';
 
 const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress }) {
   if (!visible) return null;
@@ -40,10 +41,9 @@ export default function VideoCard({
   const { width } = useWindowDimensions();
   const { showVideoOptionsSheet } = useDownload();
   
-  // STATES
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(item.likes_count ?? 0);
-  const [isLiking, setIsLiking] = useState(false); // FIX #2: Prevent double-tap
+  const [isLiking, setIsLiking] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -55,15 +55,22 @@ export default function VideoCard({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
 
+  // ModernDialog state
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
+
   const username = usernameProp ?? 'user';
   const avatarUrl = avatarUrlProp ?? null;
 
-  // FIX #1: Sync with parent prop when it changes
   useEffect(() => { 
     setLiked(initialLiked); 
   }, [initialLiked]);
 
-  // FIX #3: Realtime subscription - updates count when others like
   useEffect(() => {
     const channel = supabase
       .channel(`video-${item.id}`)
@@ -81,20 +88,22 @@ export default function VideoCard({
   }, [item.id]);
 
   const requireAuth = useCallback(() => {
-  if (authLoading) return false; // Add this line first
-  if (!currentUserId) {
-    Alert.alert(
-      'Join Bushrann',
-      'Login or create an account to interact with content.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Login', onPress: () => navigation.navigate('Login') },
-      ]
-    );
-    return false;
-  }
-  return true;
-}, [currentUserId, authLoading, navigation]); // Add authLoading here too
+    if (authLoading) return false;
+    if (!currentUserId) {
+      setDialog({
+        visible: true,
+        title: 'Join Bushrann',
+        message: 'Login or create an account to interact with content.',
+        type: 'info',
+        buttons: [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Login', onPress: () => navigation.navigate('Login') },
+        ]
+      });
+      return false;
+    }
+    return true;
+  }, [currentUserId, authLoading, navigation]);
 
   const lastTap = useRef(null);
   const tapTimer = useRef(null);
@@ -139,9 +148,7 @@ export default function VideoCard({
     });
   }, []);
 
-  // FIX #4: Completely rewritten handleLike
   const handleLike = useCallback(async () => {
-    // Check auth AND prevent double-tap
     if (!requireAuth() || isLiking) return;
     
     setIsLiking(true);
@@ -149,20 +156,17 @@ export default function VideoCard({
     const newLiked = !liked;
     const countChange = newLiked ? 1 : -1;
     
-    // Optimistic update (immediate UI feedback)
     setLiked(newLiked);
     setLikeCount(prev => prev + countChange);
     
     try {
       if (newLiked) {
-        // Insert like - trigger will update count
         const { error } = await supabase
           .from('likes')
           .insert({ user_id: currentUserId, video_id: item.id });
           
         if (error) throw error;
       } else {
-        // Delete like - trigger will update count
         const { error } = await supabase
           .from('likes')
           .delete()
@@ -171,7 +175,6 @@ export default function VideoCard({
         if (error) throw error;
       }
     } catch (error) {
-      // Revert on error
       console.log('Like error:', error);
       setLiked(liked);
       setLikeCount(prev => prev - countChange);
@@ -237,7 +240,13 @@ export default function VideoCard({
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please allow access to your media library.');
+        setDialog({
+          visible: true,
+          title: 'Permission Denied',
+          message: 'Please allow access to your media library.',
+          type: 'warning',
+          buttons: [{ text: 'OK' }]
+        });
         return;
       }
 
@@ -266,10 +275,22 @@ export default function VideoCard({
       setIsDownloading(false);
       setHasDownloaded(true);
 
-      Alert.alert('Downloaded ✅', 'Video saved to your gallery!');
+      setDialog({
+        visible: true,
+        title: 'Downloaded ✅',
+        message: 'Video saved to your gallery!',
+        type: 'success',
+        buttons: [{ text: 'OK' }]
+      });
     } catch (e) {
       setIsDownloading(false);
-      Alert.alert('Error', 'Could not download the video. Please try again.');
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: 'Could not download the video. Please try again.',
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
       console.error('Download error:', e);
     }
   }, [item]);
@@ -332,7 +353,7 @@ export default function VideoCard({
         <View style={styles.heartOverlay}><Text style={styles.heartIcon}>{paused ? '⏸️' : '▶️'}</Text></View>
       )}
 
-      <View style={styles.overlay}>
+      <View style={[styles.overlay, { bottom: insets.bottom + s(80) }]}>
         <AnimatedButton onPress={() => navigation.navigate('UserProfile', { profileUserId: item.user_id })}>
           <Text style={styles.username}>@{username}</Text>
         </AnimatedButton>
@@ -344,7 +365,7 @@ export default function VideoCard({
         )}
       </View>
 
-      <View style={styles.actions}>
+      <View style={[styles.actions, { bottom: insets.bottom + s(100) }]}>
         <View style={styles.creatorContainer}>
           <AnimatedButton onPress={() => navigation.navigate('UserProfile', { profileUserId: item.user_id })}>
             <View style={[styles.creatorAvatar, followed && styles.creatorAvatarFollowed]}>
@@ -381,6 +402,15 @@ export default function VideoCard({
       <CommentsModal visible={showComments} onClose={() => setShowComments(false)} videoId={item.id} navigation={navigation} isCreator={currentUserId === item.user_id} />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }
@@ -410,7 +440,6 @@ const styles = StyleSheet.create({
   heartIcon: { fontSize: ms(80), opacity: 0.9 },
   overlay: { 
     position: 'absolute', 
-    bottom: s(80), 
     left: s(16), 
     right: s(80),
     zIndex: 3
@@ -422,7 +451,6 @@ const styles = StyleSheet.create({
   actions: { 
     position: 'absolute', 
     right: s(12), 
-    bottom: s(100), 
     alignItems: 'center', 
     width: s(56),
     zIndex: 10

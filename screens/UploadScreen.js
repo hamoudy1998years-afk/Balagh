@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -8,6 +8,7 @@ import AnimatedButton from './AnimatedButton';
 import { userCache } from '../utils/userCache';
 import { COLORS } from '../constants/theme';
 import { Linking } from 'react-native';
+import ModernDialog from './ModernDialog';
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
@@ -25,6 +26,15 @@ export default function UploadScreen({ navigation }) {
   const [showLiveSetup, setShowLiveSetup] = useState(false);
   const [liveTitle, setLiveTitle]         = useState('');
   const [maxQuestions, setMaxQuestions]   = useState('5');
+
+  // ModernDialog state
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
 
   const scrollRef = useRef(null);
   useFocusEffect(
@@ -65,14 +75,16 @@ export default function UploadScreen({ navigation }) {
   const pickVideo = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Permission Required',
-        'Bushrann needs access to your gallery to upload videos.',
-        [
+      setDialog({
+        visible: true,
+        title: 'Permission Required',
+        message: 'Bushrann needs access to your gallery to upload videos.',
+        type: 'warning',
+        buttons: [
           { text: 'Not Now', style: 'cancel' },
           { text: 'Open Settings', onPress: () => Linking.openSettings() },
         ]
-      );
+      });
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -84,12 +96,45 @@ export default function UploadScreen({ navigation }) {
   }, []);
 
   const uploadVideo = useCallback(async () => {
-    if (!video)          { Alert.alert('No video', 'Please pick a video first.'); return; }
-    if (!caption.trim()) { Alert.alert('No caption', 'Please add a caption.'); return; }
-    if (!category)       { Alert.alert('No category', 'Please select a category.'); return; }
-    const MAX_SIZE = 500 * 1024 * 1024; // 500MB
+    if (!video) {
+      setDialog({
+        visible: true,
+        title: 'No video',
+        message: 'Please pick a video first.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
+      return;
+    }
+    if (!caption.trim()) {
+      setDialog({
+        visible: true,
+        title: 'No caption',
+        message: 'Please add a caption.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
+      return;
+    }
+    if (!category) {
+      setDialog({
+        visible: true,
+        title: 'No category',
+        message: 'Please select a category.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
+      return;
+    }
+    const MAX_SIZE = 500 * 1024 * 1024;
     if (video.fileSize && video.fileSize > MAX_SIZE) {
-      Alert.alert('File Too Large', 'Please select a video under 500MB.');
+      setDialog({
+        visible: true,
+        title: 'File Too Large',
+        message: 'Please select a video under 500MB.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
 
@@ -98,10 +143,30 @@ export default function UploadScreen({ navigation }) {
     setProgressLabel('Uploading...');
 
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { Alert.alert('Not logged in'); setUploading(false); return; }
+    if (!user) {
+      setDialog({
+        visible: true,
+        title: 'Not logged in',
+        message: 'Please log in to upload videos.',
+        type: 'info',
+        buttons: [{ text: 'OK' }]
+      });
+      setUploading(false);
+      return;
+    }
 
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { Alert.alert('Session expired', 'Please log in again.'); setUploading(false); return; }
+    if (!session) {
+      setDialog({
+        visible: true,
+        title: 'Session expired',
+        message: 'Please log in again.',
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
+      setUploading(false);
+      return;
+    }
 
     try {
       const ext      = video.uri.split('.').pop() || 'mp4';
@@ -143,19 +208,40 @@ export default function UploadScreen({ navigation }) {
 
       setProgressPercent(0); setProgressLabel(''); setUploading(false);
       setVideo(null); setCaption(''); setCategory('');
-      Alert.alert('Success! 🎉', 'Your video has been uploaded to Bushrann!');
+      setDialog({
+        visible: true,
+        title: 'Success! 🎉',
+        message: 'Your video has been uploaded to Bushrann!',
+        type: 'success',
+        buttons: [{ text: 'OK' }]
+      });
 
     } catch (error) {
       setUploading(false); setProgressPercent(0); setProgressLabel('');
       console.error('Upload error:', error);
-      Alert.alert('Upload failed', error.message);
+      setDialog({
+        visible: true,
+        title: 'Upload failed',
+        message: error.message,
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
     }
   }, [video, caption, category]);
 
   const handleGoLive = useCallback(() => { setShowLiveSetup(true); }, []);
 
   const startLiveStream = useCallback(() => {
-    if (!liveTitle.trim()) { Alert.alert('Title required', 'Please enter a title for your live stream.'); return; }
+    if (!liveTitle.trim()) {
+      setDialog({
+        visible: true,
+        title: 'Title required',
+        message: 'Please enter a title for your live stream.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
+      return;
+    }
     const max = parseInt(maxQuestions) || 5;
     setShowLiveSetup(false); setLiveTitle(''); setMaxQuestions('5');
     navigation.navigate('LiveStream', { title: liveTitle.trim(), maxQuestions: max });
@@ -198,6 +284,15 @@ export default function UploadScreen({ navigation }) {
         <AnimatedButton style={styles.cancelBtn} onPress={() => setShowLiveSetup(false)}>
           <Text style={styles.cancelBtnText}>Cancel</Text>
         </AnimatedButton>
+
+        <ModernDialog
+          visible={dialog.visible}
+          title={dialog.title}
+          message={dialog.message}
+          type={dialog.type}
+          buttons={dialog.buttons}
+          onDismiss={() => setDialog({ ...dialog, visible: false })}
+        />
       </ScrollView>
     );
   }
@@ -291,6 +386,15 @@ export default function UploadScreen({ navigation }) {
           </Text>
         </View>
       )}
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </ScrollView>
   </KeyboardAvoidingView>
   );
