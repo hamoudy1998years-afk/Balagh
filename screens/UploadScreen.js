@@ -66,7 +66,7 @@ export default function UploadScreen({ navigation }) {
     if (status !== 'granted') {
       Alert.alert(
         'Permission Required',
-        'Please go to your phone Settings → Apps → Expo Go → Permissions → Storage and enable it.',
+        'Please go to your phone Settings → Apps → Bushrann → Permissions → Storage and enable it.',
         [{ text: 'OK' }]
       );
       return;
