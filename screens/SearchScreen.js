@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image, useWindowDimensions } from 'react-native';
 import { useState, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,34 +10,37 @@ const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds',
 
 export default function SearchScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const flatListRef = useRef(null);
   const searchTimeout = useRef(null);
+
+  const ITEM_SIZE = (width - 2) / 3;
+
   const renderResultItem = useCallback(({ item }) => (
-    <AnimatedButton onPress={() => navigation.navigate('VideoDetail', { video: item })} style={styles.resultCard}>
-      <View style={styles.resultThumbnail}>
-        {item.thumbnail_url || item.video_url ? (
-          <Image
-            source={{ uri: item.thumbnail_url || item.video_url }}
-            style={{ width: 64, height: 64, borderRadius: 10 }}
-            resizeMode="cover"
-          />
-        ) : (
-          <Text style={styles.resultThumbnailIcon}>🎬</Text>
-        )}
-      </View>
-      <View style={styles.resultInfo}>
-        <Text style={styles.resultCaption} numberOfLines={2}>{item.caption}</Text>
-        <View style={styles.resultMeta}>
-          <View style={styles.categoryTag}><Text style={styles.categoryTagText}>{item.category}</Text></View>
-          <Text style={styles.resultViews}>{item.views_count ?? 0} views</Text>
+    <AnimatedButton
+      onPress={() => navigation.navigate('VideoDetail', { videoId: item.id })}
+      style={[styles.gridItem, { width: ITEM_SIZE, height: ITEM_SIZE * 1.3 }]}
+    >
+      {item.thumbnail_url || item.video_url ? (
+        <Image
+          source={{ uri: item.thumbnail_url || item.video_url }}
+          style={styles.gridThumb}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={styles.gridThumbFallback}>
+          <Text style={{ fontSize: 28 }}>🎬</Text>
         </View>
+      )}
+      <View style={styles.gridOverlay}>
+        <Text style={styles.gridViews}>▶ {item.views_count ?? 0}</Text>
       </View>
     </AnimatedButton>
-  ), [navigation]);
+  ), [navigation, ITEM_SIZE]);
 
   useFocusEffect(
     useCallback(() => {
@@ -46,30 +49,30 @@ export default function SearchScreen({ navigation }) {
   );
 
   const handleSearch = useCallback((text) => {
-      setQuery(text);
-      if (text.trim().length < 2) { setResults([]); return; }
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-      searchTimeout.current = setTimeout(async () => {
-        setLoading(true);
-        const sanitized = text.replace(/[%_\\]/g, '\\$&').trim();
-        let query = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
-        if (selectedCategory !== 'All') query = query.eq('category', selectedCategory);
-        const { data, error } = await query.limit(20);
-        if (error) { console.warn('Search error:', error.message); setResults([]); setLoading(false); return; }
-        setResults(data ?? []);
-        setLoading(false);
-      }, 400);
-    }, [selectedCategory]);
+    setQuery(text);
+    if (text.trim().length < 2) { setResults([]); return; }
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    searchTimeout.current = setTimeout(async () => {
+      setLoading(true);
+      const sanitized = text.replace(/[%_\\]/g, '\\$&').trim();
+      let q = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
+      if (selectedCategory !== 'All') q = q.eq('category', selectedCategory);
+      const { data, error } = await q.limit(30);
+      if (error) { console.warn('Search error:', error.message); setResults([]); setLoading(false); return; }
+      setResults(data ?? []);
+      setLoading(false);
+    }, 400);
+  }, [selectedCategory]);
 
   const handleCategory = useCallback(async (cat) => {
     setSelectedCategory(cat);
     setLoading(true);
     if (cat === 'All') {
-      const { data, error } = await supabase.from('videos').select('*').limit(20);
+      const { data, error } = await supabase.from('videos').select('*').limit(30);
       if (error) { console.warn('Category error:', error.message); setResults([]); setLoading(false); return; }
       setResults(data ?? []);
     } else {
-      const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(20);
+      const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(30);
       setResults(data ?? []);
     }
     setLoading(false);
@@ -124,9 +127,10 @@ export default function SearchScreen({ navigation }) {
           ref={flatListRef}
           data={results}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.resultsList}
+          numColumns={3}
+          contentContainerStyle={styles.gridList}
           removeClippedSubviews={true}
-          maxToRenderPerBatch={6}
+          maxToRenderPerBatch={9}
           windowSize={5}
           renderItem={renderResultItem}
         />
@@ -152,14 +156,10 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyText: { color: '#111111', fontSize: 16, fontWeight: '600', marginBottom: 6 },
   emptySubtext: { color: '#888888', fontSize: 14 },
-  resultsList: { paddingHorizontal: 16, paddingBottom: 40 },
-  resultCard: { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 12, padding: 12, marginBottom: 10, gap: 12, alignItems: 'center', borderWidth: 0.5, borderColor: '#e5e5e5' },
-  resultThumbnail: { width: 64, height: 64, borderRadius: 10, backgroundColor: '#e5e5e5', alignItems: 'center', justifyContent: 'center' },
-  resultThumbnailIcon: { fontSize: 28 },
-  resultInfo: { flex: 1 },
-  resultCaption: { color: '#111111', fontSize: 14, fontWeight: '600', marginBottom: 8, lineHeight: 20 },
-  resultMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  categoryTag: { backgroundColor: `${COLORS.gold}20`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  categoryTagText: { color: COLORS.goldDark, fontSize: 11, fontWeight: '700' },
-  resultViews: { color: '#888888', fontSize: 12 },
+  gridList: { paddingBottom: 40 },
+  gridItem: { padding: 1, backgroundColor: '#f0f0f0' },
+  gridThumb: { width: '100%', height: '100%' },
+  gridThumbFallback: { width: '100%', height: '100%', backgroundColor: '#e5e5e5', alignItems: 'center', justifyContent: 'center' },
+  gridOverlay: { position: 'absolute', bottom: 4, left: 4 },
+  gridViews: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
 });
