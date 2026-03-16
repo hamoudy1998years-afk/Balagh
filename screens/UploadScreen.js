@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { userCache } from '../utils/userCache';
 import { COLORS } from '../constants/theme';
+import { Linking } from 'react-native';
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
@@ -66,8 +67,11 @@ export default function UploadScreen({ navigation }) {
     if (status !== 'granted') {
       Alert.alert(
         'Permission Required',
-        'Please go to your phone Settings → Apps → Bushrann → Permissions → Storage and enable it.',
-        [{ text: 'OK' }]
+        'Bushrann needs access to your gallery to upload videos.',
+        [
+          { text: 'Not Now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]
       );
       return;
     }
