@@ -266,6 +266,7 @@ export default function App() {
 
   // ADD THIS HELPER FUNCTION
   async function handleDeepLink(url) {
+    if (!url || !url.startsWith('bushrann://')) return;
     
     // Check if it's a recovery link
     if (url.includes('type=recovery')) {
