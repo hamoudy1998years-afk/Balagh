@@ -31,6 +31,7 @@ import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
 import { COLORS } from './constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { usePushNotifications } from './hooks/usePushNotifications';
 
 
 // ADD THIS IMPORT
@@ -209,6 +210,7 @@ function MainTabs({ session }) {
 export default function App() {
   const [session, setSession] = useState(undefined);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
+  usePushNotifications();
 
   useEffect(() => {
     runMigrationIfNeeded();
