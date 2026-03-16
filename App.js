@@ -24,12 +24,14 @@ import { useBiometricAuth } from './hooks/useBiometricAuth';
 import FollowListScreen from './screens/FollowListScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import AvatarCropScreen from './screens/AvatarCropScreen';
+import VideoDetailScreen from './screens/VideoDetailScreen';
 import { useEffect, useState } from 'react';
 import React from 'react';
 import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
 import { COLORS } from './constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+
 
 // ADD THIS IMPORT
 import { UserProvider } from './context/UserContext';
@@ -92,14 +94,13 @@ function MainTabs({ session }) {
     const state = navigation.getState();
     const mainRoute = state?.routes?.find(r => r.name === 'Main');
     const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
-
-    if (activeTab === 'Home') {
-      // Already on home — refresh the feed
+    
+    // If activeTab is undefined (navigator not ready) OR we're on Home, do refresh
+    if (!activeTab || activeTab === 'Home') {
       if (homeRefreshRef.current) {
         homeRefreshRef.current();
       }
     } else {
-      // On another screen — just navigate back to home
       navigation.navigate('Main', { screen: 'Home' });
     }
   };
@@ -261,6 +262,7 @@ export default function App() {
                   <Stack.Screen name="Settings" component={SettingsScreen} />
                   <Stack.Screen name="UserProfile" component={ProfileScreen} />
                   <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
+                  <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
                 </Stack.Navigator>
                 <GlobalVideoOptionsSheet />
               </NavigationContainer>

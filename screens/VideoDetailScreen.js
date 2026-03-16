@@ -1,13 +1,15 @@
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
 import { useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
-import VideoCard from '../components/VideoCard.js';
+import VideoCard from '../screens/VideoCard';
 import { COLORS } from '../constants/theme';
 
 export default function VideoDetailScreen({ navigation }) {
   const route = useRoute();
   const { videoId } = route.params;
+  const { height } = useWindowDimensions();
+  const playerRef = useRef(null);
   const [video, setVideo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -43,7 +45,7 @@ export default function VideoDetailScreen({ navigation }) {
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={styles.center}>
         <ActivityIndicator color={COLORS.gold} size="large" />
       </View>
     );
@@ -51,7 +53,7 @@ export default function VideoDetailScreen({ navigation }) {
 
   if (error) {
     return (
-      <View style={styles.container}>
+      <View style={styles.center}>
         <Text style={{ color: '#fff', fontSize: 16 }}>Video not found.</Text>
       </View>
     );
@@ -61,16 +63,18 @@ export default function VideoDetailScreen({ navigation }) {
     <View style={styles.container}>
       <TouchableOpacity
         onPress={() => navigation.goBack()}
-        style={{ position: 'absolute', top: 48, left: 16, zIndex: 99 }}
+        style={styles.backBtn}
       >
-        <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>←</Text>
+        <Text style={styles.backText}>←</Text>
       </TouchableOpacity>
       {video && (
         <VideoCard
           item={video}
+          player={playerRef}
           isActive={true}
           isVisible={true}
           isTabActive={true}
+          cardHeight={height}
           initialLiked={video.initialLiked ?? false}
           initialFollowed={video.initialFollowed ?? false}
           username={video.profiles?.username ?? 'user'}
@@ -83,9 +87,8 @@ export default function VideoDetailScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#000' },
+  center: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { position: 'absolute', top: 48, left: 16, zIndex: 99 },
+  backText: { color: '#fff', fontSize: 28, fontWeight: '700' },
 });
