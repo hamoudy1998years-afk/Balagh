@@ -23,6 +23,7 @@
       }
     },
     "android": {
+      "largeHeap": true,
       "navigationBar": {
         "backgroundColor": "#000000",
         "barStyle": "light-content"

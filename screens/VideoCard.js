@@ -334,6 +334,12 @@ export default function VideoCard({
         playWhenInactive={false}
         ignoreSilentSwitch="ignore"
         progressUpdateInterval={250}
+        bufferConfig={{
+          minBufferMs: 2500,
+          maxBufferMs: 10000,
+          bufferForPlaybackMs: 1000,
+          bufferForPlaybackAfterRebufferMs: 2000,
+        }}
         onError={(e) => console.log('Video error:', e)}
         useTextureView={false}
       />
