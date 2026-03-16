@@ -265,7 +265,6 @@ export default function App() {
 
   // ADD THIS HELPER FUNCTION
   async function handleDeepLink(url) {
-    console.log('🔥 DEEP LINK URL:', url);
     
     // Check if it's a recovery link
     if (url.includes('type=recovery')) {

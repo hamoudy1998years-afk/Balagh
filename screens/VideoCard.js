@@ -314,6 +314,7 @@ export default function VideoCard({
         ignoreSilentSwitch="ignore"
         progressUpdateInterval={250}
         onError={(e) => console.log('Video error:', e)}
+        useTextureView={false}
       />
 
       <TouchableOpacity
