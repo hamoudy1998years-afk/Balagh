@@ -65,6 +65,7 @@ export default function CommentsModal({
   const bottomSheetRef = useRef(null);
   const snapPoints = ['68%', '92%'];
   const COMMENT_MAX = 300;
+  const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
 
   // ─── Auth ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -147,17 +148,19 @@ export default function CommentsModal({
 
   // ─── Comment actions ──────────────────────────────────────────────────────
   const handleSubmitComment = async () => {
-    if (!newComment.trim() || posting) return;
-    await postComment(newComment);
+    const clean = sanitize(newComment);
+    if (!clean || posting) return;
+    await postComment(clean);
     setNewComment('');
     Keyboard.dismiss();
     Vibration.vibrate(10);
   };
 
   const handleSubmitReply = async () => {
-    if (!replyText.trim() || !replyingTo || posting) return;
+    const cleanReply = sanitize(replyText);
+    if (!cleanReply || !replyingTo || posting) return;
     const parentId = replyingTo.id;
-    await postComment(replyText, parentId);
+    await postComment(cleanReply, parentId);
     setJustRepliedTo(parentId);
     setReplyText('');
     setReplyingTo(null);
