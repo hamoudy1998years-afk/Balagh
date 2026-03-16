@@ -141,28 +141,17 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       setIsTabActive(true);
     },
     setActive: (val) => {
-      console.log('>>> setActive called:', val, 'type:', type);
-      if (!val) {
-        console.log('>>> WHO PAUSED ME?');
-      }
-      setIsTabActive(!!val);
-    },
+        setIsTabActive(!!val);
+      },
   }));
 
   // ── Load first video when videos array arrives ─────────────────────────────
   useEffect(() => {
-    console.log('>>> useEffect[videos] fired, videos.length:', videos.length);
     if (videos.length === 0) return;
-    if (isRefreshingRef.current) {           // ← ADD THIS HERE
-      console.log('>>> SKIPPING - refresh in progress');
-      return;
-    }
+    if (isRefreshingRef.current) return;
     if (prevIndexRef.current === -1) prevIndexRef.current = 0;
     playerPool.loadVideo('current', videos[0].video_url);
-    console.log('>>> loaded video[0], isTabActive:', isTabActive);
     if (isTabActive) playerPool.playCurrent();
-    // ...
-    console.log('>>> useEffect[videos] setting activeIndex to 0');
     setActiveIndex(0);
   }, [videos]);
 
@@ -194,14 +183,12 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
   // ── Pause / resume when tab focus changes ─────────────────────────────────
   useEffect(() => {
-  console.log('>>> isTabActive CHANGED to:', isTabActive);
-  if (isTabActive) {
-    try { playerPool.playCurrent(); } catch (e) {}
-  } else {
-    console.log('>>> PAUSING - isTabActive is false');
-    try { playerPool.pauseAll(); } catch (e) {}
-  }
-}, [isTabActive]);
+    if (isTabActive) {
+      try { playerPool.playCurrent(); } catch (e) {}
+    } else {
+      try { playerPool.pauseAll(); } catch (e) {}
+    }
+  }, [isTabActive]);
 
   // ── Load data on mount ─────────────────────────────────────────────────────
   useEffect(() => {
