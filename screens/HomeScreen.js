@@ -126,31 +126,43 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const flatListRef = useRef(null);
   const playerPool = useVideoPlayerPool();
   const prevIndexRef = useRef(0);
+  const isRefreshingRef = useRef(false);
 
   // ── Imperative handle ──────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     refresh: async () => {
+      isRefreshingRef.current = true;
       setActiveIndex(0);
-      prevIndexRef.current = -1;
+      prevIndexRef.current = 0;
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      // Force fresh fetch, skip cache
-      feedCache[type] = null;
-      feedCache.ts[type] = null;
-      loadVideos();
-      loadMyInteractions();
+      await loadVideos();
+      await loadMyInteractions();
+      isRefreshingRef.current = false;
+      setIsTabActive(true);
     },
     setActive: (val) => {
+      console.log('>>> setActive called:', val, 'type:', type);
+      if (!val) {
+        console.log('>>> WHO PAUSED ME?');
+      }
       setIsTabActive(!!val);
     },
   }));
 
   // ── Load first video when videos array arrives ─────────────────────────────
   useEffect(() => {
+    console.log('>>> useEffect[videos] fired, videos.length:', videos.length);
     if (videos.length === 0) return;
+    if (isRefreshingRef.current) {           // ← ADD THIS HERE
+      console.log('>>> SKIPPING - refresh in progress');
+      return;
+    }
     if (prevIndexRef.current === -1) prevIndexRef.current = 0;
     playerPool.loadVideo('current', videos[0].video_url);
+    console.log('>>> loaded video[0], isTabActive:', isTabActive);
     if (isTabActive) playerPool.playCurrent();
-    if (videos[1]) playerPool.loadVideo('next', videos[1].video_url);
+    // ...
+    console.log('>>> useEffect[videos] setting activeIndex to 0');
     setActiveIndex(0);
   }, [videos]);
 
@@ -178,20 +190,18 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     if (prevVideo) playerPool.loadVideo('prev', prevVideo.video_url);
 
     prevIndexRef.current = activeIndex;
-
-    return () => {
-      try { playerPool.pauseAll(); } catch (e) {}
-    };
   }, [activeIndex, videos]);
 
   // ── Pause / resume when tab focus changes ─────────────────────────────────
   useEffect(() => {
-    if (isTabActive) {
-      try { playerPool.playCurrent(); } catch (e) {}
-    } else {
-      try { playerPool.pauseAll(); } catch (e) {}
-    }
-  }, [isTabActive]);
+  console.log('>>> isTabActive CHANGED to:', isTabActive);
+  if (isTabActive) {
+    try { playerPool.playCurrent(); } catch (e) {}
+  } else {
+    console.log('>>> PAUSING - isTabActive is false');
+    try { playerPool.pauseAll(); } catch (e) {}
+  }
+}, [isTabActive]);
 
   // ── Load data on mount ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -243,7 +253,9 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       const result = data ?? [];
       feedCache.following = result;
       feedCache.ts.following = Date.now();
-      setVideos(result);
+      if (result[0]?.id !== videos[0]?.id) {
+        setVideos(result);
+      }
 
     } else {
       const { data, error } = await supabase
@@ -261,7 +273,9 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       const shuffled = arr;
       feedCache.foryou = shuffled;
       feedCache.ts.foryou = Date.now();
-      setVideos(shuffled);
+      if (shuffled[0]?.id !== videos[0]?.id) {
+        setVideos(shuffled);
+      }
     }
 
     setLoading(false);
@@ -296,8 +310,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
   async function onRefresh() {
     setRefreshing(true);
-    feedCache[type] = null;
-    feedCache.ts[type] = null;
     await Promise.all([loadVideos(), loadMyInteractions()]);
     setRefreshing(false);
   }
@@ -397,8 +409,11 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => {
     homeRefreshRef.current = () => {
-      if (index === 0) followingRef.current?.refresh();
-      else if (index === 1) foryouRef.current?.refresh();
+      if (index === 0) {
+        followingRef.current?.refresh();  // remove setActive(true) here
+      } else if (index === 1) {
+        foryouRef.current?.refresh();     // remove setActive(true) here
+      }
     };
   }, [index]);
 
