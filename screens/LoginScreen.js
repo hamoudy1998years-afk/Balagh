@@ -537,7 +537,7 @@ export default function LoginScreen({ navigation }) {
             nestedScrollEnabled={true}
           >
             <AnimatedButton onPress={() => navigation.navigate('Main')} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
-              <Text style={{ color: '#a78bfa', fontSize: 16 }}>← Back</Text>
+              <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
             </AnimatedButton>
             <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
             <Text style={styles.title}>Bushrann</Text>
