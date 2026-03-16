@@ -1,4 +1,4 @@
-import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -25,13 +25,14 @@ import FollowListScreen from './screens/FollowListScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import AvatarCropScreen from './screens/AvatarCropScreen';
 import VideoDetailScreen from './screens/VideoDetailScreen';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import React from 'react';
 import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
 import { COLORS } from './constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
+import ResetPasswordScreen from './screens/ResetPasswordScreen';
 
 
 // ADD THIS IMPORT
@@ -207,13 +208,38 @@ function MainTabs({ session }) {
   );
 }
 
+// ADD THIS - tells React Navigation how to handle deep links
+const linking = {
+  prefixes: ['bushrann://'],
+  config: {
+    screens: {
+      ResetPassword: 'auth/callback',
+    },
+  },
+};
+
 export default function App() {
   const [session, setSession] = useState(undefined);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
+  const navigationRef = useRef(null);
 
   useEffect(() => {
     runMigrationIfNeeded();
+
+    // Handle app opened from killed state
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        handleDeepLink(url);
+      }
+    });
+
+    // Handle app opened from background
+    const linkingSub = Linking.addEventListener('url', ({ url }) => {
+      if (url) {
+        handleDeepLink(url);
+      }
+    });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -222,13 +248,61 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
 
+      if (_event === 'PASSWORD_RECOVERY') {
+        navigationRef.current?.navigate('ResetPassword');
+      }
+
       if (_event === 'TOKEN_REFRESHED' && session?.user?.email && session?.refresh_token) {
         updateStoredGoogleToken(session.user.email, session.refresh_token);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      linkingSub.remove();
+    };
   }, []);
+
+  // ADD THIS HELPER FUNCTION
+  async function handleDeepLink(url) {
+    console.log('🔥 DEEP LINK URL:', url);
+    
+    // Check if it's a recovery link
+    if (url.includes('type=recovery')) {
+      console.log('✅ Recovery link detected!');
+      
+      // Extract tokens from URL hash or query
+      const hashIndex = url.indexOf('#');
+      const queryIndex = url.indexOf('?');
+      const paramStart = hashIndex !== -1 ? hashIndex + 1 : (queryIndex !== -1 ? queryIndex + 1 : null);
+      
+      if (paramStart) {
+        const params = new URLSearchParams(url.substring(paramStart));
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
+        
+        console.log('Access token found:', !!access_token);
+        
+        if (access_token) {
+          // Set session manually
+          const { data, error } = await supabase.auth.setSession({
+            access_token,
+            refresh_token: refresh_token || '',
+          });
+          
+          if (error) {
+            console.log('❌ Session error:', error.message);
+          } else {
+            console.log('✅ Session set!');
+            // Navigate to ResetPassword
+            setTimeout(() => {
+              navigationRef.current?.navigate('ResetPassword');
+            }, 500);
+          }
+        }
+      }
+    }
+  }
 
   if (session === undefined) {
     return (
@@ -246,7 +320,7 @@ export default function App() {
           <SafeAreaProvider>
             <StatusBar style="light" translucent backgroundColor="transparent" />
             <BottomSheetModalProvider>
-              <NavigationContainer>
+              <NavigationContainer ref={navigationRef} linking={linking}>
                 <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
                   <Stack.Screen name="Main">
                     {() => <MainTabs session={session} />}
@@ -265,6 +339,7 @@ export default function App() {
                   <Stack.Screen name="UserProfile" component={ProfileScreen} />
                   <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
                   <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
+                  <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
                 </Stack.Navigator>
                 <GlobalVideoOptionsSheet />
               </NavigationContainer>

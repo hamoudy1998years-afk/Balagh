@@ -1,12 +1,14 @@
 import {
   View, Text, TextInput, StyleSheet,
   Alert, ScrollView, KeyboardAvoidingView, Platform,
+  TouchableOpacity, Animated,
 } from 'react-native';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function SignupScreen({ navigation }) {
   const [username, setUsername] = useState('');
@@ -16,12 +18,36 @@ export default function SignupScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Animation values for eye icons
+  const passwordEyeOpacity = useRef(new Animated.Value(0)).current;
+  const confirmEyeOpacity = useRef(new Animated.Value(0)).current;
 
   const { saveAccount } = useBiometricAuth();
 
   const generateFakeEmail = (username, phone) => {
     const cleanPhone = phone.replace(/[^0-9]/g, '');
     return `${username.toLowerCase().trim()}_${cleanPhone}@balagh.app`;
+  };
+
+  // Toggle functions with animation
+  const togglePassword = () => {
+    setShowPassword(!showPassword);
+    Animated.timing(passwordEyeOpacity, {
+      toValue: showPassword ? 0 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const toggleConfirmPassword = () => {
+    setShowConfirmPassword(!showConfirmPassword);
+    Animated.timing(confirmEyeOpacity, {
+      toValue: showConfirmPassword ? 0 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
   };
 
   async function handleSignup() {
@@ -120,6 +146,7 @@ export default function SignupScreen({ navigation }) {
           autoComplete="off"
         />
 
+        {/* Password Input with Eye Icon */}
         <View style={styles.passwordContainer}>
           <TextInput
             style={styles.passwordInput}
@@ -131,11 +158,25 @@ export default function SignupScreen({ navigation }) {
             autoComplete="off"
             textContentType="none"
           />
-          <AnimatedButton onPress={() => setShowPassword((prev) => !prev)}>
-            <Text style={styles.eyeBtn}>{showPassword ? '🙈' : '👁️'}</Text>
-          </AnimatedButton>
+          <TouchableOpacity 
+            style={styles.eyeButton} 
+            onPress={togglePassword}
+            activeOpacity={0.7}
+          >
+            <Animated.View style={{ opacity: passwordEyeOpacity.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.6, 1]
+            })}}>
+              <MaterialCommunityIcons 
+                name={showPassword ? 'eye-off-outline' : 'eye-outline'} 
+                size={22} 
+                color={showPassword ? COLORS.gold : '#6b7280'} 
+              />
+            </Animated.View>
+          </TouchableOpacity>
         </View>
 
+        {/* Confirm Password Input with Eye Icon */}
         <View style={styles.passwordContainer}>
           <TextInput
             style={styles.passwordInput}
@@ -143,10 +184,26 @@ export default function SignupScreen({ navigation }) {
             placeholderTextColor={COLORS.textGray}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
-            secureTextEntry={!showPassword}
+            secureTextEntry={!showConfirmPassword}
             autoComplete="off"
             textContentType="none"
           />
+          <TouchableOpacity 
+            style={styles.eyeButton} 
+            onPress={toggleConfirmPassword}
+            activeOpacity={0.7}
+          >
+            <Animated.View style={{ opacity: confirmEyeOpacity.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.6, 1]
+            })}}>
+              <MaterialCommunityIcons 
+                name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} 
+                size={22} 
+                color={showConfirmPassword ? COLORS.gold : '#6b7280'} 
+              />
+            </Animated.View>
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.helperText}>
@@ -185,10 +242,26 @@ const styles = StyleSheet.create({
   passwordContainer: {
     width: '100%', flexDirection: 'row', alignItems: 'center',
     backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark,
-    borderRadius: 12, paddingHorizontal: 16, marginBottom: 10,
+    borderRadius: 12, paddingHorizontal: 16, marginBottom: 14,
+    position: 'relative',
   },
-  passwordInput: { flex: 1, paddingVertical: 16, color: COLORS.textWhite, fontSize: 15 },
-  eyeBtn: { fontSize: 20, paddingLeft: 8 },
+  passwordInput: { 
+    flex: 1, 
+    paddingVertical: 16, 
+    color: COLORS.textWhite, 
+    fontSize: 15,
+    paddingRight: 40, // Space for eye icon
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 40,
+    height: '100%',
+  },
   helperText: { width: '100%', color: COLORS.textGray, fontSize: 12, marginBottom: 20, lineHeight: 18 },
   button: {
     width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 16,

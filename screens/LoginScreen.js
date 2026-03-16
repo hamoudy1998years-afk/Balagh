@@ -13,6 +13,7 @@ import {
   Modal,
   TouchableOpacity,
   Keyboard,
+  Animated,
 } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as WebBrowser from 'expo-web-browser';
@@ -50,6 +51,9 @@ export default function LoginScreen({ navigation }) {
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
 
+  // Animation value for eye icon
+  const eyeOpacity = useRef(new Animated.Value(0)).current;
+
   const { refreshUser } = useUser();
   const suppressDropdown = useRef(false);
   const silentReAuth = useRef(false);
@@ -84,7 +88,20 @@ export default function LoginScreen({ navigation }) {
     setSavedAccounts(accounts);
   };
 
-  const closeDropdown = () => setShowDropdown(false);
+  const closeDropdown = () => {
+    setShowDropdown(false);
+    suppressDropdown.current = false;
+  };
+
+  // Toggle password visibility with animation
+  const togglePassword = () => {
+    setShowPassword(!showPassword);
+    Animated.timing(eyeOpacity, {
+      toValue: showPassword ? 0 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  };
 
   const handleAccountSelect = async (account) => {
     closeDropdown();
@@ -219,11 +236,10 @@ export default function LoginScreen({ navigation }) {
       return;
     }
 
-    // ✅ Clear old user cache before setting new one
     if (data?.user) {
       await userCache.clear();
       await userCache.set(data.user);
-      await refreshUser(); // ✅ force UserContext to reload with new user
+      await refreshUser();
     }
 
     const bioAvailable = await isBiometricAvailable();
@@ -330,7 +346,7 @@ export default function LoginScreen({ navigation }) {
 
           await userCache.clear();
           await userCache.set(userWithProfile);
-          await refreshUser(); // ✅ force UserContext to reload with new user
+          await refreshUser();
         }
       }
 
@@ -396,7 +412,6 @@ export default function LoginScreen({ navigation }) {
       return;
     }
     if (savedAccounts.length > 0) {
-      Keyboard.dismiss();
       setShowDropdown(true);
     }
   };
@@ -468,7 +483,6 @@ export default function LoginScreen({ navigation }) {
         try {
           await validateQuickPin(selectedAccount.email, enteredPin);
 
-          // Restore Supabase session after PIN verified
           const credKey = 'bushrann_creds_' + selectedAccount.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
           const savedRaw = await SecureStore.getItemAsync(credKey);
           if (savedRaw) {
@@ -481,7 +495,6 @@ export default function LoginScreen({ navigation }) {
                 setPinError('Session expired. Please login with Google again.');
                 return;
               }
-              // Update stored token with new one
               await SecureStore.setItemAsync(credKey, JSON.stringify({
                 ...creds,
                 refreshToken: data.session.refresh_token,
@@ -510,206 +523,225 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <TouchableWithoutFeedback onPress={closeDropdown}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView
-          contentContainerStyle={styles.container}
-          keyboardShouldPersistTaps="handled"
-          scrollEnabled={!showDropdown}
-          nestedScrollEnabled={true}
+    <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
+      <TouchableWithoutFeedback onPress={closeDropdown}>
+        <KeyboardAvoidingView 
+          style={{ flex: 1, backgroundColor: COLORS.bgDark }} 
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <AnimatedButton onPress={() => navigation.navigate('Main')} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
-            <Text style={{ color: '#a78bfa', fontSize: 16 }}>← Back</Text>
-          </AnimatedButton>
-          <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
-          <Text style={styles.title}>Bushrann</Text>
-          <Text style={styles.subtitle}>Welcome back</Text>
-
-          <View style={styles.inputWrapper}>
-            <TextInput
-              style={[styles.input, showDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
-              placeholder="Email, Username or Phone"
-              placeholderTextColor="#4b5563"
-              value={identifier}
-              onChangeText={handleIdentifierChange}
-              onFocus={handleIdentifierFocus}
-              onBlur={handleIdentifierBlur}
-              autoCapitalize="none"
-              autoComplete="off"
-              autoCorrect={false}
-              importantForAutofill="no"
-              textContentType="none"
-              keyboardType="default"
-            />
-
-            {showDropdown && savedAccounts.length > 0 && (
-              <ScrollView
-                style={styles.dropdown}
-                nestedScrollEnabled={true}
-                scrollEnabled={true}
-                keyboardShouldPersistTaps="handled"
-                onStartShouldSetResponder={() => true}
-              >
-                {savedAccounts.map((account, idx) => (
-                  <TouchableOpacity
-                    key={idx}
-                    style={[styles.dropdownItem, idx < savedAccounts.length - 1 && styles.dropdownItemBorder]}
-                    onPress={() => { closeDropdown(); handleAccountSelect(account); }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
-                      <Text style={styles.dropdownAvatarText}>
-                        {account.provider === 'google' ? 'G' : (account.identifier || account.email)[0].toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.dropdownInfo}>
-                      <Text style={styles.dropdownIdentifier}>{account.identifier || account.email}</Text>
-                      {account.identifier && account.identifier !== account.email && (
-                        <Text style={styles.dropdownEmail}>{account.email}</Text>
-                      )}
-                    </View>
-                    <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-          </View>
-
-          <TouchableWithoutFeedback onPress={closeDropdown}>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="Password"
-                placeholderTextColor="#4b5563"
-                value={password}
-                onChangeText={setPassword}
-                onFocus={closeDropdown}
-                secureTextEntry={!showPassword}
-                autoComplete="off"
-                textContentType="none"
-              />
-              <AnimatedButton onPress={() => setShowPassword((prev) => !prev)}>
-                <Text style={styles.eyeBtn}>{showPassword ? '🙈' : '👁️'}</Text>
-              </AnimatedButton>
-            </View>
-          </TouchableWithoutFeedback>
-
-          <AnimatedButton style={styles.button} onPress={handleLogin} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Login</Text>}
-          </AnimatedButton>
-
-          <View style={styles.dividerContainer}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <AnimatedButton style={styles.googleButton} onPress={handleGoogleLogin} disabled={googleLoading}>
-            {googleLoading ? <ActivityIndicator color="#a78bfa" /> : <Text style={styles.googleButtonText}>🔵  Continue with Google</Text>}
-          </AnimatedButton>
-
-          <AnimatedButton style={styles.facebookButton} onPress={handleFacebookLogin} disabled={facebookLoading}>
-            {facebookLoading ? <ActivityIndicator color="#fff" /> : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <MaterialCommunityIcons name="facebook" size={22} color="#fff" />
-            <Text style={styles.facebookButtonText}>Continue with Facebook</Text>
-          </View>}
-          </AnimatedButton>
-
-          <AnimatedButton onPress={() => {
-            Alert.alert('Reset Password', 'Enter your email to receive a reset link.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Send', onPress: async () => {
-                if (!identifier.trim()) { Alert.alert('Enter your email first'); return; }
-                const { error } = await supabase.auth.resetPasswordForEmail(identifier.trim());
-                if (error) Alert.alert('Error', error.message);
-                else Alert.alert('Sent! ✉️', 'Check your email for the reset link.');
-              }},
-            ]);
-          }}>
-            <Text style={[styles.link, { color: COLORS.gold }]}>Forgot Password?</Text>
-          </AnimatedButton>
-
-          <AnimatedButton onPress={() => navigation.navigate('Signup')}>
-            <Text style={styles.link}>
-              Don't have an account?{' '}
-              <Text style={styles.linkBold}>Sign up</Text>
-            </Text>
-          </AnimatedButton>
-
-          <Modal
-            animationType="slide"
-            transparent={true}
-            visible={pinModalVisible}
-            onRequestClose={() => {
-              setPinModalVisible(false);
-              setEnteredPin('');
-              setNewPin('');
-              setConfirmPin('');
-              setPinError('');
-            }}
+          <ScrollView
+            style={{ flex: 1, backgroundColor: COLORS.bgDark }}
+            contentContainerStyle={styles.container}
+            keyboardShouldPersistTaps="handled"
+            scrollEnabled={!showDropdown}
+            nestedScrollEnabled={true}
           >
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>
-                  {isCreatingPin ? 'Create Quick PIN' : 'Enter PIN'}
-                </Text>
+            <AnimatedButton onPress={() => navigation.navigate('Main')} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+              <Text style={{ color: '#a78bfa', fontSize: 16 }}>← Back</Text>
+            </AnimatedButton>
+            <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
+            <Text style={styles.title}>Bushrann</Text>
+            <Text style={styles.subtitle}>Welcome back</Text>
 
-                <Text style={styles.modalSubtitle}>
-                  {isCreatingPin
-                    ? 'This PIN is only stored on your device'
-                    : selectedAccount?.email
-                  }
-                </Text>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[styles.input, showDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
+                placeholder="Email, Username or Phone"
+                placeholderTextColor="#4b5563"
+                value={identifier}
+                onChangeText={handleIdentifierChange}
+                onFocus={handleIdentifierFocus}
+                onBlur={handleIdentifierBlur}
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect={false}
+                importantForAutofill="no"
+                textContentType="none"
+                keyboardType="default"
+              />
 
-                <View style={styles.pinDisplay}>
-                  {[0, 1, 2, 3].map((index) => (
-                    <View
-                      key={index}
-                      style={[
-                        styles.pinDot,
-                        (isCreatingPin
-                          ? (confirmPin.length > index || (confirmPin.length === 0 && newPin.length > index))
-                          : enteredPin.length > index
-                        ) && styles.pinDotFilled
-                      ]}
-                    />
-                  ))}
-                </View>
-
-                {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}
-
-                <View style={styles.keypad}>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'back', 0, 'enter'].map((key) => (
+              {showDropdown && savedAccounts.length > 0 && (
+                <ScrollView
+                  style={styles.dropdown}
+                  nestedScrollEnabled={true}
+                  scrollEnabled={true}
+                  keyboardShouldPersistTaps="handled"
+                  onStartShouldSetResponder={() => true}
+                >
+                  {savedAccounts.map((account, idx) => (
                     <TouchableOpacity
-                      key={key}
-                      style={styles.keypadButton}
-                      onPress={() => handlePinKeyPress(key)}
+                      key={idx}
+                      style={[styles.dropdownItem, idx < savedAccounts.length - 1 && styles.dropdownItemBorder]}
+                      onPress={() => { closeDropdown(); handleAccountSelect(account); }}
+                      activeOpacity={0.7}
                     >
-                      <Text style={styles.keypadButtonText}>
-                        {key === 'back' ? '⌫' : key === 'enter' ? '→' : key}
-                      </Text>
+                      <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
+                        <Text style={styles.dropdownAvatarText}>
+                          {account.provider === 'google' ? 'G' : (account.identifier || account.email)[0].toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={styles.dropdownInfo}>
+                        <Text style={styles.dropdownIdentifier}>{account.identifier || account.email}</Text>
+                        {account.identifier && account.identifier !== account.email && (
+                          <Text style={styles.dropdownEmail}>{account.email}</Text>
+                        )}
+                      </View>
+                      <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
                     </TouchableOpacity>
                   ))}
-                </View>
+                </ScrollView>
+              )}
+            </View>
 
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    setPinModalVisible(false);
-                    setEnteredPin('');
-                    setNewPin('');
-                    setConfirmPin('');
-                    setPinError('');
-                  }}
+            <TouchableWithoutFeedback onPress={closeDropdown}>
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Password"
+                  placeholderTextColor="#4b5563"
+                  value={password}
+                  onChangeText={setPassword}
+                  onFocus={closeDropdown}
+                  secureTextEntry={!showPassword}
+                  autoComplete="off"
+                  textContentType="none"
+                />
+                <TouchableOpacity 
+                  style={styles.eyeButton} 
+                  onPress={togglePassword}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Animated.View style={{ opacity: eyeOpacity.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.6, 1]
+                  })}}>
+                    <MaterialCommunityIcons 
+                      name={showPassword ? 'eye-off-outline' : 'eye-outline'} 
+                      size={22} 
+                      color={showPassword ? COLORS.gold : '#6b7280'} 
+                    />
+                  </Animated.View>
                 </TouchableOpacity>
               </View>
+            </TouchableWithoutFeedback>
+
+            <AnimatedButton style={styles.button} onPress={handleLogin} disabled={loading}>
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Login</Text>}
+            </AnimatedButton>
+
+            <View style={styles.dividerContainer}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
             </View>
-          </Modal>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </TouchableWithoutFeedback>
+
+            <AnimatedButton style={styles.googleButton} onPress={handleGoogleLogin} disabled={googleLoading}>
+              {googleLoading ? <ActivityIndicator color="#a78bfa" /> : <Text style={styles.googleButtonText}>🔵  Continue with Google</Text>}
+            </AnimatedButton>
+
+            <AnimatedButton style={styles.facebookButton} onPress={handleFacebookLogin} disabled={facebookLoading}>
+              {facebookLoading ? <ActivityIndicator color="#fff" /> : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MaterialCommunityIcons name="facebook" size={22} color="#fff" />
+              <Text style={styles.facebookButtonText}>Continue with Facebook</Text>
+            </View>}
+            </AnimatedButton>
+
+            <AnimatedButton onPress={() => {
+              Alert.alert('Reset Password', 'Enter your email to receive a reset link.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Send', onPress: async () => {
+                  if (!identifier.trim()) { Alert.alert('Enter your email first'); return; }
+                  const { error } = await supabase.auth.resetPasswordForEmail(identifier.trim());
+                  if (error) Alert.alert('Error', error.message);
+                  else Alert.alert('Sent! ✉️', 'Check your email for the reset link.');
+                }},
+              ]);
+            }}>
+              <Text style={[styles.link, { color: COLORS.gold }]}>Forgot Password?</Text>
+            </AnimatedButton>
+
+            <AnimatedButton onPress={() => navigation.navigate('Signup')}>
+              <Text style={styles.link}>
+                Don't have an account?{' '}
+                <Text style={styles.linkBold}>Sign up</Text>
+              </Text>
+            </AnimatedButton>
+
+            <Modal
+              animationType="slide"
+              transparent={true}
+              visible={pinModalVisible}
+              onRequestClose={() => {
+                setPinModalVisible(false);
+                setEnteredPin('');
+                setNewPin('');
+                setConfirmPin('');
+                setPinError('');
+              }}
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>
+                    {isCreatingPin ? 'Create Quick PIN' : 'Enter PIN'}
+                  </Text>
+
+                  <Text style={styles.modalSubtitle}>
+                    {isCreatingPin
+                      ? 'This PIN is only stored on your device'
+                      : selectedAccount?.email
+                    }
+                  </Text>
+
+                  <View style={styles.pinDisplay}>
+                    {[0, 1, 2, 3].map((index) => (
+                      <View
+                        key={index}
+                        style={[
+                          styles.pinDot,
+                          (isCreatingPin
+                            ? (confirmPin.length > index || (confirmPin.length === 0 && newPin.length > index))
+                            : enteredPin.length > index
+                          ) && styles.pinDotFilled
+                        ]}
+                      />
+                    ))}
+                  </View>
+
+                  {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}
+
+                  <View style={styles.keypad}>
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'back', 0, 'enter'].map((key) => (
+                      <TouchableOpacity
+                        key={key}
+                        style={styles.keypadButton}
+                        onPress={() => handlePinKeyPress(key)}
+                      >
+                        <Text style={styles.keypadButtonText}>
+                          {key === 'back' ? '⌫' : key === 'enter' ? '→' : key}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => {
+                      setPinModalVisible(false);
+                      setEnteredPin('');
+                      setNewPin('');
+                      setConfirmPin('');
+                      setPinError('');
+                    }}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
+    </View>
   );
 }
 
@@ -748,8 +780,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148',
     borderRadius: 12, paddingHorizontal: 16, marginBottom: 14, zIndex: 1,
   },
-  passwordInput: { flex: 1, paddingVertical: 16, color: '#ffffff', fontSize: 15 },
-  eyeBtn: { fontSize: 20, paddingLeft: 8 },
+  passwordInput: { 
+    flex: 1, 
+    paddingVertical: 16, 
+    color: '#ffffff', 
+    fontSize: 15,
+    paddingRight: 40, // Space for eye icon
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 40,
+    height: '100%',
+  },
   button: {
     width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 16,
     alignItems: 'center', marginTop: 6, marginBottom: 20, zIndex: 1, minHeight: 52, justifyContent: 'center',
