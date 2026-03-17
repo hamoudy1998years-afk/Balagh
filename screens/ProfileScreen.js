@@ -3,6 +3,7 @@ import {
   Image, Modal, Alert, useWindowDimensions,
   StatusBar, RefreshControl, Animated, Pressable,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import React, { useState, useEffect as useEffectHook, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -512,11 +513,12 @@ export default function ProfileScreen({ route, navigation }) {
         )}
       </View>
 
-      <FlatList
+      <FlashList
         ref={flatListRef}
         data={activeVideos}
         keyExtractor={(item) => item.id}
         numColumns={3}
+        estimatedItemSize={150}
         ListHeaderComponent={renderHeader}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} progressViewOffset={35} />}
         renderItem={({ item, index }) => (
@@ -530,9 +532,6 @@ export default function ProfileScreen({ route, navigation }) {
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 20, paddingTop: insets.top + 50 }}
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={6}
-        windowSize={5}
       />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
