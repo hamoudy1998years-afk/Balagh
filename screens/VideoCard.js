@@ -54,6 +54,7 @@ function VideoCard({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
+  const [showReportSheet, setShowReportSheet] = useState(false);
 
   // Tracks if user manually paused — prevents re-renders from unpausing
   const userPausedRef = useRef(false);
@@ -304,6 +305,24 @@ function VideoCard({
     }
   }, [item]);
 
+  const handleReport = useCallback(async (reason) => {
+    if (!currentUserId) return;
+    await supabase.from('reports').insert({
+      reporter_id: currentUserId,
+      reported_user_id: item.user_id,
+      video_id: item.id,
+      reason,
+    });
+    setShowReportSheet(false);
+    setDialog({
+      visible: true,
+      title: 'Report Submitted ✅',
+      message: 'Thanks for reporting. We will review this video.',
+      type: 'success',
+      buttons: [{ text: 'OK' }]
+    });
+  }, [currentUserId, item]);
+
   const handleShare = useCallback(async () => {
     await Share.share({ message: `Watch "${item.caption}" on Balagh! ☪️` });
   }, [item]);
@@ -401,7 +420,27 @@ function VideoCard({
           <Text style={styles.actionIcon}>↗️</Text>
           <Text style={styles.actionCount}>Share</Text>
         </AnimatedButton>
+        {currentUserId && currentUserId !== item.user_id && (
+          <AnimatedButton onPress={() => setShowReportSheet(true)} style={styles.actionBtn}>
+            <Text style={styles.actionIcon}>🚩</Text>
+            <Text style={styles.actionCount}>Report</Text>
+          </AnimatedButton>
+        )}
       </View>
+
+      <ModernDialog
+        visible={showReportSheet}
+        title="Report Video"
+        message="Why are you reporting this video?"
+        type="warning"
+        buttons={[
+          { text: 'Spam', onPress: () => handleReport('spam') },
+          { text: 'Inappropriate', onPress: () => handleReport('inappropriate') },
+          { text: 'Harassment', onPress: () => handleReport('harassment') },
+          { text: 'Cancel', style: 'cancel', onPress: () => setShowReportSheet(false) },
+        ]}
+        onDismiss={() => setShowReportSheet(false)}
+      />
 
       <CommentsModal visible={showComments} onClose={() => setShowComments(false)} videoId={item.id} navigation={navigation} isCreator={currentUserId === item.user_id} />
 
