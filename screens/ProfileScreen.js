@@ -127,6 +127,15 @@ export default function ProfileScreen({ route, navigation }) {
     return unsubscribe;
   }, [navigation, route?.params?.croppedUri]);
 
+  useEffectHook(() => {
+    const { DeviceEventEmitter } = require('react-native');
+    const sub = DeviceEventEmitter.addListener('followChanged', ({ userId, isFollowing }) => {
+      if (userId === currentUser?.id) return;
+      setFollowingCount(prev => isFollowing ? prev + 1 : prev - 1);
+    });
+    return () => sub.remove();
+  }, [currentUser]);
+
   const flatListRef = useRef(null);
   const hasLoaded = useRef(false);
 

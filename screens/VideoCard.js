@@ -190,6 +190,8 @@ export default function VideoCard({
     const newFollowed = !followed;
     setFollowed(newFollowed);
     if (onFollowChange) onFollowChange(item.user_id, newFollowed);
+    const { DeviceEventEmitter } = require('react-native');
+    DeviceEventEmitter.emit('followChanged', { userId: item.user_id, isFollowing: newFollowed });
     if (followed) {
       await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', item.user_id);
     } else {
