@@ -50,6 +50,9 @@ export default function LoginScreen({ navigation }) {
   const [isCreatingPin, setIsCreatingPin] = useState(false);
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
+  const [pinStep, setPinStep] = useState('create'); // 'create' or 'confirm'
+  const [visiblePin, setVisiblePin] = useState(''); // temporarily show number
+  const [visibleConfirmPin, setVisibleConfirmPin] = useState('');
 
   // ModernDialog state
   const [dialog, setDialog] = useState({ 
@@ -484,44 +487,93 @@ export default function LoginScreen({ navigation }) {
 
   const handlePinKeyPress = async (key) => {
     if (isCreatingPin) {
-      if (key === 'back') {
-        if (confirmPin.length > 0) {
-          setConfirmPin(confirmPin.slice(0, -1));
-        } else if (newPin.length > 0) {
-          setNewPin(newPin.slice(0, -1));
-        }
-      } else if (key === 'enter') {
-        if (newPin.length < 4) {
-          setPinError('Enter 4 digits');
-          return;
-        }
-        if (confirmPin.length < 4) {
-          setPinError('Confirm your PIN');
-          return;
-        }
-        if (newPin !== confirmPin) {
-          setPinError('PINs do not match');
-          setConfirmPin('');
-          return;
-        }
-
-        const saved = await saveQuickPin(selectedAccount.email, newPin);
-        if (saved) {
-          setPinModalVisible(false);
-          setNewPin('');
-          setConfirmPin('');
-          navigation.navigate('Main');
+      // STEP 1: Creating first PIN
+      if (pinStep === 'create') {
+        if (key === 'back') {
+          if (newPin.length > 0) {
+            const deletedDigit = newPin[newPin.length - 1];
+            const updated = newPin.slice(0, -1);
+            setNewPin(updated);
+            setVisiblePin(deletedDigit);
+            
+            setTimeout(() => {
+              setVisiblePin('');
+            }, 500);
+          }
+        } else if (key === 'enter') {
+          if (newPin.length !== 4) {
+            setPinError('Enter 4 digits');
+            return;
+          }
+          // Move to confirmation step
+          setPinStep('confirm');
+          setPinError('');
+          setVisiblePin('');
         } else {
-          setPinError('Failed to save PIN');
+          // Number key pressed
+          if (newPin.length < 4) {
+            const updated = newPin + key;
+            setNewPin(updated);
+            setVisiblePin(key); // Show the number
+            
+            // Hide after 500ms
+            setTimeout(() => {
+              setVisiblePin('');
+            }, 500);
+          }
         }
-      } else {
-        if (newPin.length < 4) {
-          setNewPin(newPin + key);
-        } else if (confirmPin.length < 4) {
-          setConfirmPin(confirmPin + key);
+      }
+      // STEP 2: Confirming PIN
+      else if (pinStep === 'confirm') {
+        if (key === 'back') {
+          if (confirmPin.length > 0) {
+            const deletedDigit = confirmPin[confirmPin.length - 1];
+            const updated = confirmPin.slice(0, -1);
+            setConfirmPin(updated);
+            setVisibleConfirmPin(deletedDigit);
+            
+            setTimeout(() => {
+              setVisibleConfirmPin('');
+            }, 500);
+          }
+        } else if (key === 'enter') {
+          if (confirmPin.length !== 4) {
+            setPinError('Enter 4 digits');
+            return;
+          }
+          if (newPin !== confirmPin) {
+            setPinError('PINs do not match');
+            setConfirmPin('');
+            setVisibleConfirmPin('');
+            return;
+          }
+
+          const saved = await saveQuickPin(selectedAccount.email, newPin);
+          if (saved) {
+            setPinModalVisible(false);
+            setNewPin('');
+            setConfirmPin('');
+            setPinStep('create');
+            navigation.navigate('Main');
+          } else {
+            setPinError('Failed to save PIN');
+          }
+        } else {
+          // Number key pressed
+          if (confirmPin.length < 4) {
+            const updated = confirmPin + key;
+            setConfirmPin(updated);
+            setVisibleConfirmPin(key); // Show the number
+            
+            // Hide after 500ms
+            setTimeout(() => {
+              setVisibleConfirmPin('');
+            }, 500);
+          }
         }
       }
     } else {
+      // Existing code for entering PIN (not creating) - keep as is
       if (key === 'back') {
         setEnteredPin(enteredPin.slice(0, -1));
         setPinError('');
@@ -773,34 +825,68 @@ export default function LoginScreen({ navigation }) {
                 setNewPin('');
                 setConfirmPin('');
                 setPinError('');
+                setPinStep('create');
+                setVisiblePin('');
+                setVisibleConfirmPin('');
               }}
             >
               <View style={styles.modalOverlay}>
                 <View style={styles.modalContent}>
                   <Text style={styles.modalTitle}>
-                    {isCreatingPin ? 'Create Quick PIN' : 'Enter PIN'}
-                  </Text>
-
-                  <Text style={styles.modalSubtitle}>
-                    {isCreatingPin
-                      ? 'This PIN is only stored on your device'
-                      : selectedAccount?.email
+                    {isCreatingPin 
+                      ? (pinStep === 'confirm' ? 'Confirm your PIN' : 'Create Quick PIN')
+                      : 'Enter PIN'
                     }
                   </Text>
 
+                  {isCreatingPin && pinStep === 'confirm' ? (
+                    <Text style={styles.modalSubtitleHighlight}>
+                      Re-enter your PIN to confirm
+                    </Text>
+                  ) : (
+                    <Text style={styles.modalSubtitle}>
+                      {isCreatingPin
+                        ? 'This PIN is only stored on your device'
+                        : selectedAccount?.email
+                      }
+                    </Text>
+                  )}
                   <View style={styles.pinDisplay}>
-                    {[0, 1, 2, 3].map((index) => (
-                      <View
-                        key={index}
-                        style={[
-                          styles.pinDot,
-                          (isCreatingPin
-                            ? (confirmPin.length > index || (confirmPin.length === 0 && newPin.length > index))
-                            : enteredPin.length > index
-                          ) && styles.pinDotFilled
-                        ]}
-                      />
-                    ))}
+                    {[0, 1, 2, 3].map((index) => {
+                      let isFilled = false;
+                      let showNumber = null;
+                      
+                      if (isCreatingPin) {
+                        if (pinStep === 'create') {
+                          isFilled = newPin.length > index;
+                          // Show number if it's the last entered digit and visiblePin is set
+                          if (index === newPin.length - 1 && visiblePin && visiblePin !== '') {
+                            showNumber = visiblePin;
+                          }
+                        } else {
+                          isFilled = confirmPin.length > index;
+                          // Show number if it's the last entered digit and visibleConfirmPin is set
+                          if (index === confirmPin.length - 1 && visibleConfirmPin && visibleConfirmPin !== '') {
+                            showNumber = visibleConfirmPin;
+                          }
+                        }
+                      } else {
+                        isFilled = enteredPin.length > index;
+                      }
+                      
+                      return (
+                        <View
+                          key={index}
+                          style={[
+                            styles.pinDot,
+                            isFilled && styles.pinDotFilled,
+                            showNumber && styles.pinDotWithNumber
+                          ]}
+                        >
+                          {showNumber && <Text style={styles.pinNumber}>{showNumber}</Text>}
+                        </View>
+                      );
+                    })}
                   </View>
 
                   {pinError ? <Text style={styles.pinError}>{pinError}</Text> : null}
@@ -827,6 +913,9 @@ export default function LoginScreen({ navigation }) {
                       setNewPin('');
                       setConfirmPin('');
                       setPinError('');
+                      setPinStep('create');
+                      setVisiblePin('');
+                      setVisibleConfirmPin('');
                     }}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -964,12 +1053,41 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 10, color: '#333' },
   modalSubtitle: { fontSize: 14, color: '#666', marginBottom: 30, textAlign: 'center' },
-  pinDisplay: { flexDirection: 'row', marginBottom: 20, gap: 15 },
-  pinDot: {
-    width: 20, height: 20, borderRadius: 10,
-    borderWidth: 2, borderColor: '#ccc', backgroundColor: 'transparent',
+  pinDisplay: { 
+    flexDirection: 'row', 
+    marginBottom: 24, 
+    gap: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  pinDotFilled: { backgroundColor: '#333', borderColor: '#333' },
+  pinDot: {
+    width: 24, 
+    height: 24, 
+    borderRadius: 12,
+    borderWidth: 2, 
+    borderColor: '#d1d5db', 
+    backgroundColor: 'transparent',
+  },
+  pinDotFilled: { 
+    backgroundColor: '#1f2937', 
+    borderColor: '#1f2937',
+  },
+  pinDotWithNumber: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  pinNumber: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
   pinError: { color: '#ff4444', marginBottom: 15, fontSize: 14 },
   keypad: {
     flexDirection: 'row', flexWrap: 'wrap',
@@ -997,5 +1115,23 @@ const styles = StyleSheet.create({
     color: '#a78bfa', fontWeight: '700', fontSize: 15,
     paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: '#2d3148',
+  },
+  pinDotWithNumber: {
+    backgroundColor: '#333',
+    borderColor: '#333',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinNumber: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalSubtitleHighlight: {
+    fontSize: 14,
+    color: '#7c3aed',
+    marginBottom: 30,
+    textAlign: 'center',
+    fontWeight: '600',
   },
 });
