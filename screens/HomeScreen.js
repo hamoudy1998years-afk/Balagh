@@ -130,6 +130,43 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     }
   }, [activeIndexRef?.current, isFocusedRef?.current, tabIndex]);
 
+  // Preload Following feed when For You loads
+  useEffect(() => {
+    if (type === 'foryou' && !isCacheValid('following')) {
+      // Silently preload following in background
+      loadFollowingInBackground();
+    }
+  }, [type]);
+
+  async function loadFollowingInBackground() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: follows } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', user.id);
+
+    if (!follows || follows.length === 0) {
+      feedCache.following = [];
+      feedCache.ts.following = Date.now();
+      return;
+    }
+
+    const followingIds = follows.map(f => f.following_id);
+
+    const { data } = await supabase
+      .from('videos')
+      .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+      .in('user_id', followingIds)
+      .neq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    feedCache.following = data ?? [];
+    feedCache.ts.following = Date.now();
+  }
+
   const flatListRef = useRef(null);
   const playerPool = useVideoPlayerPool();
   const prevIndexRef = useRef(0);
@@ -422,6 +459,46 @@ export default function HomeScreen({ navigation }) {
       pulseAnimation.stop();
     };
   }, []);
+
+  // Add this useEffect in HomeScreen (around line 170, after the pulse animation effect):
+  useEffect(() => {
+    // Preload Following feed when For You tab is active
+    if (index === 1 && isFocused) {
+      preloadFollowingFeed();
+    }
+  }, [index, isFocused]);
+
+  async function preloadFollowingFeed() {
+    if (isCacheValid('following')) return;
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: follows } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', user.id);
+
+    if (!follows || follows.length === 0) {
+      feedCache.following = [];
+      feedCache.ts.following = Date.now();
+      return;
+    }
+
+    const followingIds = follows.map(f => f.following_id);
+
+    const { data } = await supabase
+      .from('videos')
+      .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+      .in('user_id', followingIds)
+      .neq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    feedCache.following = data ?? [];
+    feedCache.ts.following = Date.now();
+    console.log('Following feed preloaded:', data?.length || 0, 'videos');
+  }
 
   useEffect(() => {
     followingRef.current?.setActive(isFocused && index === 0);
