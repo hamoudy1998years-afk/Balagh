@@ -21,7 +21,7 @@ const feedCache = {
   follows: null,
   ts: {},
 };
-const CACHE_TTL = 60 * 1000; // 1 minute — serve cache, refresh in background
+const CACHE_TTL = 60 * 1000;
 
 export function clearFeedCache() {
   feedCache.foryou = null;
@@ -130,7 +130,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const prevIndexRef = useRef(0);
   const isRefreshingRef = useRef(false);
 
-  // ── Imperative handle ──────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     refresh: async () => {
       isRefreshingRef.current = true;
@@ -147,7 +146,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       },
   }));
 
-  // ── Load first video when videos array arrives ─────────────────────────────
   useEffect(() => {
     if (videos.length === 0) return;
     if (isRefreshingRef.current) return;
@@ -157,7 +155,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     setActiveIndex(0);
   }, [videos]);
 
-  // ── Manage player pool when active index changes ───────────────────────────
   useEffect(() => {
     if (videos.length === 0) return;
 
@@ -183,7 +180,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     prevIndexRef.current = activeIndex;
   }, [activeIndex, videos]);
 
-  // ── Pause / resume when tab focus changes ─────────────────────────────────
   useEffect(() => {
     if (isTabActive) {
       try { playerPool.playCurrent(); } catch (e) {}
@@ -192,15 +188,12 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     }
   }, [isTabActive]);
 
-  // ── Load data on mount ─────────────────────────────────────────────────────
   useEffect(() => {
-    // If cache is valid, show it instantly and refresh in background
     if (isCacheValid(type)) {
       setVideos(feedCache[type]);
       setMyLikes(feedCache.likes ?? []);
       setMyFollows(feedCache.follows ?? []);
       setLoading(false);
-      // Background refresh
       loadVideos(true);
       loadMyInteractions(true);
     } else {
@@ -209,7 +202,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     }
   }, [type]);
 
-  // ── FIX 1: Single query with profile join — no more attachUsernames ────────
   async function loadVideos(background = false) {
     if (!background) setLoading(true);
 
@@ -270,7 +262,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     setLoading(false);
   }
 
-  // ── FIX 3: Load likes + follows in parallel with Promise.all ──────────────
   async function loadMyInteractions(background = false) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -345,7 +336,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
               onFollowChange={updateMyFollows}
               navigation={navigation}
               cardHeight={listHeight}
-              // ── FIX 4: Pass profile data as props — no fetch needed in VideoCard
               username={item.profiles?.username ?? 'user'}
               avatarUrl={item.profiles?.avatar_url ?? null}
             />
@@ -377,19 +367,46 @@ export default function HomeScreen({ navigation }) {
   const [routes] = useState([
     { key: 'following', title: 'Following' },
     { key: 'foryou', title: 'For You' },
-    { key: 'live', title: '🔴 Live' },
+    { key: 'live', title: 'Live' },
   ]);
 
   const { width: screenWidth } = useWindowDimensions();
   const isFocused = useIsFocused();
   const followingRef = useRef(null);
   const foryouRef = useRef(null);
+  
+  // PULSE ANIMATION SETUP - Make sure this is BEFORE any usage
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const indexRef = useRef(index);
   const isFocusedRef = useRef(isFocused);
 
   useEffect(() => { indexRef.current = index; }, [index]);
   useEffect(() => { isFocusedRef.current = isFocused; }, [isFocused]);
+
+  // PULSE ANIMATION EFFECT - This creates the looping pulse
+  useEffect(() => {
+    const pulseAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.5, // Pulse to 1.5x size (bigger for visibility)
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    
+    pulseAnimation.start();
+    
+    return () => {
+      pulseAnimation.stop();
+    };
+  }, []);
 
   useEffect(() => {
     followingRef.current?.setActive(isFocused && index === 0);
@@ -399,9 +416,9 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     homeRefreshRef.current = () => {
       if (index === 0) {
-        followingRef.current?.refresh();  // remove setActive(true) here
+        followingRef.current?.refresh();
       } else if (index === 1) {
-        foryouRef.current?.refresh();     // remove setActive(true) here
+        foryouRef.current?.refresh();
       }
     };
   }, [index]);
@@ -462,13 +479,34 @@ export default function HomeScreen({ navigation }) {
                   onPress={() => props.jumpTo(route.key)}
                   style={{ paddingHorizontal: 16, paddingVertical: 8, alignItems: 'center' }}
                 >
-                  <Text style={{
-                    color: isFocusedTab ? COLORS.gold : 'rgba(255,255,255,0.6)',
-                    fontSize: 15,
-                    fontWeight: isFocusedTab ? '700' : '600',
-                  }}>
-                    {route.title}
-                  </Text>
+                  {route.key === 'live' ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Animated.View style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: '#FF3B30',
+                        transform: [{ scale: pulseAnim }],
+                        marginRight: 6,
+                      }} />
+                      <Text style={{
+                        color: isFocusedTab ? '#FF3B30' : 'rgba(255,59,48,0.6)',
+                        fontSize: 15,
+                        fontWeight: isFocusedTab ? '700' : '600',
+                        letterSpacing: 0.5,
+                      }}>
+                        LIVE
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={{
+                      color: isFocusedTab ? COLORS.gold : 'rgba(255,255,255,0.6)',
+                      fontSize: 15,
+                      fontWeight: isFocusedTab ? '700' : '600',
+                    }}>
+                      {route.title}
+                    </Text>
+                  )}
                   <Animated.View style={{
                     marginTop: 3,
                     alignSelf: 'center',
@@ -488,7 +526,7 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
     );
-  }, [insets.top, index]);
+  }, [insets.top, index, pulseAnim]); // Added pulseAnim to dependencies
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
