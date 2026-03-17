@@ -3,21 +3,24 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import { readAsStringAsync, deleteAsync } from 'expo-file-system/legacy';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { userCache } from '../utils/userCache';
 import { COLORS } from '../constants/theme';
 import { Linking } from 'react-native';
 import ModernDialog from './ModernDialog';
+import { decode } from 'base64-arraybuffer';
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
 
 export default function UploadScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const [video, setVideo]         = useState(null);
-  const [caption, setCaption]     = useState('');
-  const [category, setCategory]   = useState('');
+  const [video, setVideo] = useState(null);
+  const [caption, setCaption] = useState('');
+  const [category, setCategory] = useState('');
   const [uploading, setUploading] = useState(false);
   const [isScholar, setIsScholar] = useState(null);
   const [scholarChecked, setScholarChecked] = useState(true);
@@ -25,10 +28,9 @@ export default function UploadScreen({ navigation }) {
   const [progressLabel, setProgressLabel] = useState('');
 
   const [showLiveSetup, setShowLiveSetup] = useState(false);
-  const [liveTitle, setLiveTitle]         = useState('');
-  const [maxQuestions, setMaxQuestions]   = useState('5');
+  const [liveTitle, setLiveTitle] = useState('');
+  const [maxQuestions, setMaxQuestions] = useState('5');
 
-  // ModernDialog state
   const [dialog, setDialog] = useState({ 
     visible: false, 
     title: '', 
@@ -98,95 +100,67 @@ export default function UploadScreen({ navigation }) {
 
   const uploadVideo = useCallback(async () => {
     if (!video) {
-      setDialog({
-        visible: true,
-        title: 'No video',
-        message: 'Please pick a video first.',
-        type: 'warning',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'No video', message: 'Please pick a video first.', type: 'warning', buttons: [{ text: 'OK' }] });
       return;
     }
     if (!caption.trim()) {
-      setDialog({
-        visible: true,
-        title: 'No caption',
-        message: 'Please add a caption.',
-        type: 'warning',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'No caption', message: 'Please add a caption.', type: 'warning', buttons: [{ text: 'OK' }] });
       return;
     }
     if (!category) {
-      setDialog({
-        visible: true,
-        title: 'No category',
-        message: 'Please select a category.',
-        type: 'warning',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'No category', message: 'Please select a category.', type: 'warning', buttons: [{ text: 'OK' }] });
       return;
     }
     const MAX_SIZE = 500 * 1024 * 1024;
     if (video.fileSize && video.fileSize > MAX_SIZE) {
-      setDialog({
-        visible: true,
-        title: 'File Too Large',
-        message: 'Please select a video under 500MB.',
-        type: 'warning',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'File Too Large', message: 'Please select a video under 500MB.', type: 'warning', buttons: [{ text: 'OK' }] });
       return;
     }
 
     setUploading(true);
     setProgressPercent(0);
-    setProgressLabel('Uploading...');
+    setProgressLabel('Generating thumbnail...');
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      setDialog({
-        visible: true,
-        title: 'Not logged in',
-        message: 'Please log in to upload videos.',
-        type: 'info',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'Not logged in', message: 'Please log in to upload videos.', type: 'info', buttons: [{ text: 'OK' }] });
       setUploading(false);
       return;
     }
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      setDialog({
-        visible: true,
-        title: 'Session expired',
-        message: 'Please log in again.',
-        type: 'error',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'Session expired', message: 'Please log in again.', type: 'error', buttons: [{ text: 'OK' }] });
       setUploading(false);
       return;
     }
 
     try {
-      const ext      = video.uri.split('.').pop() || 'mp4';
-      const fileName = `${user.id}/${Date.now()}.${ext}`;
+      // 1. GENERATE THUMBNAIL
+      const { uri: thumbnailUri } = await VideoThumbnails.getThumbnailAsync(
+        video.uri,
+        { time: 1000, quality: 0.8 }
+      );
+      setProgressPercent(10);
+      setProgressLabel('Uploading video...');
+
+      // 2. UPLOAD VIDEO
+      const ext = video.uri.split('.').pop() || 'mp4';
+      const videoFileName = `${user.id}/${Date.now()}.${ext}`;
       const SUPABASE_URL = supabase.supabaseUrl;
 
       const formData = new FormData();
-      formData.append('', { uri: video.uri, type: 'video/mp4', name: fileName.split('/').pop() });
+      formData.append('', { uri: video.uri, type: 'video/mp4', name: videoFileName.split('/').pop() });
 
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/videos/${fileName}`);
+        xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/videos/${videoFileName}`);
         xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
         xhr.setRequestHeader('x-upsert', 'false');
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            const pct = Math.min(Math.round((e.loaded / e.total) * 100), 99);
+            const pct = Math.min(Math.round((e.loaded / e.total) * 85) + 10, 95);
             setProgressPercent(pct);
-            setProgressLabel('Uploading...');
           }
         };
         xhr.onload = () => {
@@ -197,18 +171,52 @@ export default function UploadScreen({ navigation }) {
         xhr.send(formData);
       });
 
-      const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${fileName}`;
+      const videoUrl = `${SUPABASE_URL}/storage/v1/object/public/videos/${videoFileName}`;
+      setProgressPercent(95);
+      setProgressLabel('Uploading thumbnail...');
+
+      // 3. UPLOAD THUMBNAIL
+      const thumbBase64 = await readAsStringAsync(thumbnailUri, {
+        encoding: 'base64',
+      });
+      const thumbFileName = `${user.id}/${Date.now()}.jpg`;
+
+      const { error: thumbError } = await supabase.storage
+        .from('thumbnails')
+        .upload(thumbFileName, decode(thumbBase64), {
+          contentType: 'image/jpeg',
+          upsert: false
+        });
+
+      if (thumbError) throw thumbError;
+
+      const thumbnailUrl = `${SUPABASE_URL}/storage/v1/object/public/thumbnails/${thumbFileName}`;
       setProgressPercent(100);
       setProgressLabel('Saving...');
 
+      // 4. SAVE TO DATABASE
       const { error: dbError } = await supabase.from('videos').insert({
-        user_id: user.id, caption: sanitize(caption), category,
-        video_url: publicUrl, thumbnail_url: null,
+        user_id: user.id,
+        caption: sanitize(caption),
+        category,
+        video_url: videoUrl,
+        thumbnail_url: thumbnailUrl,
+        is_private: false,
+        views_count: 0,
+        likes_count: 0,
       });
+
       if (dbError) throw dbError;
 
-      setProgressPercent(0); setProgressLabel(''); setUploading(false);
-      setVideo(null); setCaption(''); setCategory('');
+      // Cleanup
+      await deleteAsync(thumbnailUri, { idempotent: true });
+      setUploading(false);
+      setProgressPercent(0);
+      setProgressLabel('');
+      setVideo(null);
+      setCaption('');
+      setCategory('');
+
       setDialog({
         visible: true,
         title: 'Success! 🎉',
@@ -218,7 +226,9 @@ export default function UploadScreen({ navigation }) {
       });
 
     } catch (error) {
-      setUploading(false); setProgressPercent(0); setProgressLabel('');
+      setUploading(false);
+      setProgressPercent(0);
+      setProgressLabel('');
       console.error('Upload error:', error);
       setDialog({
         visible: true,
@@ -234,17 +244,13 @@ export default function UploadScreen({ navigation }) {
 
   const startLiveStream = useCallback(() => {
     if (!liveTitle.trim()) {
-      setDialog({
-        visible: true,
-        title: 'Title required',
-        message: 'Please enter a title for your live stream.',
-        type: 'warning',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'Title required', message: 'Please enter a title for your live stream.', type: 'warning', buttons: [{ text: 'OK' }] });
       return;
     }
     const max = parseInt(maxQuestions) || 5;
-    setShowLiveSetup(false); setLiveTitle(''); setMaxQuestions('5');
+    setShowLiveSetup(false);
+    setLiveTitle('');
+    setMaxQuestions('5');
     navigation.navigate('LiveStream', { title: liveTitle.trim(), maxQuestions: max });
   }, [liveTitle, maxQuestions, navigation]);
 
@@ -300,154 +306,154 @@ export default function UploadScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]} keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>Upload Video</Text>
-      <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
+      <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]} keyboardShouldPersistTaps="handled">
+        <Text style={styles.title}>Upload Video</Text>
+        <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
 
-      {isScholar === true && (
-        <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
-          <Text style={styles.liveDot}>🔴</Text>
-          <Text style={styles.liveBtnText}>Go Live</Text>
-          <View style={styles.scholarBadge}>
-            <Text style={styles.scholarBadgeText}>Scholar</Text>
+        {isScholar === true && (
+          <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
+            <Text style={styles.liveDot}>🔴</Text>
+            <Text style={styles.liveBtnText}>Go Live</Text>
+            <View style={styles.scholarBadge}>
+              <Text style={styles.scholarBadgeText}>Scholar</Text>
+            </View>
+          </AnimatedButton>
+        )}
+
+        <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading}>
+          {video ? (
+            <View style={styles.videoSelected}>
+              <Text style={styles.videoSelectedIcon}>🎬</Text>
+              <Text style={styles.videoSelectedText}>Video selected!</Text>
+              <Text style={styles.videoSelectedName} numberOfLines={1}>{video.uri.split('/').pop()}</Text>
+              <Text style={styles.tapToChange}>Tap to change</Text>
+            </View>
+          ) : (
+            <View style={styles.videoPlaceholder}>
+              <Text style={styles.videoPlaceholderIcon}>📹</Text>
+              <Text style={styles.videoPlaceholderText}>Tap to select a video</Text>
+              <Text style={styles.videoPlaceholderSub}>from your camera roll</Text>
+            </View>
+          )}
+        </AnimatedButton>
+
+        <Text style={styles.label}>Caption</Text>
+        <View style={styles.inputWrapper} onLayout={(e) => { inputWrapperY.current = e.nativeEvent.layout.y; }}>
+          <TextInput
+            style={styles.input}
+            placeholder="What is this video about?"
+            placeholderTextColor="#aaaaaa"
+            value={caption}
+            onChangeText={setCaption}
+            multiline
+            maxLength={200}
+            editable={!uploading}
+          />
+          <Text style={styles.charCount}>{caption.length}/200</Text>
+        </View>
+
+        <Text style={styles.label}>Category</Text>
+        <View style={styles.categories}>
+          {CATEGORIES.map(cat => (
+            <AnimatedButton
+              key={cat}
+              style={[styles.categoryChip, category === cat && styles.categoryChipActive]}
+              onPress={() => !uploading && setCategory(cat)}
+            >
+              <Text style={[styles.categoryChipText, category === cat && styles.categoryChipTextActive]}>
+                {cat}
+              </Text>
+            </AnimatedButton>
+          ))}
+        </View>
+
+        <AnimatedButton
+          style={[styles.uploadBtn, uploading && styles.uploadBtnDisabled]}
+          onPress={uploadVideo}
+          disabled={uploading}
+        >
+          {uploading && (
+            <View style={styles.tiktokBarBg}>
+              <View style={[styles.tiktokBarFill, { width: `${progressPercent}%` }]} />
+            </View>
+          )}
+          <View style={styles.uploadBtnContent}>
+            <Text style={styles.uploadBtnText}>
+              {uploading ? progressLabel : 'Upload to Bushrann ☪️'}
+            </Text>
+            {uploading && <Text style={styles.uploadBtnPct}>{progressPercent}%</Text>}
           </View>
         </AnimatedButton>
-      )}
 
-      <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading}>
-        {video ? (
-          <View style={styles.videoSelected}>
-            <Text style={styles.videoSelectedIcon}>🎬</Text>
-            <Text style={styles.videoSelectedText}>Video selected!</Text>
-            <Text style={styles.videoSelectedName} numberOfLines={1}>{video.uri.split('/').pop()}</Text>
-            <Text style={styles.tapToChange}>Tap to change</Text>
-          </View>
-        ) : (
-          <View style={styles.videoPlaceholder}>
-            <Text style={styles.videoPlaceholderIcon}>📹</Text>
-            <Text style={styles.videoPlaceholderText}>Tap to select a video</Text>
-            <Text style={styles.videoPlaceholderSub}>from your camera roll</Text>
-          </View>
-        )}
-      </AnimatedButton>
-
-      <Text style={styles.label}>Caption</Text>
-      <View style={styles.inputWrapper} onLayout={(e) => { inputWrapperY.current = e.nativeEvent.layout.y; }}>
-        <TextInput
-          style={styles.input}
-          placeholder="What is this video about?"
-          placeholderTextColor="#aaaaaa"
-          value={caption}
-          onChangeText={setCaption}
-          multiline
-          maxLength={200}
-          editable={!uploading}
-        />
-        <Text style={styles.charCount}>{caption.length}/200</Text>
-      </View>
-
-      <Text style={styles.label}>Category</Text>
-      <View style={styles.categories}>
-        {CATEGORIES.map(cat => (
-          <AnimatedButton
-            key={cat}
-            style={[styles.categoryChip, category === cat && styles.categoryChipActive]}
-            onPress={() => !uploading && setCategory(cat)}
-          >
-            <Text style={[styles.categoryChipText, category === cat && styles.categoryChipTextActive]}>
-              {cat}
+        {scholarChecked && isScholar === false && (
+          <View style={styles.scholarInfo}>
+            <Text style={styles.scholarInfoIcon}>🎓</Text>
+            <Text style={styles.scholarInfoText}>
+              Are you a verified Islamic scholar? Contact us to get your Scholar badge and unlock live streaming.
             </Text>
-          </AnimatedButton>
-        ))}
-      </View>
-
-      <AnimatedButton
-        style={[styles.uploadBtn, uploading && styles.uploadBtnDisabled]}
-        onPress={uploadVideo}
-        disabled={uploading}
-      >
-        {uploading && (
-          <View style={styles.tiktokBarBg}>
-            <View style={[styles.tiktokBarFill, { width: `${progressPercent}%` }]} />
           </View>
         )}
-        <View style={styles.uploadBtnContent}>
-          <Text style={styles.uploadBtnText}>
-            {uploading ? progressLabel : 'Upload to Bushrann ☪️'}
-          </Text>
-          {uploading && <Text style={styles.uploadBtnPct}>{progressPercent}%</Text>}
-        </View>
-      </AnimatedButton>
 
-      {scholarChecked && isScholar === false && (
-        <View style={styles.scholarInfo}>
-          <Text style={styles.scholarInfoIcon}>🎓</Text>
-          <Text style={styles.scholarInfoText}>
-            Are you a verified Islamic scholar? Contact us to get your Scholar badge and unlock live streaming.
-          </Text>
-        </View>
-      )}
-
-      <ModernDialog
-        visible={dialog.visible}
-        title={dialog.title}
-        message={dialog.message}
-        type={dialog.type}
-        buttons={dialog.buttons}
-        onDismiss={() => setDialog({ ...dialog, visible: false })}
-      />
-    </ScrollView>
-  </KeyboardAvoidingView>
+        <ModernDialog
+          visible={dialog.visible}
+          title={dialog.title}
+          message={dialog.message}
+          type={dialog.type}
+          buttons={dialog.buttons}
+          onDismiss={() => setDialog({ ...dialog, visible: false })}
+        />
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container:              { flex: 1, backgroundColor: '#ffffff' },
+  container: { flex: 1, backgroundColor: '#ffffff' },
   content: { padding: 24 },
-  title:                  { fontSize: 24, fontWeight: '700', color: '#111111', marginBottom: 4 },
-  subtitle:               { fontSize: 14, color: '#888888', marginBottom: 28 },
-  hint:                   { color: '#888888', fontSize: 12, marginBottom: 10 },
-  liveBtn:                { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff5f5', borderWidth: 1, borderColor: COLORS.live, borderRadius: 14, padding: 16, marginBottom: 20, gap: 10 },
-  liveDot:                { fontSize: 18 },
-  liveBtnText:            { color: COLORS.live, fontSize: 16, fontWeight: '700', flex: 1 },
-  scholarBadge:           { backgroundColor: COLORS.live, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  scholarBadgeText:       { color: '#fff', fontSize: 11, fontWeight: '700' },
-  videoPicker:            { backgroundColor: '#f5f5f5', borderRadius: 16, borderWidth: 2, borderColor: '#e5e5e5', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
-  videoPlaceholder:       { padding: 40, alignItems: 'center' },
-  videoPlaceholderIcon:   { fontSize: 48, marginBottom: 12 },
-  videoPlaceholderText:   { color: '#111111', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  videoPlaceholderSub:    { color: '#888888', fontSize: 13 },
-  videoSelected:          { padding: 24, alignItems: 'center' },
-  videoSelectedIcon:      { fontSize: 40, marginBottom: 8 },
-  videoSelectedText:      { color: COLORS.success, fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  videoSelectedName:      { color: '#888888', fontSize: 12, marginBottom: 8 },
-  tapToChange:            { color: '#aaaaaa', fontSize: 12 },
-  label:                  { color: '#888888', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
-  input:                  { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 12, padding: 16, color: '#111111', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  title: { fontSize: 24, fontWeight: '700', color: '#111111', marginBottom: 4 },
+  subtitle: { fontSize: 14, color: '#888888', marginBottom: 28 },
+  hint: { color: '#888888', fontSize: 12, marginBottom: 10 },
+  liveBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff5f5', borderWidth: 1, borderColor: COLORS.live, borderRadius: 14, padding: 16, marginBottom: 20, gap: 10 },
+  liveDot: { fontSize: 18 },
+  liveBtnText: { color: COLORS.live, fontSize: 16, fontWeight: '700', flex: 1 },
+  scholarBadge: { backgroundColor: COLORS.live, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  scholarBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  videoPicker: { backgroundColor: '#f5f5f5', borderRadius: 16, borderWidth: 2, borderColor: '#e5e5e5', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
+  videoPlaceholder: { padding: 40, alignItems: 'center' },
+  videoPlaceholderIcon: { fontSize: 48, marginBottom: 12 },
+  videoPlaceholderText: { color: '#111111', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  videoPlaceholderSub: { color: '#888888', fontSize: 13 },
+  videoSelected: { padding: 24, alignItems: 'center' },
+  videoSelectedIcon: { fontSize: 40, marginBottom: 8 },
+  videoSelectedText: { color: COLORS.success, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  videoSelectedName: { color: '#888888', fontSize: 12, marginBottom: 8 },
+  tapToChange: { color: '#aaaaaa', fontSize: 12 },
+  label: { color: '#888888', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
+  input: { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 12, padding: 16, color: '#111111', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
   inputWrapper: { marginBottom: 20 },
   charCount: { color: '#aaaaaa', fontSize: 12, textAlign: 'right', marginTop: 4 },
-  categories:             { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 32 },
-  categoryChip:           { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  categoryChipActive:     { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
-  categoryChipText:       { color: '#888888', fontSize: 13, fontWeight: '600' },
+  categories: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 32 },
+  categoryChip: { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  categoryChipActive: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  categoryChipText: { color: '#888888', fontSize: 13, fontWeight: '600' },
   categoryChipTextActive: { color: '#ffffff' },
-  uploadBtn:              { backgroundColor: COLORS.gold, borderRadius: 14, paddingVertical: 18, paddingHorizontal: 65, marginBottom: 20, overflow: 'hidden' },
-  uploadBtnDisabled:      { backgroundColor: COLORS.goldDark },
-  uploadBtnContent:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  uploadBtnText:          { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  uploadBtnPct:           { color: '#ffffff', fontSize: 16, fontWeight: '800' },
-  tiktokBarBg:            { position: 'absolute', bottom: -15, left: -30, right: -30, height: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
-  tiktokBarFill:          { height: 4, backgroundColor: '#ffffff' },
-  scholarInfo:            { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 12, padding: 14, gap: 10, marginBottom: 40, alignItems: 'flex-start', borderWidth: 0.5, borderColor: '#e5e5e5' },
-  scholarInfoIcon:        { fontSize: 20 },
-  scholarInfoText:        { color: '#888888', fontSize: 13, lineHeight: 20, flex: 1 },
-  maxQuestionsRow:        { flexDirection: 'row', gap: 10, marginBottom: 28, flexWrap: 'wrap' },
-  qChip:                  { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
-  qChipActive:            { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
-  qChipText:              { color: '#888888', fontSize: 15, fontWeight: '600' },
-  qChipTextActive:        { color: '#ffffff' },
-  goLiveConfirmBtn:       { backgroundColor: COLORS.live, borderRadius: 14, padding: 18, alignItems: 'center', marginBottom: 12 },
-  goLiveConfirmBtnText:   { color: '#ffffff', fontSize: 16, fontWeight: '700' },
-  cancelBtn:              { borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 40 },
-  cancelBtnText:          { color: '#888888', fontSize: 15 },
+  uploadBtn: { backgroundColor: COLORS.gold, borderRadius: 14, paddingVertical: 18, paddingHorizontal: 65, marginBottom: 20, overflow: 'hidden' },
+  uploadBtnDisabled: { backgroundColor: COLORS.goldDark },
+  uploadBtnContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  uploadBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  uploadBtnPct: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  tiktokBarBg: { position: 'absolute', bottom: -15, left: -30, right: -30, height: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
+  tiktokBarFill: { height: 4, backgroundColor: '#ffffff' },
+  scholarInfo: { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 12, padding: 14, gap: 10, marginBottom: 40, alignItems: 'flex-start', borderWidth: 0.5, borderColor: '#e5e5e5' },
+  scholarInfoIcon: { fontSize: 20 },
+  scholarInfoText: { color: '#888888', fontSize: 13, lineHeight: 20, flex: 1 },
+  maxQuestionsRow: { flexDirection: 'row', gap: 10, marginBottom: 28, flexWrap: 'wrap' },
+  qChip: { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
+  qChipActive: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  qChipText: { color: '#888888', fontSize: 15, fontWeight: '600' },
+  qChipTextActive: { color: '#ffffff' },
+  goLiveConfirmBtn: { backgroundColor: COLORS.live, borderRadius: 14, padding: 18, alignItems: 'center', marginBottom: 12 },
+  goLiveConfirmBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+  cancelBtn: { borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 14, padding: 16, alignItems: 'center', marginBottom: 40 },
+  cancelBtnText: { color: '#888888', fontSize: 15 },
 });
