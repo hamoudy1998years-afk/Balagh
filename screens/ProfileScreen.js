@@ -100,6 +100,7 @@ export default function ProfileScreen({ route, navigation }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [isOwnProfile, setIsOwnProfile] = useState(true);
   const [following, setFollowing] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [isScholar, setIsScholar] = useState(false);
@@ -189,6 +190,13 @@ export default function ProfileScreen({ route, navigation }) {
           .eq('following_id', viewingId)
           .maybeSingle()
           .then(({ data }) => setFollowing(!!data));
+
+        supabase.from('blocks')
+          .select('id')
+          .eq('blocker_id', globalUser.id)
+          .eq('blocked_id', viewingId)
+          .maybeSingle()
+          .then(({ data }) => setBlocked(!!data));
       } else {
         loadLikedVideos(globalUser.id);
       }
@@ -251,6 +259,26 @@ export default function ProfileScreen({ route, navigation }) {
         .limit(1)
         .maybeSingle();
       setScholarData(scholarInfo);
+    }
+  }
+
+  async function handleBlock() {
+    if (!currentUser || isOwnProfile) return;
+    if (blocked) {
+      await supabase.from('blocks').delete()
+        .eq('blocker_id', currentUser.id)
+        .eq('blocked_id', targetUserId);
+      setBlocked(false);
+    } else {
+      await supabase.from('blocks').insert({
+        blocker_id: currentUser.id,
+        blocked_id: targetUserId,
+      });
+      setBlocked(true);
+      setFollowing(false);
+      await supabase.from('follows').delete()
+        .eq('follower_id', currentUser.id)
+        .eq('following_id', targetUserId);
     }
   }
 
@@ -478,11 +506,16 @@ export default function ProfileScreen({ route, navigation }) {
         )
       ) : (
         <View style={styles.actionButtons}>
-          <AnimatedButton style={[styles.followBtn, following && styles.followingBtn]} onPress={handleFollow}>
-            <Text style={[styles.followBtnText, following && styles.followingBtnText]}>
-              {following ? '✓ Following' : '+ Follow'}
-            </Text>
-          </AnimatedButton>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <AnimatedButton style={[styles.followBtn, following && styles.followingBtn, { flex: 1 }]} onPress={handleFollow}>
+              <Text style={[styles.followBtnText, following && styles.followingBtnText]}>
+                {following ? '✓ Following' : '+ Follow'}
+              </Text>
+            </AnimatedButton>
+            <AnimatedButton style={styles.blockBtn} onPress={handleBlock}>
+              <Text style={styles.blockBtnText}>{blocked ? '🚫 Blocked' : 'Block'}</Text>
+            </AnimatedButton>
+          </View>
         </View>
       )}
 
@@ -648,4 +681,6 @@ const styles = StyleSheet.create({
   dlBarBg: { width: '100%', height: 8, backgroundColor: '#eee', borderRadius: 4, overflow: 'hidden' },
   dlBarFill: { height: '100%', backgroundColor: COLORS.gold, borderRadius: 4 },
   dlPercent: { color: COLORS.goldDark, fontSize: 22, fontWeight: '800' },
+  blockBtn: { backgroundColor: '#f3f4f6', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  blockBtnText: { color: '#ef4444', fontSize: 14, fontWeight: '700' },
 });
