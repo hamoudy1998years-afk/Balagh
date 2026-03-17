@@ -735,7 +735,14 @@ export default function LoginScreen({ navigation }) {
             </View>
 
             <AnimatedButton style={styles.googleButton} onPress={handleGoogleLogin} disabled={googleLoading}>
-              {googleLoading ? <ActivityIndicator color="#a78bfa" /> : <Text style={styles.googleButtonText}>🔵  Continue with Google</Text>}
+              {googleLoading ? <ActivityIndicator color="#4285F4" /> : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={styles.googleIconContainer}>
+                    <Text style={styles.googleG}>G</Text>
+                  </View>
+                  <Text style={styles.googleButtonText}>Continue with Google</Text>
+                </View>
+              )}
             </AnimatedButton>
 
             <AnimatedButton style={styles.facebookButton} onPress={handleFacebookLogin} disabled={facebookLoading}>
@@ -905,10 +912,41 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.borderDark },
   dividerText: { color: COLORS.navyLight, marginHorizontal: 12, fontSize: 13 },
   googleButton: {
-    width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark,
-    borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 20, minHeight: 52, justifyContent: 'center',
+    width: '100%', 
+    backgroundColor: '#ffffff', 
+    borderWidth: 1, 
+    borderColor: '#dadce0',
+    borderRadius: 12, 
+    padding: 14, 
+    alignItems: 'center', 
+    marginBottom: 20, 
+    minHeight: 52, 
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  googleButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
+  googleButtonText: { 
+    color: '#3c4043', 
+    fontSize: 15, 
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  googleIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleG: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#EA4335',
+  },
   link: { color: COLORS.textGray, fontSize: 14, marginTop: 4 },
   linkBold: { color: COLORS.gold, fontWeight: '700' },
   modalOverlay: {
