@@ -343,7 +343,7 @@ export default function VideoCard({
         onError={(e) => console.log('Video error:', e)}
         useTextureView={false}
       />
-
+      
       <TouchableOpacity
         style={styles.tapAreaFull}
         onPress={handleTap}
