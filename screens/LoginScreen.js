@@ -50,11 +50,10 @@ export default function LoginScreen({ navigation }) {
   const [isCreatingPin, setIsCreatingPin] = useState(false);
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
-  const [pinStep, setPinStep] = useState('create'); // 'create' or 'confirm'
-  const [visiblePin, setVisiblePin] = useState(''); // temporarily show number
+  const [pinStep, setPinStep] = useState('create');
+  const [visiblePin, setVisiblePin] = useState('');
   const [visibleConfirmPin, setVisibleConfirmPin] = useState('');
 
-  // ModernDialog state
   const [dialog, setDialog] = useState({ 
     visible: false, 
     title: '', 
@@ -63,7 +62,6 @@ export default function LoginScreen({ navigation }) {
     buttons: [] 
   });
 
-  // Animation value for eye icon
   const eyeOpacity = useRef(new Animated.Value(0)).current;
 
   const { refreshUser } = useUser();
@@ -105,7 +103,6 @@ export default function LoginScreen({ navigation }) {
     suppressDropdown.current = false;
   };
 
-  // Toggle password visibility with animation
   const togglePassword = () => {
     setShowPassword(!showPassword);
     Animated.timing(eyeOpacity, {
@@ -487,7 +484,6 @@ export default function LoginScreen({ navigation }) {
 
   const handlePinKeyPress = async (key) => {
     if (isCreatingPin) {
-      // STEP 1: Creating first PIN
       if (pinStep === 'create') {
         if (key === 'back') {
           if (newPin.length > 0) {
@@ -505,26 +501,21 @@ export default function LoginScreen({ navigation }) {
             setPinError('Enter 4 digits');
             return;
           }
-          // Move to confirmation step
           setPinStep('confirm');
           setPinError('');
           setVisiblePin('');
         } else {
-          // Number key pressed
           if (newPin.length < 4) {
             const updated = newPin + key;
             setNewPin(updated);
-            setVisiblePin(key); // Show the number
+            setVisiblePin(key);
             
-            // Hide after 500ms
             setTimeout(() => {
               setVisiblePin('');
             }, 500);
           }
         }
-      }
-      // STEP 2: Confirming PIN
-      else if (pinStep === 'confirm') {
+      } else if (pinStep === 'confirm') {
         if (key === 'back') {
           if (confirmPin.length > 0) {
             const deletedDigit = confirmPin[confirmPin.length - 1];
@@ -559,13 +550,11 @@ export default function LoginScreen({ navigation }) {
             setPinError('Failed to save PIN');
           }
         } else {
-          // Number key pressed
           if (confirmPin.length < 4) {
             const updated = confirmPin + key;
             setConfirmPin(updated);
-            setVisibleConfirmPin(key); // Show the number
+            setVisibleConfirmPin(key);
             
-            // Hide after 500ms
             setTimeout(() => {
               setVisibleConfirmPin('');
             }, 500);
@@ -573,7 +562,6 @@ export default function LoginScreen({ navigation }) {
         }
       }
     } else {
-      // Existing code for entering PIN (not creating) - keep as is
       if (key === 'back') {
         setEnteredPin(enteredPin.slice(0, -1));
         setPinError('');
@@ -851,6 +839,7 @@ export default function LoginScreen({ navigation }) {
                       }
                     </Text>
                   )}
+                  
                   <View style={styles.pinDisplay}>
                     {[0, 1, 2, 3].map((index) => {
                       let isFilled = false;
@@ -859,13 +848,11 @@ export default function LoginScreen({ navigation }) {
                       if (isCreatingPin) {
                         if (pinStep === 'create') {
                           isFilled = newPin.length > index;
-                          // Show number if it's the last entered digit and visiblePin is set
                           if (index === newPin.length - 1 && visiblePin && visiblePin !== '') {
                             showNumber = visiblePin;
                           }
                         } else {
                           isFilled = confirmPin.length > index;
-                          // Show number if it's the last entered digit and visibleConfirmPin is set
                           if (index === confirmPin.length - 1 && visibleConfirmPin && visibleConfirmPin !== '') {
                             showNumber = visibleConfirmPin;
                           }
@@ -924,7 +911,6 @@ export default function LoginScreen({ navigation }) {
               </View>
             </Modal>
 
-            {/* ModernDialog */}
             <ModernDialog
               visible={dialog.visible}
               title={dialog.title}
@@ -1048,90 +1034,120 @@ const styles = StyleSheet.create({
   },
   facebookButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
   modalContent: {
-    backgroundColor: 'white', borderRadius: 20,
-    padding: 30, width: '80%', alignItems: 'center',
+    backgroundColor: COLORS.bgCard || '#1a1d27', 
+    borderRadius: 24,
+    padding: 32, 
+    width: '85%', 
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.4,
+    shadowRadius: 40,
+    elevation: 10,
   },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 10, color: '#333' },
-  modalSubtitle: { fontSize: 14, color: '#666', marginBottom: 30, textAlign: 'center' },
+  modalTitle: { 
+    fontSize: 24, 
+    fontWeight: '800', 
+    marginBottom: 8, 
+    color: '#ffffff',
+    letterSpacing: -0.5,
+  },
+  modalSubtitle: { 
+    fontSize: 14, 
+    color: 'rgba(255,255,255,0.6)', 
+    marginBottom: 32, 
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modalSubtitleHighlight: {
+    fontSize: 15,
+    color: COLORS.gold,
+    marginBottom: 32,
+    textAlign: 'center',
+    fontWeight: '700',
+    backgroundColor: 'rgba(212, 175, 55, 0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   pinDisplay: { 
     flexDirection: 'row', 
-    marginBottom: 24, 
-    gap: 20,
+    marginBottom: 32, 
+    gap: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pinDot: {
-    width: 24, 
-    height: 24, 
-    borderRadius: 12,
+    width: 20, 
+    height: 20, 
+    borderRadius: 10,
     borderWidth: 2, 
-    borderColor: '#d1d5db', 
+    borderColor: 'rgba(212, 175, 55, 0.4)',
     backgroundColor: 'transparent',
   },
   pinDotFilled: { 
-    backgroundColor: '#1f2937', 
-    borderColor: '#1f2937',
-  },
-  pinDotWithNumber: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#7c3aed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#7c3aed',
+    backgroundColor: COLORS.gold, 
+    borderColor: COLORS.gold,
+    shadowColor: COLORS.gold,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
-    shadowRadius: 8,
+    shadowRadius: 10,
     elevation: 4,
   },
-  pinNumber: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+  pinDotWithNumber: {
+    backgroundColor: '#ffffff',
+    borderColor: COLORS.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLORS.gold,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 15,
+    elevation: 6,
+    transform: [{ scale: 1.15 }],
   },
-  pinError: { color: '#ff4444', marginBottom: 15, fontSize: 14 },
+  pinNumber: {
+    color: '#1a1d27',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  pinError: { 
+    color: '#ef4444', 
+    marginBottom: 20, 
+    fontSize: 14,
+    fontWeight: '600',
+  },
   keypad: {
     flexDirection: 'row', flexWrap: 'wrap',
     justifyContent: 'center', width: s(240), gap: 10, marginBottom: 20,
   },
   keypadButton: {
-    width: s(70), height: s(70), borderRadius: s(35),
-    backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center',
-  },
-  keypadButtonText: { fontSize: ms(24), color: '#333', fontWeight: '600' },
-  cancelButton: { paddingVertical: 12, paddingHorizontal: 30 },
-  cancelButtonText: { color: '#666', fontSize: 16 },
-  accountModalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-start', alignItems: 'center',
-    paddingTop: 350,
-  },
-  accountModalBox: {
-    width: '85%', maxHeight: 200,
-    backgroundColor: '#1a1d27', borderRadius: 16,
-    borderWidth: 1, borderColor: '#2d3148',
-    overflow: 'hidden',
-  },
-  accountModalTitle: {
-    color: '#a78bfa', fontWeight: '700', fontSize: 15,
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#2d3148',
-  },
-  pinDotWithNumber: {
-    backgroundColor: '#333',
-    borderColor: '#333',
+    width: s(72), 
+    height: s(72), 
+    borderRadius: s(36),
+    backgroundColor: 'rgba(255,255,255,0.05)', 
+    justifyContent: 'center', 
     alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.3)',
   },
-  pinNumber: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
+  keypadButtonText: { 
+    fontSize: ms(26), 
+    color: '#ffffff', 
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
-  modalSubtitleHighlight: {
-    fontSize: 14,
-    color: '#7c3aed',
-    marginBottom: 30,
-    textAlign: 'center',
+  cancelButton: { 
+    paddingVertical: 12, 
+    paddingHorizontal: 30,
+    marginTop: 8,
+  },
+  cancelButtonText: { 
+    color: 'rgba(255,255,255,0.6)', 
+    fontSize: 16,
     fontWeight: '600',
   },
 });
