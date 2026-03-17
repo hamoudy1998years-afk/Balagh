@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image, useWindowDimensions } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useState, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -123,15 +124,13 @@ export default function SearchScreen({ navigation }) {
           <Text style={styles.emptySubtext}>{query.length > 0 ? 'Try different keywords' : 'or browse by category above'}</Text>
         </View>
       ) : (
-        <FlatList
+        <FlashList
           ref={flatListRef}
           data={results}
           keyExtractor={(item) => item.id}
           numColumns={3}
+          estimatedItemSize={150}
           contentContainerStyle={styles.gridList}
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={9}
-          windowSize={5}
           renderItem={renderResultItem}
         />
       )}
