@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { TabView } from 'react-native-tab-view';
 import { useIsFocused } from '@react-navigation/native';
@@ -89,10 +90,11 @@ function LiveFeed({ navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <FlatList
+      <FlashList
         data={streams}
         numColumns={2}
         keyExtractor={(item) => item.id}
+        estimatedItemSize={200}
         contentContainerStyle={{ padding: 4, paddingTop: insets.top + 60 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadStreams} tintColor="#ef4444" />}
         renderItem={({ item }) => (
