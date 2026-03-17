@@ -1,9 +1,6 @@
-// ────────────────────────────────────────────────────────────────────────────
-// EditProfileScreen.js
-// ────────────────────────────────────────────────────────────────────────────
 import {
   View, Text, TextInput, StyleSheet,
-  Alert, ActivityIndicator, ScrollView, Keyboard
+  ActivityIndicator, ScrollView, Keyboard
 } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -11,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import ModernDialog from './ModernDialog';
 
 export default function EditProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -27,6 +25,7 @@ export default function EditProfileScreen({ navigation }) {
   const [education,    setEducation]    = useState('');
   const [expertise,    setExpertise]    = useState('');
   const [extraPadding, setExtraPadding] = useState(0);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
 
   const scrollRef = useRef(null);
 
@@ -80,13 +79,26 @@ export default function EditProfileScreen({ navigation }) {
 
   async function handleSave() {
     const trimmedUsername = username.trim();
-    if (!trimmedUsername) { Alert.alert('Invalid Username', 'Username cannot be empty.'); return; }
-    if (trimmedUsername.length < 3) { Alert.alert('Invalid Username', 'Username must be at least 3 characters.'); return; }
-    if (!/^[a-zA-Z0-9._]+$/.test(trimmedUsername)) { Alert.alert('Invalid Username', 'Username can only contain letters, numbers, dots, and underscores.'); return; }
+    if (!trimmedUsername) {
+      setDialog({ visible: true, title: 'Invalid Username', message: 'Username cannot be empty.', type: 'warning', buttons: [{ text: 'OK' }] });
+      return;
+    }
+    if (trimmedUsername.length < 3) {
+      setDialog({ visible: true, title: 'Invalid Username', message: 'Username must be at least 3 characters.', type: 'warning', buttons: [{ text: 'OK' }] });
+      return;
+    }
+    if (!/^[a-zA-Z0-9._]+$/.test(trimmedUsername)) {
+      setDialog({ visible: true, title: 'Invalid Username', message: 'No spaces allowed! Use letters, numbers, dots (.) or underscores (_) only.', type: 'warning', buttons: [{ text: 'OK' }] });
+      return;
+    }
 
     setSaving(true);
     const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (!user || userError) { setSaving(false); Alert.alert('Error', 'Could not verify your session. Please try again.'); return; }
+    if (!user || userError) {
+      setSaving(false);
+      setDialog({ visible: true, title: 'Error', message: 'Could not verify your session. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+      return;
+    }
     try {
       if (isScholar) {
         const { error: profileError } = await supabase.from('profiles').update({ username: username.trim() }).eq('id', user.id);
@@ -109,15 +121,14 @@ export default function EditProfileScreen({ navigation }) {
         }).eq('id', user.id);
         if (error) throw error;
       }
-      Alert.alert('Success!', 'Profile updated!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      setDialog({ visible: true, title: 'Success! 🎉', message: 'Profile updated!', type: 'success', buttons: [{ text: 'OK', onPress: () => navigation.goBack() }] });
     } catch (e) {
-      Alert.alert('Error', e.message);
+      setDialog({ visible: true, title: 'Error', message: e.message, type: 'error', buttons: [{ text: 'OK' }] });
     } finally {
       setSaving(false);
     }
   }
 
-  // Scroll to a field when focused so it appears above keyboard
   function scrollToField(y) {
     setTimeout(() => {
       scrollRef.current?.scrollTo({ y: y, animated: true });
@@ -162,6 +173,9 @@ export default function EditProfileScreen({ navigation }) {
           placeholder="@username"
           onFocus={() => scrollToField(0)}
         />
+        <Text style={{ color: '#4b5563', fontSize: 12, marginTop: -10, marginBottom: 14 }}>
+          No spaces allowed. Use letters, numbers, dots (.) or underscores (_) only.
+        </Text>
 
         {isScholar ? (
           <>
@@ -254,6 +268,15 @@ export default function EditProfileScreen({ navigation }) {
         <AnimatedButton style={epStyles.cancelBtn} onPress={() => navigation.goBack()}>
           <Text style={epStyles.cancelBtnText}>Cancel</Text>
         </AnimatedButton>
+
+        <ModernDialog
+          visible={dialog.visible}
+          title={dialog.title}
+          message={dialog.message}
+          type={dialog.type}
+          buttons={dialog.buttons}
+          onDismiss={() => setDialog({ ...dialog, visible: false })}
+        />
       </ScrollView>
     </View>
   );

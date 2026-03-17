@@ -296,12 +296,12 @@ export default function ProfileScreen({ route, navigation }) {
     if (video.is_pinned) {
       Alert.alert('Unpin Video', 'Remove this video from pinned?', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Unpin', onPress: async () => { await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); loadVideos(currentUser.id, true); } },
+        { text: 'Unpin', onPress: async () => { await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); if (currentUser?.id) loadVideos(currentUser.id, true); } },
       ]);
     } else {
       if (pinnedCount >= 3) { Alert.alert('Limit Reached', 'You can only pin up to 3 videos.'); return; }
       await supabase.from('videos').update({ is_pinned: true, pin_order: pinnedCount + 1 }).eq('id', video.id);
-      loadVideos(currentUser.id, true);
+      if (currentUser?.id) loadVideos(currentUser.id, true);
     }
   }
 
