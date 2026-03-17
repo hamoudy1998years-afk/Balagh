@@ -112,12 +112,18 @@ export default function LoginScreen({ navigation }) {
     }).start();
   };
 
+  // ========== FIXED: handleAccountSelect ==========
   const handleAccountSelect = async (account) => {
+    console.log('[LOGIN] ========== Account Selected ==========');
+    console.log('[LOGIN] Account:', account.email);
+    console.log('[LOGIN] Provider:', account.provider);
+
     closeDropdown();
     setLoading(true);
     setSelectedAccount(account);
 
     try {
+      // EMAIL ACCOUNTS - existing logic
       if (account.provider === 'email') {
         const available = await isBiometricAvailable();
         const hasCreds = await hasCredentials(account.email);
@@ -140,56 +146,80 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
+      // GOOGLE ACCOUNTS - NEW FLOW
       if (account.provider === 'google') {
         const hasPin = await hasQuickPin(account.email);
-
-        if (hasPin) {
-          const bioAvailable = await isBiometricAvailable();
-
-          if (bioAvailable) {
-            const bioResult = await LocalAuthentication.authenticateAsync({
-              promptMessage: 'Verify to login instantly',
-              cancelLabel: 'Use PIN',
-            });
-
-            if (bioResult.success) {
-              setLoading(false);
-              navigation.navigate('Main');
-              return;
-            }
-          }
-
+        const credKey = 'bushrann_creds_' + account.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const savedRaw = await SecureStore.getItemAsync(credKey);
+        
+        // NO PIN YET - Ask to create PIN
+        if (!hasPin) {
+          console.log('[LOGIN] No PIN yet - showing create PIN modal');
           setLoading(false);
           setPinModalVisible(true);
-          setIsCreatingPin(false);
+          setIsCreatingPin(true);
+          setPinStep('create');
+          setNewPin('');
+          setConfirmPin('');
           setEnteredPin('');
           setPinError('');
           return;
         }
 
-        setLoading(false);
-        setDialog({
-          visible: true,
-          title: '⚡ Enable Instant Login',
-          message: 'Create a 4-digit PIN to skip Google sign-in next time. Takes 10 seconds.',
-          type: 'info',
-          buttons: [
-            {
-              text: 'Set Up Now',
-              onPress: () => {
-                setPinModalVisible(true);
-                setIsCreatingPin(true);
-                setNewPin('');
-                setConfirmPin('');
-              }
-            },
-            {
-              text: 'Use Google',
-              style: 'cancel',
-              onPress: () => handleGoogleLogin(),
+        // HAS PIN - Show biometric immediately (no dialog!)
+        console.log('[LOGIN] Has PIN - showing biometric immediately');
+        const bioAvailable = await isBiometricAvailable();
+
+        if (bioAvailable) {
+          const bioResult = await LocalAuthentication.authenticateAsync({
+            promptMessage: 'Verify to login instantly',
+            cancelLabel: 'Use PIN',
+          });
+
+          if (bioResult.success) {
+            console.log('[LOGIN] Biometric success - creating session with appPassword...');
+            
+            // Get stored credentials with appPassword
+            if (!savedRaw) {
+              console.log('[LOGIN] No saved credentials found');
+              setLoading(false);
+              return;
             }
-          ]
-        });
+            
+            const creds = JSON.parse(savedRaw);
+            
+            // Create session with appPassword (NOT Google token!)
+            const { data, error } = await supabase.auth.signInWithPassword({
+              email: account.email,
+              password: creds.appPassword,
+            });
+            
+            if (error) {
+              console.log('[LOGIN] Session failed:', error.message);
+              setLoading(false);
+              // Fallback to PIN
+              setPinModalVisible(true);
+              setIsCreatingPin(false);
+              setEnteredPin('');
+              setPinError('');
+              return;
+            }
+            
+            console.log('[LOGIN] Session created successfully');
+            setLoading(false);
+            navigation.navigate('Main');
+            return;
+          }
+        }
+
+        // Biometric failed/cancelled/no biometric - Show PIN
+        console.log('[LOGIN] Biometric failed or not available - showing PIN');
+        setLoading(false);
+        setPinModalVisible(true);
+        setIsCreatingPin(false);
+        setEnteredPin('');
+        setPinError('');
+        return;
       }
     } catch (e) {
       console.log('handleAccountSelect error:', e);
@@ -312,6 +342,7 @@ export default function LoginScreen({ navigation }) {
     }
   }
 
+  // ========== FIXED: handleGoogleLogin - Store appPassword ==========
   async function handleGoogleLogin() {
     setGoogleLoading(true);
 
@@ -366,11 +397,24 @@ export default function LoginScreen({ navigation }) {
       const { data: sessionData } = await supabase.auth.getSession();
       const userEmail = sessionData?.session?.user?.email;
       const userMeta = sessionData?.session?.user?.user_metadata;
-      const tokenToStore = sessionData?.session?.refresh_token;
 
-      if (userEmail && tokenToStore) {
+      if (userEmail) {
+        // ========== NEW: Generate and store appPassword ==========
+        const appPassword = Array(32).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');
+        
+        const credKey = 'bushrann_creds_' + userEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        await SecureStore.setItemAsync(credKey, JSON.stringify({
+          type: 'google',
+          email: userEmail,
+          appPassword: appPassword,
+          hasPin: false, // Will be set to true when PIN created
+        }));
+        
+        // Set password in Supabase so signInWithPassword works
+        await supabase.auth.updateUser({ password: appPassword });
+        
         const displayName = userMeta?.full_name || userMeta?.name || userEmail;
-        await saveGoogleCredentials(displayName, userEmail, tokenToStore);
+        await saveGoogleCredentials(displayName, userEmail, refresh_token);
         await refreshAccountsList();
 
         const { data: { user } } = await supabase.auth.getUser();
@@ -391,42 +435,50 @@ export default function LoginScreen({ navigation }) {
           await userCache.set(userWithProfile);
           await refreshUser();
         }
+
+        // Check if PIN already exists
+        const hasPin = await hasQuickPin(userEmail);
+        
+        if (!hasPin) {
+          // First time - suggest creating PIN
+          setTimeout(() => {
+            setGoogleLoading(false);
+            setDialog({
+              visible: true,
+              title: '⚡ Enable Instant Login?',
+              message: 'Create a 4-digit PIN to skip Google sign-in next time. Just tap your account and use Face ID or fingerprint.',
+              type: 'info',
+              buttons: [
+                {
+                  text: 'Set Up Now',
+                  onPress: () => {
+                    setSelectedAccount({ email: userEmail, provider: 'google' });
+                    setPinModalVisible(true);
+                    setIsCreatingPin(true);
+                    setPinStep('create');
+                    setNewPin('');
+                    setConfirmPin('');
+                  }
+                },
+                {
+                  text: 'Later',
+                  style: 'cancel',
+                  onPress: () => navigation.navigate('Main'),
+                }
+              ]
+            });
+          }, 500);
+          return; // Don't navigate yet, wait for dialog
+        }
       }
 
-      setTimeout(async () => {
-        const bioAvailable = await isBiometricAvailable();
-
-        setDialog({
-          visible: true,
-          title: '⚡ Enable Instant Login?',
-          message: bioAvailable
-            ? 'Create a 4-digit PIN to skip Google sign-in next time. Just tap your account and use Face ID or fingerprint.'
-            : 'Create a 4-digit PIN to skip Google sign-in next time.',
-          type: 'info',
-          buttons: [
-            {
-              text: 'Set Up Now',
-              onPress: () => {
-                setSelectedAccount({ email: userEmail, provider: 'google' });
-                setPinModalVisible(true);
-                setIsCreatingPin(true);
-                setNewPin('');
-                setConfirmPin('');
-              }
-            },
-            {
-              text: 'Later',
-              style: 'cancel',
-              onPress: () => navigation.navigate('Main'),
-            }
-          ]
-        });
-      }, 500);
+      setGoogleLoading(false);
+      navigation.navigate('Main');
+    } else {
+      setGoogleLoading(false);
     }
-
-    navigation.navigate('Main');
+    
     silentReAuth.current = false;
-    setGoogleLoading(false);
   }
 
   async function handleFacebookLogin() {
@@ -479,8 +531,10 @@ export default function LoginScreen({ navigation }) {
 
   const biometricIcon = biometricType === 'face' ? 'face-recognition' : 'fingerprint';
 
+  // ========== FIXED: handlePinKeyPress - Create session with appPassword ==========
   const handlePinKeyPress = async (key) => {
     if (isCreatingPin) {
+      // ========== CREATING NEW PIN ==========
       if (pinStep === 'create') {
         if (key === 'back') {
           if (newPin.length > 0) {
@@ -536,8 +590,18 @@ export default function LoginScreen({ navigation }) {
             return;
           }
 
+          // Save PIN
           const saved = await saveQuickPin(selectedAccount.email, newPin);
           if (saved) {
+            // Mark hasPin = true in credentials
+            const credKey = 'bushrann_creds_' + selectedAccount.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            const savedRaw = await SecureStore.getItemAsync(credKey);
+            if (savedRaw) {
+              const creds = JSON.parse(savedRaw);
+              creds.hasPin = true;
+              await SecureStore.setItemAsync(credKey, JSON.stringify(creds));
+            }
+            
             setPinModalVisible(false);
             setNewPin('');
             setConfirmPin('');
@@ -559,6 +623,7 @@ export default function LoginScreen({ navigation }) {
         }
       }
     } else {
+      // ========== VALIDATING EXISTING PIN ==========
       if (key === 'back') {
         setEnteredPin(enteredPin.slice(0, -1));
         setPinError('');
@@ -569,31 +634,42 @@ export default function LoginScreen({ navigation }) {
         }
 
         try {
+          console.log('[PIN] Validating PIN...');
           await validateQuickPin(selectedAccount.email, enteredPin);
+          console.log('[PIN] PIN valid - creating session...');
 
           const credKey = 'bushrann_creds_' + selectedAccount.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
           const savedRaw = await SecureStore.getItemAsync(credKey);
-          if (savedRaw) {
-            const creds = JSON.parse(savedRaw);
-            if (creds.type === 'google' && creds.refreshToken) {
-              const { data, error } = await supabase.auth.refreshSession({
-                refresh_token: creds.refreshToken,
-              });
-              if (error || !data?.session) {
-                setPinError('Session expired. Please login with Google again.');
-                return;
-              }
-              await SecureStore.setItemAsync(credKey, JSON.stringify({
-                ...creds,
-                refreshToken: data.session.refresh_token,
-              }));
-            }
+          
+          if (!savedRaw) {
+            setPinError('Account not found');
+            setEnteredPin('');
+            return;
           }
-
+          
+          const creds = JSON.parse(savedRaw);
+          
+          // Create session with appPassword (NOT Google refresh token!)
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: selectedAccount.email,
+            password: creds.appPassword,
+          });
+          
+          if (error) {
+            console.log('[PIN] Session failed:', error.message);
+            setPinError('Login failed. Please try again.');
+            setEnteredPin('');
+            return;
+          }
+          
+          console.log('[PIN] Session created successfully');
           setPinModalVisible(false);
           setEnteredPin('');
+          setPinError('');
           navigation.navigate('Main');
+          
         } catch (e) {
+          console.log('[PIN] Invalid PIN:', e.message);
           if (e.message === 'INVALID_PIN') {
             setPinError('Wrong PIN');
             setEnteredPin('');
