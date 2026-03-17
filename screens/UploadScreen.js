@@ -49,7 +49,7 @@ export default function UploadScreen({ navigation }) {
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => {
       setTimeout(() => {
-        scrollRef.current?.scrollTo({ y: inputWrapperY.current - 345 + insets.top, animated: true });
+        scrollRef.current?.scrollTo({ y: inputWrapperY.current - 388 + insets.top, animated: true });
       }, 100);
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
