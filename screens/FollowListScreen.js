@@ -163,7 +163,7 @@ export default function FollowListScreen({ route, navigation }) {
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#7c3aed" />
+          <ActivityIndicator size="large" color={COLORS.gold} />
         </View>
       ) : (
         <FlashList

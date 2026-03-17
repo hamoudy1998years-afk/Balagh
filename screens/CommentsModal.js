@@ -20,6 +20,7 @@ import CommentList from '../components/comments/CommentList';
 import CommentInput from '../components/comments/CommentInput';
 import ReplyInput from '../components/comments/ReplyInput';
 import { supabase } from '../lib/supabase';
+import { COLORS } from '../constants/theme';
 
 function CustomBackdrop({ onClose }) {
   return (
@@ -217,7 +218,7 @@ export default function CommentsModal({
         <View style={styles.listContainer}>
           {loading ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#FE2C55" />
+              <ActivityIndicator size="large" color={COLORS.gold} />
               <Text style={styles.loadingText}>Loading comments...</Text>
             </View>
           ) : (

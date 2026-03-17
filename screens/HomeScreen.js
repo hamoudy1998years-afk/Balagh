@@ -343,7 +343,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#ffffff" size="large" />
+        <ActivityIndicator color={COLORS.gold} size="large" />
       </View>
     );
   }
