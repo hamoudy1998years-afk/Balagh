@@ -260,6 +260,7 @@ export default function CommentsModal({
         <View
           style={[
             styles.inputWrapper,
+            { marginBottom: keyboardHeight },
           ]}
         >
           {replyingTo ? (
