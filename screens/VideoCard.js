@@ -343,6 +343,9 @@ export default function VideoCard({
         onError={(e) => console.log('Video error:', e)}
         useTextureView={false}
       />
+      {!isActive && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#000', zIndex: 1 }} />
+      )}
 
       <TouchableOpacity
         style={styles.tapAreaFull}
@@ -422,7 +425,7 @@ export default function VideoCard({
 }
 
 const styles = StyleSheet.create({
-  card: { width: '100%', backgroundColor: '#000' },
+  card: { width: '100%', backgroundColor: '#000', overflow: 'hidden' },
   video: { width: '100%', height: '100%', position: 'absolute' },
   tapAreaFull: { 
     position: 'absolute', 
