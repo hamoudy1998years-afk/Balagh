@@ -333,7 +333,7 @@ function VideoCard({
         key={item.id}
         ref={player}
         source={{ uri: item.video_url }}
-        style={[styles.video, { opacity: isActive ? 1 : 0 }]}
+        style={[styles.video, { opacity: isVisible ? 1 : 0 }]}
         resizeMode="contain"
         repeat={true}
         paused={!isActive || !isTabActive || paused}
