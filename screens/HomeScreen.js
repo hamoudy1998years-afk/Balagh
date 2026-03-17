@@ -52,7 +52,9 @@ function LiveFeed({ navigation }) {
     const channel = supabase
       .channel('live_streams_home')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => loadStreams())
-      .subscribe();
+      .subscribe((status, err) => {
+        if (err) __DEV__ && console.error('Live streams subscription error:', err);
+      });
 
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {

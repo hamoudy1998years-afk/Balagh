@@ -35,6 +35,14 @@ function rateLimit(req, res, next) {
   next();
 }
 
+// Purge expired rate-limit entries every 5 minutes to prevent unbounded growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of rateLimits.entries()) {
+    if (now > data.resetTime) rateLimits.delete(ip);
+  }
+}, 5 * 60 * 1000);
+
 // Apply rate limit to token endpoint
 app.get('/token', rateLimit, (req, res) => {
   const channelName = req.query.channelName;

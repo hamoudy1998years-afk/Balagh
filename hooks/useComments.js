@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 export function useComments(videoId) {
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [posting, setPosting] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -71,8 +72,10 @@ export function useComments(videoId) {
       } else if (isRefresh || pageNum === 0) {
         setComments([]);
       }
+      setError(null);
     } catch (error) {
       __DEV__ && console.error('Error fetching comments:', error);
+      setError('Failed to load comments. Pull down to retry.');
     }
   }, [videoId, refreshTrigger]); // ADDED: refreshTrigger to dependencies
 
@@ -301,6 +304,7 @@ export function useComments(videoId) {
   return {
     comments,
     loading,
+    error,
     posting,
     loadingMore,
     hasMore,
