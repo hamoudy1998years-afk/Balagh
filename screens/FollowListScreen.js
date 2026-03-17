@@ -2,6 +2,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Image, ActivityIndicator, RefreshControl, StatusBar,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -165,10 +166,11 @@ export default function FollowListScreen({ route, navigation }) {
           <ActivityIndicator size="large" color="#7c3aed" />
         </View>
       ) : (
-        <FlatList
+        <FlashList
           ref={flatListRef}
           data={users}
           keyExtractor={(item) => item.id}
+          estimatedItemSize={74}
           renderItem={({ item }) => (
             <UserRow
               item={item}
