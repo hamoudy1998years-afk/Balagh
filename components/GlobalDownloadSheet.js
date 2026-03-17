@@ -12,7 +12,7 @@ export default function GlobalDownloadSheet() {
   
   // SAFETY CHECK - if context is undefined, return null
   if (!context) {
-    console.log('GlobalDownloadSheet: context is undefined');
+    __DEV__ && console.log('GlobalDownloadSheet: context is undefined');
     return null;
   }
   

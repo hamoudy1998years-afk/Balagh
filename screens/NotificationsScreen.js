@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 
-const NotificationItem = React.memo(function NotificationItem({ item, onDelete, onMarkRead }) {
+const NotificationItem = React.memo(function NotificationItem({ item, onDelete, onMarkRead, navigation }) {
   const translateX    = useRef(new Animated.Value(0)).current;
   const deleteOpacity = useRef(new Animated.Value(0)).current;
   const rowScale      = useRef(new Animated.Value(1)).current;
@@ -153,7 +153,29 @@ export default function NotificationsScreen({ navigation }) {
     supabase.auth.getUser().then(({ data }) => { if (data.user) setCurrentUserId(data.user.id); });
   }, []);
 
-  useEffect(() => { if (currentUserId) loadNotifications(); }, [currentUserId]);
+  useEffect(() => {
+    if (!currentUserId) return;
+    loadNotifications();
+
+    const channel = supabase
+      .channel(`notifications_realtime_${currentUserId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${currentUserId}`,
+      }, async (payload) => {
+        const { data: actor } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url')
+          .eq('id', payload.new.actor_id)
+          .maybeSingle();
+        setNotifications(prev => [{ ...payload.new, actor }, ...prev]);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [currentUserId]);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -166,7 +188,7 @@ export default function NotificationsScreen({ navigation }) {
       if (error) throw error;
       setNotifications(data ?? []);
     } catch (e) {
-      console.error('Error loading notifications:', e);
+      __DEV__ && console.error('Error loading notifications:', e);
     } finally {
       setLoading(false);
     }

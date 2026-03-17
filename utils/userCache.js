@@ -9,7 +9,7 @@ export const userCache = {
       const data = { user, timestamp: Date.now() };
       await AsyncStorage.setItem(USER_CACHE_KEY, JSON.stringify(data));
     } catch (e) {
-      console.log('Cache save error:', e);
+      __DEV__ && console.log('Cache save error:', e);
     }
   },
 
@@ -29,7 +29,7 @@ export const userCache = {
     try {
       await AsyncStorage.removeItem(USER_CACHE_KEY);
     } catch (e) {
-      console.log('Cache clear error:', e);
+      __DEV__ && console.log('Cache clear error:', e);
     }
   },
 
@@ -38,7 +38,7 @@ export const userCache = {
       const current = await userCache.get();
       if (current) await userCache.set({ ...current, ...updates });
     } catch (e) {
-      console.log('Cache update error:', e);
+      __DEV__ && console.log('Cache update error:', e);
     }
   },
 };

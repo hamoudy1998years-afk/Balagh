@@ -12,7 +12,7 @@ const CROP_SIZE = width - 60;
 const SIDE = (width - CROP_SIZE) / 2;
 
 export default function AvatarCropScreen({ route, navigation }) {
-  const { imageUri } = route.params;
+  const { imageUri } = route.params ?? {};
   const insets = useSafeAreaInsets();
   const VERT = (height - CROP_SIZE) / 2 - insets.top;
   const [processing, setProcessing] = useState(false);
@@ -108,7 +108,7 @@ export default function AvatarCropScreen({ route, navigation }) {
         params: { croppedUri: result.uri },
         });
     } catch (e) {
-        console.error('Crop error:', e);
+        __DEV__ && console.error('Crop error:', e);
         setProcessing(false);
         Alert.alert('Crop Failed', 'Could not crop the image. Please try again.', [
           { text: 'OK', onPress: () => navigation.goBack() }

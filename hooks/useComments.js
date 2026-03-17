@@ -72,7 +72,7 @@ export function useComments(videoId) {
         setComments([]);
       }
     } catch (error) {
-      console.error('Error fetching comments:', error);
+      __DEV__ && console.error('Error fetching comments:', error);
     }
   }, [videoId, refreshTrigger]); // ADDED: refreshTrigger to dependencies
 
@@ -134,7 +134,7 @@ export function useComments(videoId) {
       setReplyingTo(null);
       return commentWithUser;
     } catch (error) {
-      console.error('Error posting comment:', error);
+      __DEV__ && console.error('Error posting comment:', error);
       alert('Failed to post comment');
     } finally {
       setPosting(false);
@@ -161,7 +161,7 @@ export function useComments(videoId) {
       ));
       return data;
     } catch (error) {
-      console.error('Error editing comment:', error);
+      __DEV__ && console.error('Error editing comment:', error);
       alert('Failed to edit comment');
     }
   }, []);
@@ -178,7 +178,7 @@ export function useComments(videoId) {
 
       setComments(prev => prev.filter(c => c.id !== commentId));
     } catch (error) {
-      console.error('Error deleting comment:', error);
+      __DEV__ && console.error('Error deleting comment:', error);
       alert('Failed to delete comment');
     }
   }, []);
@@ -216,7 +216,7 @@ export function useComments(videoId) {
           .insert({ comment_id: commentId, user_id: user.id });
       }
     } catch (error) {
-      console.error('Error toggling like:', error);
+      __DEV__ && console.error('Error toggling like:', error);
       // Revert on error
       setComments(prev => prev.map(c => {
         if (c.id === commentId) {
@@ -254,7 +254,7 @@ export function useComments(videoId) {
         is_pinned: c.id === commentId ? shouldPin : false
       })).sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0)));
     } catch (error) {
-      console.error('Error pinning comment:', error);
+      __DEV__ && console.error('Error pinning comment:', error);
     }
   }, [videoId]);
 

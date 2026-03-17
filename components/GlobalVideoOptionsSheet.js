@@ -11,7 +11,7 @@ export default function GlobalVideoOptionsSheet() {
   const context = useDownload();
   
   if (!context) {
-    console.log('GlobalVideoOptionsSheet: context is undefined');
+    __DEV__ && console.log('GlobalVideoOptionsSheet: context is undefined');
     return null;
   }
   

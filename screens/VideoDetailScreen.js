@@ -7,7 +7,7 @@ import { COLORS } from '../constants/theme';
 
 export default function VideoDetailScreen({ navigation }) {
   const route = useRoute();
-  const { videoId } = route.params;
+  const { videoId } = route.params ?? {};
   const { height } = useWindowDimensions();
   const playerRef = useRef(null);
   const [video, setVideo] = useState(null);
@@ -19,6 +19,7 @@ export default function VideoDetailScreen({ navigation }) {
   }, [videoId]);
 
   async function loadVideo() {
+    if (!videoId) { setError(true); setLoading(false); return; }
     const { data, error } = await supabase
       .from('videos')
       .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')

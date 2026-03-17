@@ -43,6 +43,6 @@ async function registerForPushNotifications() {
       .eq('id', user.id);
 
   } catch (e) {
-    console.log('Push token error:', e);
+    __DEV__ && console.log('Push token error:', e);
   }
 }

@@ -181,7 +181,7 @@ export default function ProfileScreen({ route, navigation }) {
       Promise.all([
         loadProfile(viewingId),
         loadVideos(viewingId, ownProfile),
-      ]);
+      ]).catch(e => __DEV__ && console.error('Profile load error:', e));
 
       if (!ownProfile) {
         supabase.from('follows')
@@ -214,7 +214,7 @@ export default function ProfileScreen({ route, navigation }) {
         Promise.all([
           loadProfile(viewingId),
           loadVideos(viewingId, ownProfile),
-        ]);
+        ]).catch(e => __DEV__ && console.error('Profile load error:', e));
       }
     }
   }
@@ -311,7 +311,7 @@ export default function ProfileScreen({ route, navigation }) {
       setProfile(prev => ({ ...prev, avatar_url: cacheBustedUrl }));
     } catch (e) {
       Alert.alert('Error', 'Could not upload avatar. Please try again.');
-      console.error('Upload error:', e);
+      __DEV__ && console.error('Upload error:', e);
     }
   }
 
@@ -385,7 +385,7 @@ export default function ProfileScreen({ route, navigation }) {
     } catch (e) {
       setIsDownloading(false);
       Alert.alert('Error', 'Could not download the video. Please try again.');
-      console.error('Download error:', e);
+      __DEV__ && console.error('Download error:', e);
     }
   }
 
@@ -399,7 +399,14 @@ export default function ProfileScreen({ route, navigation }) {
     });
   }, [showVideoOptionsSheet, isOwnProfile]);
 
-  const onRefresh = useCallback(async () => { setRefreshing(true); await init(); setRefreshing(false); }, []);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await init();
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
   const openVideo = useCallback((videos, index) => navigation.navigate('ProfileVideos', { videos, startIndex: index }), [navigation]);
 
   const renderHeader = useCallback(() => (

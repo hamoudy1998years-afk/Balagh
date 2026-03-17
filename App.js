@@ -270,7 +270,7 @@ export default function App() {
     
     // Check if it's a recovery link
     if (url.includes('type=recovery')) {
-      console.log('✅ Recovery link detected!');
+      __DEV__ && console.log('✅ Recovery link detected!');
       
       // Extract tokens from URL hash or query
       const hashIndex = url.indexOf('#');
@@ -282,7 +282,7 @@ export default function App() {
         const access_token = params.get('access_token');
         const refresh_token = params.get('refresh_token');
         
-        console.log('Access token found:', !!access_token);
+        __DEV__ && console.log('Access token found:', !!access_token);
         
         if (access_token) {
           // Set session manually
@@ -292,9 +292,9 @@ export default function App() {
           });
           
           if (error) {
-            console.log('❌ Session error:', error.message);
+            __DEV__ && console.log('❌ Session error:', error.message);
           } else {
-            console.log('✅ Session set!');
+            __DEV__ && console.log('✅ Session set!');
             // Navigate to ResetPassword
             setTimeout(() => {
               navigationRef.current?.navigate('ResetPassword');

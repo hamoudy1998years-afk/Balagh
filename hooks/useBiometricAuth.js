@@ -27,9 +27,9 @@ export function useBiometricAuth() {
       }
 
       await SecureStore.setItemAsync(CREDS_VERSION_KEY, CURRENT_VERSION);
-      console.log('[BiometricAuth] Migration complete — old Google tokens cleared');
+      __DEV__ && console.log('[BiometricAuth] Migration complete — old Google tokens cleared');
     } catch (e) {
-      console.log('Migration error:', e);
+      __DEV__ && console.log('Migration error:', e);
     }
   };
 
@@ -77,7 +77,7 @@ export function useBiometricAuth() {
       }
       await SecureStore.setItemAsync(ACCOUNTS_LIST_KEY, JSON.stringify(accounts));
     } catch (e) {
-      console.log('saveCredentials error:', e);
+      __DEV__ && console.log('saveCredentials error:', e);
     }
   };
 
@@ -108,10 +108,10 @@ export function useBiometricAuth() {
         accounts[idx] = { ...accounts[idx], provider: 'google', identifier };
       }
       await SecureStore.setItemAsync(ACCOUNTS_LIST_KEY, JSON.stringify(accounts));
-      console.log('[BiometricAuth] Google credentials saved for:', email);
+      __DEV__ && console.log('[BiometricAuth] Google credentials saved for:', email);
       return true;
     } catch (e) {
-      console.log('saveGoogleCredentials error:', e);
+      __DEV__ && console.log('saveGoogleCredentials error:', e);
       return false;
     }
   };
@@ -128,9 +128,9 @@ export function useBiometricAuth() {
         credKey,
         JSON.stringify({ ...creds, refreshToken: newRefreshToken })
       );
-      console.log('[BiometricAuth] Token auto-updated for:', email);
+      __DEV__ && console.log('[BiometricAuth] Token auto-updated for:', email);
     } catch (e) {
-      console.log('updateStoredGoogleToken error:', e);
+      __DEV__ && console.log('updateStoredGoogleToken error:', e);
     }
   };
 
@@ -143,84 +143,84 @@ export function useBiometricAuth() {
         await SecureStore.setItemAsync(ACCOUNTS_LIST_KEY, JSON.stringify(accounts));
       }
     } catch (e) {
-      console.log('saveAccount error:', e);
+      __DEV__ && console.log('saveAccount error:', e);
     }
   };
 
   // ========== FIXED: loginWithBiometrics - Use appPassword for Google accounts ==========
   const loginWithBiometrics = async (email) => {
-    console.log('[BIOMETRIC] ========== START ==========');
-    console.log('[BIOMETRIC] Email:', email);
+    __DEV__ && console.log('[BIOMETRIC] ========== START ==========');
+    __DEV__ && console.log('[BIOMETRIC] Email:', email);
     
     const available = await isBiometricAvailable();
-    console.log('[BIOMETRIC] Biometric available:', available);
+    __DEV__ && console.log('[BIOMETRIC] Biometric available:', available);
     
     if (!available) throw new Error('Biometrics not available on this device');
 
     const savedRaw = await SecureStore.getItemAsync(makeCredKey(email));
-    console.log('[BIOMETRIC] Saved credentials found:', !!savedRaw);
+    __DEV__ && console.log('[BIOMETRIC] Saved credentials found:', !!savedRaw);
     
     if (!savedRaw) {
-      console.log('[BIOMETRIC] NO CREDENTIALS - throwing error');
+      __DEV__ && console.log('[BIOMETRIC] NO CREDENTIALS - throwing error');
       throw new Error('NO_CREDENTIALS');
     }
 
     const creds = JSON.parse(savedRaw);
-    console.log('[BIOMETRIC] Credential type:', creds.type);
-    console.log('[BIOMETRIC] Has appPassword:', !!creds.appPassword);
-    console.log('[BIOMETRIC] Has refresh token:', !!creds.refreshToken);
+    __DEV__ && console.log('[BIOMETRIC] Credential type:', creds.type);
+    __DEV__ && console.log('[BIOMETRIC] Has appPassword:', !!creds.appPassword);
+    __DEV__ && console.log('[BIOMETRIC] Has refresh token:', !!creds.refreshToken);
 
-    console.log('[BIOMETRIC] Showing biometric prompt...');
+    __DEV__ && console.log('[BIOMETRIC] Showing biometric prompt...');
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: 'Verify with Face ID or fingerprint',
       cancelLabel: 'Cancel',
       disableDeviceFallback: true,
     });
 
-    console.log('[BIOMETRIC] Biometric result:', result.success);
+    __DEV__ && console.log('[BIOMETRIC] Biometric result:', result.success);
     
     if (!result.success) {
-      console.log('[BIOMETRIC] Biometric cancelled/failed');
+      __DEV__ && console.log('[BIOMETRIC] Biometric cancelled/failed');
       throw new Error('BIOMETRIC_CANCELLED');
     }
 
     if (creds.type === 'google') {
       // ========== NEW FLOW: Use appPassword if available ==========
       if (creds.appPassword) {
-        console.log('[BIOMETRIC] Using appPassword to create session...');
+        __DEV__ && console.log('[BIOMETRIC] Using appPassword to create session...');
         const { data, error } = await supabase.auth.signInWithPassword({
           email: creds.email,
           password: creds.appPassword,
         });
         
-        console.log('[BIOMETRIC] signInWithPassword error:', error?.message || 'none');
-        console.log('[BIOMETRIC] Session returned:', !!data?.session);
+        __DEV__ && console.log('[BIOMETRIC] signInWithPassword error:', error?.message || 'none');
+        __DEV__ && console.log('[BIOMETRIC] Session returned:', !!data?.session);
         
         if (error || !data?.session) {
-          console.log('[BIOMETRIC] AppPassword login failed');
+          __DEV__ && console.log('[BIOMETRIC] AppPassword login failed');
           throw new Error('SESSION_EXPIRED');
         }
         
-        console.log('[BIOMETRIC] Session created with appPassword');
+        __DEV__ && console.log('[BIOMETRIC] Session created with appPassword');
       } 
       // ========== FALLBACK: Old refresh token flow ==========
       else if (creds.refreshToken) {
-        console.log('[BIOMETRIC] No appPassword, falling back to refresh token...');
+        __DEV__ && console.log('[BIOMETRIC] No appPassword, falling back to refresh token...');
         const { data, error } = await supabase.auth.refreshSession({
           refresh_token: creds.refreshToken,
         });
 
-        console.log('[BIOMETRIC] Refresh error:', error?.message || 'none');
-        console.log('[BIOMETRIC] Session returned:', !!data?.session);
+        __DEV__ && console.log('[BIOMETRIC] Refresh error:', error?.message || 'none');
+        __DEV__ && console.log('[BIOMETRIC] Session returned:', !!data?.session);
 
         if (error || !data?.session) {
-          console.log('[BIOMETRIC] Session refresh FAILED - deleting credentials');
+          __DEV__ && console.log('[BIOMETRIC] Session refresh FAILED - deleting credentials');
           await SecureStore.deleteItemAsync(makeCredKey(email));
           throw new Error('SESSION_EXPIRED');
         }
 
         if (data.session.refresh_token) {
-          console.log('[BIOMETRIC] Saving new refresh token...');
+          __DEV__ && console.log('[BIOMETRIC] Saving new refresh token...');
           await SecureStore.setItemAsync(
             makeCredKey(email),
             JSON.stringify({
@@ -230,27 +230,27 @@ export function useBiometricAuth() {
           );
         }
 
-        console.log('[BIOMETRIC] Setting Supabase session globally...');
+        __DEV__ && console.log('[BIOMETRIC] Setting Supabase session globally...');
         await supabase.auth.setSession({
           access_token: data.session.access_token,
           refresh_token: data.session.refresh_token,
         });
       } else {
-        console.log('[BIOMETRIC] No appPassword or refreshToken available');
+        __DEV__ && console.log('[BIOMETRIC] No appPassword or refreshToken available');
         throw new Error('NO_CREDENTIALS');
       }
 
     } else {
-      console.log('[BIOMETRIC] Logging in with password...');
+      __DEV__ && console.log('[BIOMETRIC] Logging in with password...');
       const { error } = await supabase.auth.signInWithPassword({
         email: creds.email,
         password: creds.password,
       });
-      console.log('[BIOMETRIC] Password login error:', error?.message || 'none');
+      __DEV__ && console.log('[BIOMETRIC] Password login error:', error?.message || 'none');
       if (error) throw error;
     }
 
-    console.log('[BIOMETRIC] ========== SUCCESS ==========');
+    __DEV__ && console.log('[BIOMETRIC] ========== SUCCESS ==========');
     return true;
   };
 
@@ -271,7 +271,7 @@ export function useBiometricAuth() {
         await SecureStore.deleteItemAsync(ACCOUNTS_LIST_KEY);
       }
     } catch (e) {
-      console.log('clearCredentials error:', e);
+      __DEV__ && console.log('clearCredentials error:', e);
     }
   };
 
@@ -299,7 +299,7 @@ export function useBiometricAuth() {
       );
       return true;
     } catch (e) {
-      console.log('saveQuickPin error:', e);
+      __DEV__ && console.log('saveQuickPin error:', e);
       return false;
     }
   };

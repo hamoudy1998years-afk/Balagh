@@ -6,7 +6,7 @@ import AnimatedButton from './AnimatedButton';
 
 export default function ProfileVideosScreen({ route, navigation }) {
   const { height, width } = useWindowDimensions();
-  const { videos, startIndex } = route.params;
+  const { videos, startIndex } = route.params ?? {};
   const [activeIndex, setActiveIndex] = useState(startIndex ?? 0);
   const playerPool = useVideoPlayerPool();
 

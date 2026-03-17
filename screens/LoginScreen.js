@@ -114,9 +114,9 @@ export default function LoginScreen({ navigation }) {
 
   // ========== FIXED: handleAccountSelect ==========
   const handleAccountSelect = async (account) => {
-    console.log('[LOGIN] ========== Account Selected ==========');
-    console.log('[LOGIN] Account:', account.email);
-    console.log('[LOGIN] Provider:', account.provider);
+    __DEV__ && console.log('[LOGIN] ========== Account Selected ==========');
+    __DEV__ && console.log('[LOGIN] Account:', account.email);
+    __DEV__ && console.log('[LOGIN] Provider:', account.provider);
 
     closeDropdown();
     setLoading(true);
@@ -154,7 +154,7 @@ export default function LoginScreen({ navigation }) {
         
         // NO PIN YET - Ask to create PIN
         if (!hasPin) {
-          console.log('[LOGIN] No PIN yet - showing create PIN modal');
+          __DEV__ && console.log('[LOGIN] No PIN yet - showing create PIN modal');
           setLoading(false);
           setPinModalVisible(true);
           setIsCreatingPin(true);
@@ -167,7 +167,7 @@ export default function LoginScreen({ navigation }) {
         }
 
         // HAS PIN - Show biometric immediately (no dialog!)
-        console.log('[LOGIN] Has PIN - showing biometric immediately');
+        __DEV__ && console.log('[LOGIN] Has PIN - showing biometric immediately');
         const bioAvailable = await isBiometricAvailable();
 
         if (bioAvailable) {
@@ -177,11 +177,11 @@ export default function LoginScreen({ navigation }) {
           });
 
           if (bioResult.success) {
-            console.log('[LOGIN] Biometric success - creating session with appPassword...');
+            __DEV__ && console.log('[LOGIN] Biometric success - creating session with appPassword...');
             
             // Get stored credentials with appPassword
             if (!savedRaw) {
-              console.log('[LOGIN] No saved credentials found');
+              __DEV__ && console.log('[LOGIN] No saved credentials found');
               setLoading(false);
               return;
             }
@@ -195,7 +195,7 @@ export default function LoginScreen({ navigation }) {
             });
             
             if (error) {
-              console.log('[LOGIN] Session failed:', error.message);
+              __DEV__ && console.log('[LOGIN] Session failed:', error.message);
               setLoading(false);
               // Fallback to PIN
               setPinModalVisible(true);
@@ -205,7 +205,7 @@ export default function LoginScreen({ navigation }) {
               return;
             }
             
-            console.log('[LOGIN] Session created successfully');
+            __DEV__ && console.log('[LOGIN] Session created successfully');
             setLoading(false);
             navigation.navigate('Main');
             return;
@@ -213,7 +213,7 @@ export default function LoginScreen({ navigation }) {
         }
 
         // Biometric failed/cancelled/no biometric - Show PIN
-        console.log('[LOGIN] Biometric failed or not available - showing PIN');
+        __DEV__ && console.log('[LOGIN] Biometric failed or not available - showing PIN');
         setLoading(false);
         setPinModalVisible(true);
         setIsCreatingPin(false);
@@ -222,7 +222,7 @@ export default function LoginScreen({ navigation }) {
         return;
       }
     } catch (e) {
-      console.log('handleAccountSelect error:', e);
+      __DEV__ && console.log('handleAccountSelect error:', e);
       setLoading(false);
     }
   };
@@ -634,9 +634,9 @@ export default function LoginScreen({ navigation }) {
         }
 
         try {
-          console.log('[PIN] Validating PIN...');
+          __DEV__ && console.log('[PIN] Validating PIN...');
           await validateQuickPin(selectedAccount.email, enteredPin);
-          console.log('[PIN] PIN valid - creating session...');
+          __DEV__ && console.log('[PIN] PIN valid - creating session...');
 
           const credKey = 'bushrann_creds_' + selectedAccount.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
           const savedRaw = await SecureStore.getItemAsync(credKey);
@@ -656,20 +656,20 @@ export default function LoginScreen({ navigation }) {
           });
           
           if (error) {
-            console.log('[PIN] Session failed:', error.message);
+            __DEV__ && console.log('[PIN] Session failed:', error.message);
             setPinError('Login failed. Please try again.');
             setEnteredPin('');
             return;
           }
           
-          console.log('[PIN] Session created successfully');
+          __DEV__ && console.log('[PIN] Session created successfully');
           setPinModalVisible(false);
           setEnteredPin('');
           setPinError('');
           navigation.navigate('Main');
           
         } catch (e) {
-          console.log('[PIN] Invalid PIN:', e.message);
+          __DEV__ && console.log('[PIN] Invalid PIN:', e.message);
           if (e.message === 'INVALID_PIN') {
             setPinError('Wrong PIN');
             setEnteredPin('');

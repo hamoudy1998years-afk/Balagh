@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|BUG\\\\|XXX\" /c/Users/hamou/Balagh --include=*.js --include=*.ts --include=*.tsx)"
+    ]
+  }
+}

@@ -5,19 +5,19 @@ export const useViewerTracking = (streamId, isStreamer = false, user, retryCount
   const heartbeatInterval = useRef(null);
 
   useEffect(() => {
-    console.log('🔍 useViewerTracking called:', { streamId, isStreamer, hasUser: !!user, userId: user?.id });
+    __DEV__ && console.log('🔍 useViewerTracking called:', { streamId, isStreamer, hasUser: !!user, userId: user?.id });
     
     if (!streamId || !user || isStreamer) {
-      console.log('⚠️ Early return - missing:', { streamId: !!streamId, user: !!user, isStreamer });
+      __DEV__ && console.log('⚠️ Early return - missing:', { streamId: !!streamId, user: !!user, isStreamer });
       return;
     }
 
     const userId = user.id;
-    console.log('✅ Starting viewer tracking for user:', userId);
+    __DEV__ && console.log('✅ Starting viewer tracking for user:', userId);
 
     // Join stream
     const joinStream = async () => {
-      console.log('📝 Attempting to join stream_viewers table...');
+      __DEV__ && console.log('📝 Attempting to join stream_viewers table...');
       try {
         const { data, error } = await supabase
           .from('stream_viewers')
@@ -31,18 +31,18 @@ export const useViewerTracking = (streamId, isStreamer = false, user, retryCount
           });
         
         if (error) {
-          console.error('❌ Error joining stream:', error);
+          __DEV__ && console.error('❌ Error joining stream:', error);
         } else {
-          console.log('✅ Successfully joined stream_viewers:', data);
+          __DEV__ && console.log('✅ Successfully joined stream_viewers:', data);
         }
       } catch (e) {
-        console.error('❌ Exception in joinStream:', e);
+        __DEV__ && console.error('❌ Exception in joinStream:', e);
       }
     };
 
     // Heartbeat to show we're still watching
     const heartbeat = async () => {
-      console.log('💓 Heartbeat...');
+      __DEV__ && console.log('💓 Heartbeat...');
       await supabase
         .from('stream_viewers')
         .update({ last_seen_at: new Date().toISOString() })
@@ -52,7 +52,7 @@ export const useViewerTracking = (streamId, isStreamer = false, user, retryCount
 
     // Leave stream
     const leaveStream = async () => {
-      console.log('👋 Leaving stream...');
+      __DEV__ && console.log('👋 Leaving stream...');
       await supabase
         .from('stream_viewers')
         .delete()
@@ -68,7 +68,7 @@ export const useViewerTracking = (streamId, isStreamer = false, user, retryCount
 
     // Cleanup on unmount
     return () => {
-      console.log('🧹 Cleanup called');
+      __DEV__ && console.log('🧹 Cleanup called');
       clearInterval(heartbeatInterval.current);
       leaveStream();
     };

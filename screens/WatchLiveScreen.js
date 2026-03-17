@@ -24,7 +24,7 @@ const HOST_TIMEOUT_MS = 30000; // ⏱️ TIMEOUT: 30 seconds
 
 export default function WatchLiveScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { stream } = route.params;
+  const { stream } = route.params ?? {};
 
   const [loading, setLoading] = useState(false);
   const [joining, setJoining] = useState(true);
@@ -88,27 +88,22 @@ export default function WatchLiveScreen({ navigation, route }) {
   // ⏱️ TIMEOUT: Start timeout when joining completes but host hasn't joined
   useEffect(() => {
     if (!joining && !hostJoined && !hostTimeoutReached && !streamEnded) {
-      console.log('⏱️ TIMEOUT: Starting 30s host wait timer...');
+      __DEV__ && console.log('⏱️ TIMEOUT: Starting 30s host wait timer...');
       hostWaitTimeoutRef.current = setTimeout(() => {
-        console.log('⏱️ TIMEOUT: Host wait timeout reached!');
+        __DEV__ && console.log('⏱️ TIMEOUT: Host wait timeout reached!');
         setHostTimeoutReached(true);
       }, HOST_TIMEOUT_MS);
     }
 
     // Clear timeout if host joins or stream ends
     if ((hostJoined || streamEnded) && hostWaitTimeoutRef.current) {
-      console.log('⏱️ TIMEOUT: Clearing timer - host joined or stream ended');
+      __DEV__ && console.log('⏱️ TIMEOUT: Clearing timer - host joined or stream ended');
       clearTimeout(hostWaitTimeoutRef.current);
       hostWaitTimeoutRef.current = null;
     }
   }, [joining, hostJoined, hostTimeoutReached, streamEnded]);
 
   async function setup() {
-    // 🔍 DEBUG LOG - Added at very beginning
-    console.log('🎬 VIEWER: Starting setup...');
-    console.log('🎬 VIEWER: Stream ID:', stream?.id);
-    console.log('🎬 VIEWER: Channel name:', stream?.channel_name);
-    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -126,10 +121,6 @@ export default function WatchLiveScreen({ navigation, route }) {
       setUsername(profile?.username ?? 'viewer');
 
       const token = stream.viewer_token;
-
-      // 🔍 DEBUG LOG - Added after getting token
-      console.log('🎬 VIEWER: Has token:', !!token);
-      console.log('🎬 VIEWER: Token first 20 chars:', token ? token.substring(0, 20) + '...' : 'NONE');
 
       if (!token) {
         Alert.alert('Error', 'Stream token not available.');
@@ -149,32 +140,19 @@ export default function WatchLiveScreen({ navigation, route }) {
       engine.setClientRole(ClientRoleType.ClientRoleAudience);
       engine.enableVideo();
 
-      // 🔍 DEBUG LOG - Added before joining channel
-      console.log('🎬 VIEWER: About to join Agora channel...');
-
       await engine.joinChannel(token, stream.channel_name, 0, {
         clientRoleType: ClientRoleType.ClientRoleAudience,
       });
 
-      // 🔍 DEBUG LOG - Added after joining channel
-      console.log('✅ VIEWER: Successfully joined channel');
-
-      console.log('Viewer joined channel:', stream.channel_name);
       setJoining(false);
 
       engine.addListener('onUserJoined', (connection, remoteUid) => {
-        // 🔍 DEBUG LOG - Added in onUserJoined
-        console.log('✅ VIEWER EVENT: onUserJoined - uid:', remoteUid);
-        console.log('Host joined with uid:', remoteUid);
         setHostUid(remoteUid);
         setHostJoined(true);
         setHostTimeoutReached(false); // ⏱️ TIMEOUT: Reset timeout state if host joins
       });
 
       engine.addListener('onRemoteVideoStateChanged', (connection, remoteUid, state, reason, elapsed) => {
-        // 🔍 DEBUG LOG - Added in onRemoteVideoStateChanged
-        console.log('📹 VIEWER EVENT: onRemoteVideoStateChanged - uid:', remoteUid, 'state:', state, 'reason:', reason);
-        console.log('Remote video state:', state, 'reason:', reason);
         if (state === 2) {
           setHostUid(remoteUid);
           setHostJoined(true);
@@ -183,7 +161,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       });
 
       engine.addListener('onUserOffline', (connection, remoteUid, reason) => {
-        console.log('Host offline, reason:', reason);
+        __DEV__ && console.log('Host offline, reason:', reason);
         setHostJoined(false);
         if (reason === 0) {
           setStreamEnded(true);
@@ -191,7 +169,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       });
 
       engine.addListener('onError', (err) => {
-        console.log('Agora error:', err);
+        __DEV__ && console.log('Agora error:', err);
       });
 
       setLoading(false);
@@ -223,7 +201,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       subscribeToQuestions();
       subscribeToStream();
     } catch (e) {
-      console.error('Setup error:', e);
+      __DEV__ && console.error('Setup error:', e);
       Alert.alert('Error', 'Failed to join stream.');
       navigation.goBack();
     }
@@ -231,7 +209,7 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   // ⏱️ TIMEOUT: Retry function to rejoin
   async function handleRetryJoin() {
-    console.log('🔄 RETRY: User clicked try again');
+    __DEV__ && console.log('🔄 RETRY: User clicked try again');
     setHostTimeoutReached(false);
     setJoining(true);
     setRetryCount(prev => prev + 1);
@@ -239,10 +217,11 @@ export default function WatchLiveScreen({ navigation, route }) {
     // Cleanup existing engine
     if (engineRef.current) {
       try {
+        engineRef.current.removeAllListeners();
         await engineRef.current.leaveChannel();
         engineRef.current.release();
       } catch (e) {
-        console.log('Retry cleanup error:', e);
+        __DEV__ && console.log('Retry cleanup error:', e);
       }
       engineRef.current = null;
     }
@@ -257,7 +236,7 @@ export default function WatchLiveScreen({ navigation, route }) {
     if (isCleaningUp.current) return;
     isCleaningUp.current = true;
 
-    console.log('🧹 Cleanup called');
+    __DEV__ && console.log('🧹 Cleanup called');
 
     // ⏱️ TIMEOUT: Clear timeout on cleanup
     if (hostWaitTimeoutRef.current) {
@@ -274,10 +253,11 @@ export default function WatchLiveScreen({ navigation, route }) {
 
     if (engineRef.current) {
       try {
+        engineRef.current.removeAllListeners();
         engineRef.current.leaveChannel();
         engineRef.current.release();
       } catch (e) {
-        console.log('Engine cleanup error:', e);
+        __DEV__ && console.log('Engine cleanup error:', e);
       }
       engineRef.current = null;
     }
@@ -325,7 +305,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         table: 'live_streams', 
         filter: `id=eq.${stream.id}` 
       }, () => {
-        console.log('Stream deleted, ending...');
+        __DEV__ && console.log('Stream deleted, ending...');
         setStreamEnded(true);
       })
       .on('postgres_changes', { 
@@ -355,7 +335,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         message: msg 
       });
     } catch (e) {
-      console.log('Failed to send message:', e);
+      __DEV__ && console.log('Failed to send message:', e);
     }
   }
 
@@ -391,7 +371,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       });
       setQuestionsLeft(prev => prev - 1);
     } catch (e) {
-      console.log('Failed to submit question:', e);
+      __DEV__ && console.log('Failed to submit question:', e);
     }
   }
 
@@ -414,7 +394,7 @@ export default function WatchLiveScreen({ navigation, route }) {
             reaction: emoji 
           });
         } catch (e) {
-          console.log('Reaction error:', e);
+          __DEV__ && console.log('Reaction error:', e);
         }
       };
       saveReaction();

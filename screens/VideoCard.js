@@ -182,7 +182,7 @@ function VideoCard({
         if (error) throw error;
       }
     } catch (error) {
-      console.log('Like error:', error);
+      __DEV__ && console.log('Like error:', error);
       setLiked(liked);
       setLikeCount(prev => prev - countChange);
     } finally {
@@ -301,7 +301,7 @@ function VideoCard({
         type: 'error',
         buttons: [{ text: 'OK' }]
       });
-      console.error('Download error:', e);
+      __DEV__ && console.error('Download error:', e);
     }
   }, [item]);
 
@@ -356,7 +356,7 @@ function VideoCard({
           bufferForPlaybackMs: 250,
           bufferForPlaybackAfterRebufferMs: 500,
         }}
-        onError={(e) => console.log('Video error:', e)}
+        onError={(e) => __DEV__ && console.log('Video error:', e)}
         useTextureView={false}
       />
 

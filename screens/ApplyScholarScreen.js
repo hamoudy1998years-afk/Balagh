@@ -18,8 +18,9 @@ export default function ApplyScholarScreen({ navigation }) {
       Alert.alert('Missing Fields', 'Please fill in all required fields.');
       return;
     }
-    const ageNum = parseInt(age);
-    if (isNaN(ageNum) || ageNum < 18 || ageNum > 100) {
+    const trimmedAge = age.trim();
+    const ageNum = parseInt(trimmedAge, 10);
+    if (!trimmedAge || isNaN(ageNum) || !/^\d+$/.test(trimmedAge) || ageNum < 18 || ageNum > 100) {
       Alert.alert('Invalid Age', 'Please enter a valid age between 18 and 100.');
       return;
     }

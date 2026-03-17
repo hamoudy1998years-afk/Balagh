@@ -19,7 +19,7 @@ export const useFeatureFlag = (flagName) => {
         .single();
 
       if (error) {
-        console.error('Feature flag error:', error);
+        __DEV__ && console.error('Feature flag error:', error);
         setEnabled(false);
       } else {
         setEnabled(data?.enabled ?? false);

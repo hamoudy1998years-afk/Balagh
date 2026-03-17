@@ -87,7 +87,7 @@ export default function UploadScreen({ navigation }) {
       );
       setThumbnailUri(uri);
     } catch (error) {
-      console.error('Thumbnail generation failed:', error);
+      __DEV__ && console.error('Thumbnail generation failed:', error);
       setThumbnailUri(null);
     } finally {
       setGeneratingThumb(false);
@@ -285,7 +285,7 @@ export default function UploadScreen({ navigation }) {
       setUploading(false);
       setProgressPercent(0);
       setProgressLabel('');
-      console.error('Upload error:', error);
+      __DEV__ && console.error('Upload error:', error);
       setDialog({
         visible: true,
         title: 'Upload failed',

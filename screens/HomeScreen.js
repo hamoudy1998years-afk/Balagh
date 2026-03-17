@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, TouchableOpacity, useWindowDimensions, AppState } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { TabView } from 'react-native-tab-view';
@@ -43,16 +43,32 @@ function LiveFeed({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const intervalRef = useRef(null);
+
   useEffect(() => {
     loadStreams();
-    const interval = setInterval(loadStreams, 15000);
+    intervalRef.current = setInterval(loadStreams, 15000);
+
     const channel = supabase
       .channel('live_streams_home')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => loadStreams())
       .subscribe();
+
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        clearInterval(intervalRef.current);
+        intervalRef.current = setInterval(loadStreams, 15000);
+        loadStreams();
+      } else {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    });
+
     return () => {
+      appStateSub.remove();
       channel.unsubscribe();
-      clearInterval(interval);
+      clearInterval(intervalRef.current);
     };
   }, []);
 
@@ -272,7 +288,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .order('created_at', { ascending: false })
         .limit(20);
 
-      if (error) { console.warn('Following feed error:', error.message); setLoading(false); return; }
+      if (error) { __DEV__ && console.warn('Following feed error:', error.message); setLoading(false); return; }
       const result = data ?? [];
       feedCache.following = result;
       feedCache.ts.following = Date.now();
@@ -287,7 +303,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .order('created_at', { ascending: false })
         .limit(20);
 
-      if (error) { console.warn('ForYou feed error:', error.message); setLoading(false); return; }
+      if (error) { __DEV__ && console.warn('ForYou feed error:', error.message); setLoading(false); return; }
       const arr = [...(data ?? [])];
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -312,8 +328,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       supabase.from('likes').select('video_id').eq('user_id', user.id),
       supabase.from('follows').select('following_id').eq('follower_id', user.id),
     ]);
-    if (likesRes.error) console.warn('Likes error:', likesRes.error.message);
-    if (followsRes.error) console.warn('Follows error:', followsRes.error.message);
+    if (likesRes.error) __DEV__ && console.warn('Likes error:', likesRes.error.message);
+    if (followsRes.error) __DEV__ && console.warn('Follows error:', followsRes.error.message);
 
     const likes = likesRes.data?.map(l => l.video_id) ?? [];
     const follows = followsRes.data?.map(f => f.following_id) ?? [];
@@ -497,7 +513,7 @@ export default function HomeScreen({ navigation }) {
 
     feedCache.following = data ?? [];
     feedCache.ts.following = Date.now();
-    console.log('Following feed preloaded:', data?.length || 0, 'videos');
+    __DEV__ && console.log('Following feed preloaded:', data?.length || 0, 'videos');
   }
 
   useEffect(() => {

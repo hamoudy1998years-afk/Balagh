@@ -69,7 +69,7 @@ function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export default function FollowListScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
-  const { userId, type, username } = route.params;
+  const { userId, type, username } = route.params ?? {};
 
   const [users,         setUsers]         = useState([]);
   const [loading,       setLoading]       = useState(true);
@@ -135,7 +135,7 @@ export default function FollowListScreen({ route, navigation }) {
 
       setUsers(list);
     } catch (e) {
-      console.error('Error loading follow list:', e);
+      __DEV__ && console.error('Error loading follow list:', e);
     } finally {
       setLoading(false);
     }

@@ -53,7 +53,7 @@ export default function SignupScreen({ navigation }) {
   async function handleSignup() {
     if (!username.trim()) { Alert.alert('Missing Field', 'Please enter a username.'); return; }
     if (!password.trim()) { Alert.alert('Missing Field', 'Please enter a password.'); return; }
-    if (password.trim().length < 6) { Alert.alert('Weak Password', 'Password must be at least 6 characters.'); return; }
+    if (password.trim().length < 8) { Alert.alert('Weak Password', 'Password must be at least 8 characters.'); return; }
     if (password.trim() !== confirmPassword.trim()) { Alert.alert('Password Mismatch', 'Passwords do not match.'); return; }
 
     const hasRealEmail = email.trim().length > 0 && email.includes('@');
@@ -91,7 +91,7 @@ export default function SignupScreen({ navigation }) {
         .update({ phone: phone.trim() })
         .eq('id', data.user.id);
       if (phoneError) {
-        console.warn('Phone save failed:', phoneError.message);
+        __DEV__ && console.warn('Phone save failed:', phoneError.message);
         Alert.alert('Note', 'Account created but phone number could not be saved. You can update it in your profile.');
       }
     }

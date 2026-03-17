@@ -21,7 +21,7 @@ export const useRecentViewers = (streamId, limit = 20) => {
         .limit(limit);
 
       if (error) {
-        console.error('Error fetching recent viewers:', error);
+        __DEV__ && console.error('Error fetching recent viewers:', error);
         return;
       }
 

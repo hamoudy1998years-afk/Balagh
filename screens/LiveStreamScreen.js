@@ -28,7 +28,7 @@ const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 const THUMBNAIL_SERVER_URL = 'https://balagh-server-production.up.railway.app';
 
 async function getAgoraToken(channelName, uid, role) {
-  console.log('🚀 Fetching token...');
+  __DEV__ && console.log('🚀 Fetching token...');
   const fetchWithTimeout = (url, options, timeout = 10000) => {
     return Promise.race([
       fetch(url, options),
@@ -44,17 +44,17 @@ async function getAgoraToken(channelName, uid, role) {
       10000
     );
     const data = await response.json();
-    console.log('✅ Token received:', data.token ? 'YES' : 'NO');
+    __DEV__ && console.log('✅ Token received:', data.token ? 'YES' : 'NO');
     return data.token;
   } catch (error) {
-    console.error('❌ Token error:', error);
+    __DEV__ && console.error('❌ Token error:', error);
     return null;
   }
 }
 
 async function uploadThumbnail(filePath, streamId) {
   try {
-    console.log('📤 Uploading snapshot to Supabase...');
+    __DEV__ && console.log('📤 Uploading snapshot to Supabase...');
 
     const fileName = `thumbnail_${streamId}_${Date.now()}.jpg`;
 
@@ -73,17 +73,17 @@ async function uploadThumbnail(filePath, streamId) {
       });
 
     if (error) {
-      console.error('❌ Upload error:', JSON.stringify(error, null, 2));
+      __DEV__ && console.error('❌ Upload error:', JSON.stringify(error, null, 2));
       return null;
     }
 
-    console.log('✅ Upload successful:', data);
+    __DEV__ && console.log('✅ Upload successful:', data);
 
     const { data: { publicUrl } } = supabase.storage
       .from('thumbnails')
       .getPublicUrl(fileName);
 
-    console.log('✅ Thumbnail public URL:', publicUrl);
+    __DEV__ && console.log('✅ Thumbnail public URL:', publicUrl);
 
     await supabase
       .from('live_streams')
@@ -92,7 +92,7 @@ async function uploadThumbnail(filePath, streamId) {
 
     return publicUrl;
   } catch (error) {
-    console.error('❌ Upload failed:', error);
+    __DEV__ && console.error('❌ Upload failed:', error);
     return null;
   }
 }
@@ -123,6 +123,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const flatListRef = useRef(null);
   const appStateSubscription = useRef(null);
   const pingInterval = useRef(null);
+  const snapshotTimeoutRef = useRef(null);
   const currentStreamIdRef = useRef(null);
   const currentChannelRef = useRef(null);
   const isLiveRef = useRef(false);
@@ -139,7 +140,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       // REMOVED: setup() - now called manually when pressing "Start Streaming"
       appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
         if (nextAppState === 'background' || nextAppState === 'inactive') {
-          console.log('App went to background, ending stream...');
+          __DEV__ && console.log('App went to background, ending stream...');
           forceEndStream();
         }
       });
@@ -177,7 +178,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
       ]);
       if (results[PermissionsAndroid.PERMISSIONS.CAMERA] !== PermissionsAndroid.RESULTS.GRANTED) {
-        console.log('❌ Camera permission denied');
+        __DEV__ && console.log('❌ Camera permission denied');
         Alert.alert('Permission Required', 'Camera permission is needed to stream');
         return false;
       }
@@ -267,32 +268,34 @@ export default function LiveStreamScreen({ navigation, route }) {
 
       engine.registerEventHandler({
         onJoinChannelSuccess: (connection, elapsed) => {
-          console.log('✅ Joined channel:', connection.channelId, 'uid:', connection.localUid);
+          __DEV__ && console.log('✅ Joined channel:', connection.channelId, 'uid:', connection.localUid);
 
-          setTimeout(() => {
+          snapshotTimeoutRef.current = setTimeout(() => {
             // 🔧 FIXED: Use platform-specific path
             const snapshotPath = Platform.OS === 'ios' 
               ? `${RNFS.CachesDirectoryPath}/snapshot_${Date.now()}.jpg`
               : `/data/user/0/com.bushrann.app/cache/snapshot_${Date.now()}.jpg`;
-            console.log('📸 Taking Agora snapshot to:', snapshotPath);
-            engine.takeSnapshot(0, snapshotPath);
+            __DEV__ && console.log('📸 Taking Agora snapshot to:', snapshotPath);
+            if (engineRef.current) {
+              engineRef.current.takeSnapshot(0, snapshotPath);
+            }
           }, 3000);
         },
 
         onSnapshotTaken: (connection, uid, filePath, width, height, errCode) => {
-          console.log('📸 Snapshot taken! uid:', uid, 'Path:', filePath, 'Error:', errCode);
+          __DEV__ && console.log('📸 Snapshot taken! uid:', uid, 'Path:', filePath, 'Error:', errCode);
           if (errCode === 0 && filePath) {
             uploadThumbnail(filePath, currentStreamIdRef.current);
           } else {
-            console.error('❌ Snapshot failed with error code:', errCode);
+            __DEV__ && console.error('❌ Snapshot failed with error code:', errCode);
           }
         },
 
         onError: (errCode, msg) => {
-          console.log('❌ Agora error:', errCode, msg);
+          __DEV__ && console.log('❌ Agora error:', errCode, msg);
         },
         onLocalVideoStateChanged: (state, error) => {
-          console.log('📹 Local video state:', state, 'error:', error);
+          __DEV__ && console.log('📹 Local video state:', state, 'error:', error);
         }
       });
 
@@ -309,7 +312,7 @@ export default function LiveStreamScreen({ navigation, route }) {
 
       setIsLive(true);
       isLiveRef.current = true;
-      console.log('🔥 Engine exists:', engineRef.current !== null);
+      __DEV__ && console.log('🔥 Engine exists:', engineRef.current !== null);
       setLoading(false);
 
       pingInterval.current = setInterval(async () => {
@@ -325,9 +328,13 @@ export default function LiveStreamScreen({ navigation, route }) {
       subscribeToQuestions(stream.id);
 
     } catch (e) {
-      console.error('Setup error:', e);
+      if (engineRef.current) {
+        try { engineRef.current.release(); } catch (_) {}
+        engineRef.current = null;
+      }
+      __DEV__ && console.error('Setup error:', e);
       Alert.alert('Error', 'Failed to start live stream.');
-      setIsStarting(false); // 🔧 FIXED: Reset button state
+      setIsStarting(false);
       navigation.goBack();
     }
   }
@@ -341,6 +348,10 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function cleanup() {
+    if (snapshotTimeoutRef.current) {
+      clearTimeout(snapshotTimeoutRef.current);
+      snapshotTimeoutRef.current = null;
+    }
     if (pingInterval.current) {
       clearInterval(pingInterval.current);
       pingInterval.current = null;
