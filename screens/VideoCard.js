@@ -142,7 +142,9 @@ function VideoCard({
     }
   }, [isTabActive]);
 
-  useEffect(() => { setFollowed(initialFollowed); }, [initialFollowed]);
+  useEffect(() => { 
+    setFollowed(initialFollowed); 
+  }, [item.user_id]); // Only update when video creator changes, not on every prop update
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -388,7 +390,7 @@ function VideoCard({
             </View>
           </AnimatedButton>
           <AnimatedButton onPress={handleFollow}>
-            {currentUserId !== item.user_id && (
+            {currentUserId && currentUserId !== item.user_id && (
               !followed ? (
                 <View style={styles.followBadge}><Text style={styles.followBadgeText}>+</Text></View>
               ) : (
