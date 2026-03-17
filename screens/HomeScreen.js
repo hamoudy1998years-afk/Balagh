@@ -121,9 +121,14 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [myLikes, setMyLikes] = useState(() => feedCache.likes ?? []);
   const [myFollows, setMyFollows] = useState(() => feedCache.follows ?? []);
 
-  const [isTabActive, setIsTabActive] = useState(
-    () => !!(isFocusedRef?.current && activeIndexRef?.current === tabIndex)
-  );
+  const [isTabActive, setIsTabActive] = useState(() => tabIndex === 1);
+
+  useEffect(() => {
+    // When tab becomes active, set isTabActive to true
+    if (activeIndexRef?.current === tabIndex && isFocusedRef?.current) {
+      setIsTabActive(true);
+    }
+  }, [activeIndexRef?.current, isFocusedRef?.current, tabIndex]);
 
   const flatListRef = useRef(null);
   const playerPool = useVideoPlayerPool();
