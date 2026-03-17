@@ -319,7 +319,6 @@ export default function App() {
       <DownloadProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <SafeAreaProvider>
-            <StatusBar style="light" translucent backgroundColor="transparent" />
             <BottomSheetModalProvider>
               <NavigationContainer ref={navigationRef} linking={linking}>
                 <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
