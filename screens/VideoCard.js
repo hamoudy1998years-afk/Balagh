@@ -142,9 +142,10 @@ function VideoCard({
     }
   }, [isTabActive]);
 
+  // FAST: Only update when video creator changes, not on every prop update
   useEffect(() => { 
     setFollowed(initialFollowed); 
-  }, [item.user_id]); // Only update when video creator changes, not on every prop update
+  }, [item.user_id]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -311,29 +312,17 @@ function VideoCard({
   const hashtags = item.caption?.match(/#\w+/g) ?? [];
   const captionText = item.caption?.replace(/#\w+/g, '').trim() ?? '';
 
-  const [playerReady, setPlayerReady] = useState(false);
-
-  useEffect(() => {
-    if (player) {
-      const timer = setTimeout(() => setPlayerReady(true), 50);
-      return () => {
-        clearTimeout(timer);
-        setPlayerReady(false);
-      };
-    }
-  }, [player]);
-
-  if (!player) {
-    return <View style={{ height: cardHeight, backgroundColor: '#000' }} />;
-  }
+  // FAST: No playerReady state, no early return black screen
+  // Video shows immediately
 
   return (
     <View style={[styles.card, { height: cardHeight }]}>
+      {/* FAST: No key={item.id}, no poster, simple style */}
       <Video
-        key={item.id}
         ref={player}
-        source={{ uri: item.video_url }}
-        style={[styles.video, { opacity: isVisible ? 1 : 0 }]}
+        source={{ uri: item.video_url, useCaching: true }}
+        cache={{ size: 100 }}
+        style={styles.video}
         resizeMode="contain"
         repeat={true}
         paused={!isActive || !isTabActive || paused}
@@ -343,15 +332,15 @@ function VideoCard({
         ignoreSilentSwitch="ignore"
         progressUpdateInterval={250}
         bufferConfig={{
-          minBufferMs: 2500,
-          maxBufferMs: 10000,
-          bufferForPlaybackMs: 1000,
-          bufferForPlaybackAfterRebufferMs: 2000,
+          minBufferMs: 500,
+          maxBufferMs: 2000,
+          bufferForPlaybackMs: 250,
+          bufferForPlaybackAfterRebufferMs: 500,
         }}
         onError={(e) => console.log('Video error:', e)}
         useTextureView={false}
       />
-      
+
       <TouchableOpacity
         style={styles.tapAreaFull}
         onPress={handleTap}
@@ -389,6 +378,7 @@ function VideoCard({
               }
             </View>
           </AnimatedButton>
+          {/* FIX: currentUserId check prevents follow button flash on own videos */}
           <AnimatedButton onPress={handleFollow}>
             {currentUserId && currentUserId !== item.user_id && (
               !followed ? (
