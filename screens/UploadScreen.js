@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Keyboard, Image } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,6 +19,8 @@ const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
 export default function UploadScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [video, setVideo] = useState(null);
+  const [thumbnailUri, setThumbnailUri] = useState(null); // NEW: store thumbnail preview
+  const [generatingThumb, setGeneratingThumb] = useState(false); // NEW: loading state
   const [caption, setCaption] = useState('');
   const [category, setCategory] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -75,6 +77,23 @@ export default function UploadScreen({ navigation }) {
     setScholarChecked(true);
   }, []);
 
+  // NEW: Generate thumbnail when video is selected
+  const generateThumbnailPreview = useCallback(async (videoUri) => {
+    try {
+      setGeneratingThumb(true);
+      const { uri } = await VideoThumbnails.getThumbnailAsync(
+        videoUri,
+        { time: 1000, quality: 0.8 }
+      );
+      setThumbnailUri(uri);
+    } catch (error) {
+      console.error('Thumbnail generation failed:', error);
+      setThumbnailUri(null);
+    } finally {
+      setGeneratingThumb(false);
+    }
+  }, []);
+
   const pickVideo = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -95,54 +114,90 @@ export default function UploadScreen({ navigation }) {
       allowsEditing: false,
       quality: 1,
     });
-    if (!result.canceled) setVideo(result.assets[0]);
-  }, []);
+    if (!result.canceled) {
+      setVideo(result.assets[0]);
+      // NEW: Generate thumbnail immediately after selection
+      await generateThumbnailPreview(result.assets[0].uri);
+    }
+  }, [generateThumbnailPreview]);
 
   const uploadVideo = useCallback(async () => {
     if (!video) {
-      setDialog({ visible: true, title: 'No video', message: 'Please pick a video first.', type: 'warning', buttons: [{ text: 'OK' }] });
+      setDialog({
+        visible: true,
+        title: 'No video',
+        message: 'Please pick a video first.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
     if (!caption.trim()) {
-      setDialog({ visible: true, title: 'No caption', message: 'Please add a caption.', type: 'warning', buttons: [{ text: 'OK' }] });
+      setDialog({
+        visible: true,
+        title: 'No caption',
+        message: 'Please add a caption.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
     if (!category) {
-      setDialog({ visible: true, title: 'No category', message: 'Please select a category.', type: 'warning', buttons: [{ text: 'OK' }] });
+      setDialog({
+        visible: true,
+        title: 'No category',
+        message: 'Please select a category.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
     const MAX_SIZE = 500 * 1024 * 1024;
     if (video.fileSize && video.fileSize > MAX_SIZE) {
-      setDialog({ visible: true, title: 'File Too Large', message: 'Please select a video under 500MB.', type: 'warning', buttons: [{ text: 'OK' }] });
+      setDialog({
+        visible: true,
+        title: 'File Too Large',
+        message: 'Please select a video under 500MB.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
 
     setUploading(true);
     setProgressPercent(0);
-    setProgressLabel('Generating thumbnail...');
+    setProgressLabel('Uploading video...');
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      setDialog({ visible: true, title: 'Not logged in', message: 'Please log in to upload videos.', type: 'info', buttons: [{ text: 'OK' }] });
+      setDialog({
+        visible: true,
+        title: 'Not logged in',
+        message: 'Please log in to upload videos.',
+        type: 'info',
+        buttons: [{ text: 'OK' }]
+      });
       setUploading(false);
       return;
     }
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      setDialog({ visible: true, title: 'Session expired', message: 'Please log in again.', type: 'error', buttons: [{ text: 'OK' }] });
+      setDialog({
+        visible: true,
+        title: 'Session expired',
+        message: 'Please log in again.',
+        type: 'error',
+        buttons: [{ text: 'OK' }]
+      });
       setUploading(false);
       return;
     }
 
     try {
-      // 1. GENERATE THUMBNAIL
-      const { uri: thumbnailUri } = await VideoThumbnails.getThumbnailAsync(
-        video.uri,
-        { time: 1000, quality: 0.8 }
-      );
+      // Use the already generated thumbnail
+      const finalThumbnailUri = thumbnailUri || (await VideoThumbnails.getThumbnailAsync(video.uri, { time: 1000, quality: 0.8 })).uri;
       setProgressPercent(10);
-      setProgressLabel('Uploading video...');
 
       // 2. UPLOAD VIDEO
       const ext = video.uri.split('.').pop() || 'mp4';
@@ -159,7 +214,7 @@ export default function UploadScreen({ navigation }) {
         xhr.setRequestHeader('x-upsert', 'false');
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
-            const pct = Math.min(Math.round((e.loaded / e.total) * 85) + 10, 95);
+            const pct = Math.min(Math.round((e.loaded / e.total) * 90) + 10, 99);
             setProgressPercent(pct);
           }
         };
@@ -176,7 +231,7 @@ export default function UploadScreen({ navigation }) {
       setProgressLabel('Uploading thumbnail...');
 
       // 3. UPLOAD THUMBNAIL
-      const thumbBase64 = await readAsStringAsync(thumbnailUri, {
+      const thumbBase64 = await readAsStringAsync(finalThumbnailUri, {
         encoding: 'base64',
       });
       const thumbFileName = `${user.id}/${Date.now()}.jpg`;
@@ -209,11 +264,12 @@ export default function UploadScreen({ navigation }) {
       if (dbError) throw dbError;
 
       // Cleanup
-      await deleteAsync(thumbnailUri, { idempotent: true });
+      await deleteAsync(finalThumbnailUri, { idempotent: true });
       setUploading(false);
       setProgressPercent(0);
       setProgressLabel('');
       setVideo(null);
+      setThumbnailUri(null); // NEW: clear thumbnail
       setCaption('');
       setCategory('');
 
@@ -238,13 +294,19 @@ export default function UploadScreen({ navigation }) {
         buttons: [{ text: 'OK' }]
       });
     }
-  }, [video, caption, category]);
+  }, [video, caption, category, thumbnailUri]);
 
   const handleGoLive = useCallback(() => { setShowLiveSetup(true); }, []);
 
   const startLiveStream = useCallback(() => {
     if (!liveTitle.trim()) {
-      setDialog({ visible: true, title: 'Title required', message: 'Please enter a title for your live stream.', type: 'warning', buttons: [{ text: 'OK' }] });
+      setDialog({
+        visible: true,
+        title: 'Title required',
+        message: 'Please enter a title for your live stream.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
       return;
     }
     const max = parseInt(maxQuestions) || 5;
@@ -320,8 +382,23 @@ export default function UploadScreen({ navigation }) {
           </AnimatedButton>
         )}
 
-        <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading}>
-          {video ? (
+        <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading || generatingThumb}>
+          {generatingThumb ? (
+            // NEW: Show loading while generating thumbnail
+            <View style={styles.videoSelected}>
+              <Text style={styles.videoSelectedIcon}>⏳</Text>
+              <Text style={styles.videoSelectedText}>Generating thumbnail...</Text>
+            </View>
+          ) : thumbnailUri ? (
+            // NEW: Show thumbnail preview
+            <View style={styles.thumbnailPreviewContainer}>
+              <Image source={{ uri: thumbnailUri }} style={styles.thumbnailPreview} resizeMode="cover" />
+              <View style={styles.thumbnailOverlay}>
+                <Text style={styles.thumbnailText}>🎬 Thumbnail Preview</Text>
+                <Text style={styles.tapToChange}>Tap to change video</Text>
+              </View>
+            </View>
+          ) : video ? (
             <View style={styles.videoSelected}>
               <Text style={styles.videoSelectedIcon}>🎬</Text>
               <Text style={styles.videoSelectedText}>Video selected!</Text>
@@ -368,9 +445,9 @@ export default function UploadScreen({ navigation }) {
         </View>
 
         <AnimatedButton
-          style={[styles.uploadBtn, uploading && styles.uploadBtnDisabled]}
+          style={[styles.uploadBtn, (uploading || generatingThumb) && styles.uploadBtnDisabled]}
           onPress={uploadVideo}
-          disabled={uploading}
+          disabled={uploading || generatingThumb}
         >
           {uploading && (
             <View style={styles.tiktokBarBg}>
@@ -379,7 +456,7 @@ export default function UploadScreen({ navigation }) {
           )}
           <View style={styles.uploadBtnContent}>
             <Text style={styles.uploadBtnText}>
-              {uploading ? progressLabel : 'Upload to Bushrann ☪️'}
+              {uploading ? progressLabel : generatingThumb ? 'Generating thumbnail...' : 'Upload to Bushrann ☪️'}
             </Text>
             {uploading && <Text style={styles.uploadBtnPct}>{progressPercent}%</Text>}
           </View>
@@ -428,6 +505,31 @@ const styles = StyleSheet.create({
   videoSelectedText: { color: COLORS.success, fontSize: 16, fontWeight: '700', marginBottom: 4 },
   videoSelectedName: { color: '#888888', fontSize: 12, marginBottom: 8 },
   tapToChange: { color: '#aaaaaa', fontSize: 12 },
+  // NEW: Thumbnail preview styles
+  thumbnailPreviewContainer: { 
+    width: '100%', 
+    height: 200, 
+    position: 'relative',
+    backgroundColor: '#000'
+  },
+  thumbnailPreview: { 
+    width: '100%', 
+    height: '100%' 
+  },
+  thumbnailOverlay: { 
+    position: 'absolute', 
+    bottom: 0, 
+    left: 0, 
+    right: 0, 
+    backgroundColor: 'rgba(0,0,0,0.6)', 
+    padding: 12,
+    alignItems: 'center'
+  },
+  thumbnailText: { 
+    color: '#fff', 
+    fontSize: 14, 
+    fontWeight: '600' 
+  },
   label: { color: '#888888', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
   input: { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 12, padding: 16, color: '#111111', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
   inputWrapper: { marginBottom: 20 },
