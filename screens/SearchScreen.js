@@ -26,17 +26,12 @@ export default function SearchScreen({ navigation }) {
       onPress={() => navigation.navigate('VideoDetail', { videoId: item.id })}
       style={[styles.gridItem, { width: ITEM_SIZE, height: ITEM_SIZE * 1.3 }]}
     >
-      {item.thumbnail_url || item.video_url ? (
-        <Image
-          source={{ uri: item.thumbnail_url || item.video_url }}
-          style={styles.gridThumb}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={styles.gridThumbFallback}>
-          <Text style={{ fontSize: 28 }}>🎬</Text>
-        </View>
-      )}
+      <Image
+        source={{ uri: item.thumbnail_url || item.video_url }}
+        style={styles.gridThumb}
+        resizeMode="cover"
+        defaultSource={require('../assets/placeholder.png')} // Add a placeholder image
+      />
       <View style={styles.gridOverlay}>
         <Text style={styles.gridViews}>▶ {item.views_count ?? 0}</Text>
       </View>
@@ -158,7 +153,6 @@ const styles = StyleSheet.create({
   gridList: { paddingBottom: 40 },
   gridItem: { padding: 1, backgroundColor: '#f0f0f0' },
   gridThumb: { width: '100%', height: '100%' },
-  gridThumbFallback: { width: '100%', height: '100%', backgroundColor: '#e5e5e5', alignItems: 'center', justifyContent: 'center' },
-  gridOverlay: { position: 'absolute', bottom: 4, left: 4 },
+  gridOverlay: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 4, borderRadius: 4 },
   gridViews: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
 });
