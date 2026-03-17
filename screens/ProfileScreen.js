@@ -613,7 +613,7 @@ const styles = StyleSheet.create({
   activeTab: { borderBottomColor: COLORS.gold },
   tabText: { fontSize: 20, opacity: 0.35 },
   activeTabText: { opacity: 1 },
-  gridItem: { width: '33.33%', aspectRatio: 0.833, margin: 0.5, backgroundColor: '#f0f0f0' },
+  gridItem: { flex: 1, aspectRatio: 0.8, margin: 0.5, backgroundColor: '#f0f0f0' },
   gridThumb: { width: '100%', height: '100%' },
   gridOverlay: { position: 'absolute', bottom: 4, left: 4 },
   gridPlayCount: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
