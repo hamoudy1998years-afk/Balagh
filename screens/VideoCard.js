@@ -30,7 +30,7 @@ const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ vi
   );
 });
 
-export default function VideoCard({
+function VideoCard({
   item, player, isActive, isVisible, isTabActive = true,
   initialLiked = false, initialFollowed = false,
   onFollowChange, navigation, cardHeight,
@@ -55,7 +55,9 @@ export default function VideoCard({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
 
-  // ModernDialog state
+  // Tracks if user manually paused — prevents re-renders from unpausing
+  const userPausedRef = useRef(false);
+
   const [dialog, setDialog] = useState({ 
     visible: false, 
     title: '', 
@@ -113,6 +115,7 @@ export default function VideoCard({
   useEffect(() => {
     return () => {
       setPaused(true);
+      userPausedRef.current = false;
       if (tapTimer.current) clearTimeout(tapTimer.current);
       if (player?.current) {
         try { player.current.seek(0); } catch (e) {}
@@ -122,7 +125,7 @@ export default function VideoCard({
 
   useEffect(() => {
     if (isActive) {
-      setPaused(false);
+      if (!userPausedRef.current) setPaused(false);
       if (!hasPlayed.current) {
         hasPlayed.current = true;
         supabase.from('videos')
@@ -135,7 +138,7 @@ export default function VideoCard({
 
   useEffect(() => {
     if (isTabActive && isActive) {
-      setPaused(false);
+      if (!userPausedRef.current) setPaused(false);
     }
   }, [isTabActive]);
 
@@ -213,6 +216,7 @@ export default function VideoCard({
       tapTimer.current = setTimeout(() => {
         setPaused(prev => {
           const newPaused = !prev;
+          userPausedRef.current = newPaused;
           setShowPauseIcon(true);
           setTimeout(() => setShowPauseIcon(false), 600);
           return newPaused;
@@ -327,7 +331,7 @@ export default function VideoCard({
         key={item.id}
         ref={player}
         source={{ uri: item.video_url }}
-        style={styles.video}
+        style={[styles.video, { opacity: isActive ? 1 : 0 }]}
         resizeMode="contain"
         repeat={true}
         paused={!isActive || !isTabActive || paused}
@@ -527,3 +531,15 @@ const styles = StyleSheet.create({
   },
   dlPercent: { color: '#a78bfa', fontSize: 22, fontWeight: '800' },
 });
+
+// Prevent re-render when follow status changes
+function areEqual(prevProps, nextProps) {
+  return (
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.isVisible === nextProps.isVisible &&
+    prevProps.isTabActive === nextProps.isTabActive
+  );
+}
+
+export default React.memo(VideoCard, areEqual);
