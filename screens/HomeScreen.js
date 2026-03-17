@@ -306,6 +306,16 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     );
   }
 
+  if (videos.length === 0 && type === 'following') {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.emptyIcon}>🕌</Text>
+        <Text style={styles.loadingText}>You're not following anyone yet!</Text>
+        <Text style={styles.emptySubtext}>Follow scholars and creators to see their videos here.</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <FlatList
