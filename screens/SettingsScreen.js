@@ -491,7 +491,7 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="LEGAL" />
       <Card>
         <Row icon="📄" label="Terms of Service" onPress={() => setScreen('terms')} />
-        <Row icon="🔏" label="Privacy Policy" onPress={() => setScreen('privacypolicy')} last />
+        <Row icon="🔏" label="Privacy Policy" onPress={() => setScreen('privacypolicy')} sublabel="https://sites.google.com/view/bushrann" last />
       </Card>
       <GroupLabel text="APP INFO" />
       <Card>
