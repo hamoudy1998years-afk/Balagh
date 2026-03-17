@@ -472,11 +472,8 @@ export default function LoginScreen({ navigation }) {
 
   const handleIdentifierChange = (text) => {
     setIdentifier(text);
-    if (text.length === 0) {
-      suppressDropdown.current = false;
-      if (savedAccounts.length > 0) setShowDropdown(true);
-    } else {
-      setShowDropdown(false);
+    if (savedAccounts.length > 0) {
+      setShowDropdown(true);
     }
   };
 
@@ -708,7 +705,14 @@ export default function LoginScreen({ navigation }) {
                   keyboardShouldPersistTaps="handled"
                   onStartShouldSetResponder={() => true}
                 >
-                  {savedAccounts.map((account, idx) => (
+                  {savedAccounts
+                  .filter(account => {
+                    const searchText = identifier.toLowerCase();
+                    const email = (account.email || '').toLowerCase();
+                    const username = (account.identifier || '').toLowerCase();
+                    return email.includes(searchText) || username.includes(searchText);
+                  })
+                  .map((account, idx) => (
                     <TouchableOpacity
                       key={idx}
                       style={[styles.dropdownItem, idx < savedAccounts.length - 1 && styles.dropdownItemBorder]}
@@ -729,6 +733,16 @@ export default function LoginScreen({ navigation }) {
                       <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
                     </TouchableOpacity>
                   ))}
+                                {savedAccounts.filter(account => {
+                  const searchText = identifier.toLowerCase();
+                  const email = (account.email || '').toLowerCase();
+                  const username = (account.identifier || '').toLowerCase();
+                  return email.includes(searchText) || username.includes(searchText);
+                }).length === 0 && identifier.length > 0 && (
+                  <View style={styles.noMatchesContainer}>
+                    <Text style={styles.noMatchesText}>No matching accounts</Text>
+                  </View>
+                )}
                 </ScrollView>
               )}
             </View>
@@ -1150,5 +1164,13 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)', 
     fontSize: 16,
     fontWeight: '600',
+  },
+  noMatchesContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  noMatchesText: {
+    color: '#64748b',
+    fontSize: 14,
   },
 });
