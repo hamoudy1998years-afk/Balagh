@@ -63,7 +63,7 @@ export default function CommentsModal({
   const [justRepliedTo,  setJustRepliedTo]  = useState(null);
 
   const bottomSheetRef = useRef(null);
-  const snapPoints = ['68%', '92%'];
+  const snapPoints = ['68%'];
   const COMMENT_MAX = 300;
   const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
 
@@ -204,6 +204,7 @@ export default function CommentsModal({
       handleIndicatorStyle={styles.dragHandle}
       backgroundStyle={styles.sheetBackground}
       enableDynamicSizing={false}
+      enableOverDrag={false}
     >
       <View style={styles.outerContainer}>
 
@@ -259,7 +260,6 @@ export default function CommentsModal({
         <View
           style={[
             styles.inputWrapper,
-            { marginBottom: keyboardHeight },
           ]}
         >
           {replyingTo ? (
@@ -317,6 +317,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    paddingBottom: 100,
   },
   loadingContainer: {
     flex: 1,
@@ -333,7 +334,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
-    zIndex: 10,
     paddingBottom: Platform.OS === 'ios' ? 20 : 8,
   },
 });
