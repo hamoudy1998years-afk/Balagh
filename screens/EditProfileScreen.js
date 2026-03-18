@@ -9,9 +9,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 import ModernDialog from './ModernDialog';
+import { useUser } from '../context/UserContext';
 
 export default function EditProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { user: authUser } = useUser();
   const [isScholar,    setIsScholar]    = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [saving,       setSaving]       = useState(false);
@@ -48,7 +50,7 @@ export default function EditProfileScreen({ navigation }) {
   }, []);
 
   async function loadProfile() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = authUser;
     if (!user) return;
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
     if (profile) {
@@ -93,8 +95,8 @@ export default function EditProfileScreen({ navigation }) {
     }
 
     setSaving(true);
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (!user || userError) {
+    const user = authUser;
+    if (!user) {
       setSaving(false);
       setDialog({ visible: true, title: 'Error', message: 'Could not verify your session. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
       return;
