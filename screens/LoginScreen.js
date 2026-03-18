@@ -26,7 +26,6 @@ import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
-import { LoginManager, AccessToken } from 'react-native-fbsdk-next';
 import { COLORS } from '../constants/theme';
 import { s, ms } from '../utils/responsive';
 import ModernDialog from './ModernDialog';
@@ -38,7 +37,6 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [facebookLoading, setFacebookLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [biometricType, setBiometricType] = useState(null);
   const [savedAccounts, setSavedAccounts] = useState([]);
@@ -399,19 +397,28 @@ export default function LoginScreen({ navigation }) {
       const userMeta = sessionData?.session?.user?.user_metadata;
 
       if (userEmail) {
-        // ========== NEW: Generate and store appPassword ==========
-        const appPassword = Array(32).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');
-        
         const credKey = 'bushrann_creds_' + userEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        await SecureStore.setItemAsync(credKey, JSON.stringify({
-          type: 'google',
-          email: userEmail,
-          appPassword: appPassword,
-          hasPin: false, // Will be set to true when PIN created
-        }));
-        
-        // Set password in Supabase so signInWithPassword works
-        await supabase.auth.updateUser({ password: appPassword });
+        const existingCredRaw = await SecureStore.getItemAsync(credKey);
+        const existingCred = existingCredRaw ? JSON.parse(existingCredRaw) : null;
+
+        // Only set appPassword on first Google login — calling updateUser every time
+        // invalidates the OAuth session and signs the user out.
+        if (!existingCred?.appPassword) {
+          const appPassword = Array(32).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');
+
+          await SecureStore.setItemAsync(credKey, JSON.stringify({
+            type: 'google',
+            email: userEmail,
+            appPassword,
+            hasPin: false,
+          }));
+
+          // Set password in Supabase so signInWithPassword works later
+          await supabase.auth.updateUser({ password: appPassword });
+
+          // updateUser invalidates the current OAuth session — restore it
+          await supabase.auth.setSession({ access_token, refresh_token });
+        }
         
         const displayName = userMeta?.full_name || userMeta?.name || userEmail;
         await saveGoogleCredentials(displayName, userEmail, refresh_token);
@@ -479,34 +486,6 @@ export default function LoginScreen({ navigation }) {
     }
     
     silentReAuth.current = false;
-  }
-
-  async function handleFacebookLogin() {
-    setFacebookLoading(true);
-    try {
-      const result = await LoginManager.logInWithPermissions(['public_profile', 'email']);
-      if (result.isCancelled) { setFacebookLoading(false); return; }
-      const data = await AccessToken.getCurrentAccessToken();
-      if (!data) throw new Error('No access token');
-      const { data: authData, error } = await supabase.auth.signInWithIdToken({
-        provider: 'facebook',
-        token: data.accessToken,
-      });
-      if (error) throw error;
-      await userCache.clear();
-      await userCache.set(authData.user);
-      await refreshUser();
-      navigation.navigate('Main');
-    } catch (e) {
-      setDialog({
-        visible: true,
-        title: 'Facebook Login Failed',
-        message: e.message,
-        type: 'error',
-        buttons: [{ text: 'OK' }]
-      });
-    }
-    setFacebookLoading(false);
   }
 
   const handleIdentifierFocus = () => {
@@ -876,13 +855,6 @@ export default function LoginScreen({ navigation }) {
               )}
             </AnimatedButton>
 
-            <AnimatedButton style={styles.facebookButton} onPress={handleFacebookLogin} disabled={facebookLoading}>
-              {facebookLoading ? <ActivityIndicator color="#fff" /> : <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <MaterialCommunityIcons name="facebook" size={22} color="#fff" />
-              <Text style={styles.facebookButtonText}>Continue with Facebook</Text>
-            </View>}
-            </AnimatedButton>
-
             <AnimatedButton onPress={showResetPasswordDialog}>
               <Text style={[styles.link, { color: COLORS.gold }]}>Forgot Password?</Text>
             </AnimatedButton>
@@ -1120,11 +1092,6 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center', alignItems: 'center',
   },
-  facebookButton: {
-    width: '100%', backgroundColor: '#1877F2', borderRadius: 12, padding: 16,
-    alignItems: 'center', marginBottom: 20, minHeight: 52, justifyContent: 'center',
-  },
-  facebookButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '600' },
   modalContent: {
     backgroundColor: COLORS.bgCard || '#1a1d27', 
     borderRadius: 24,
