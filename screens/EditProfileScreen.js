@@ -104,12 +104,13 @@ export default function EditProfileScreen({ navigation }) {
         const { error: profileError } = await supabase.from('profiles').update({ username: username.trim() }).eq('id', user.id);
         if (profileError) throw profileError;
         if (scholarId) {
+          const stripHtml = (s: string) => s.replace(/<[^>]*>/g, '').trim();
           const { error: scholarError } = await supabase.from('scholar_applications').update({
-            full_name: realName.trim(),
+            full_name: stripHtml(realName),
             age: age ? parseInt(age) : null,
-            location: location.trim(),
-            education: education.trim(),
-            expertise: expertise.trim(),
+            location: stripHtml(location),
+            education: stripHtml(education),
+            expertise: stripHtml(expertise),
           }).eq('id', scholarId);
           if (scholarError) throw scholarError;
         }

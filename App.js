@@ -266,6 +266,11 @@ export default function App() {
       if (_event === 'TOKEN_REFRESHED' && session?.user?.email && session?.refresh_token) {
         updateStoredGoogleToken(session.user.email, session.refresh_token);
       }
+
+      // Recreate missing profile rows (e.g. after admin deletion)
+      if ((_event === 'SIGNED_IN' || _event === 'INITIAL_SESSION') && session?.user) {
+        ensureProfileExists(session.user);
+      }
     });
 
     return () => {
@@ -273,6 +278,30 @@ export default function App() {
       linkingSub.remove();
     };
   }, []);
+
+  async function ensureProfileExists(user) {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (!profile) {
+        const rawUsername = user.email?.split('@')[0] ?? `user_${user.id.slice(0, 8)}`;
+        const username = rawUsername.replace(/[^a-zA-Z0-9._]/g, '').slice(0, 30) || `user_${user.id.slice(0, 8)}`;
+        await supabase.from('profiles').insert({
+          id: user.id,
+          username,
+          full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
+          avatar_url: user.user_metadata?.avatar_url ?? null,
+        });
+        __DEV__ && console.log('[App] Profile auto-created for:', user.email);
+      }
+    } catch (e) {
+      __DEV__ && console.warn('[App] ensureProfileExists error:', e.message);
+    }
+  }
 
   // ADD THIS HELPER FUNCTION
   async function handleDeepLink(url) {
