@@ -152,7 +152,7 @@ function SavingBanner({ visible }) {
 
 export default function SettingsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { user: currentUser } = useUser();
+  const { user: currentUser, setUser } = useUser();
   const [screen, setScreen] = useState(null);
 
   const [profile,     setProfile]     = useState(null);
@@ -266,6 +266,7 @@ export default function SettingsScreen({ navigation }) {
     await userCache.clear();
     clearFeedCache();
     await supabase.auth.signOut({ scope: 'local' });
+    setUser(null);
   }
 
   async function handleDeleteAccount() {
