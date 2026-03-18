@@ -4,12 +4,14 @@ import { useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import VideoCard from '../screens/VideoCard';
 import { COLORS } from '../constants/theme';
+import { useUser } from '../context/UserContext';
 
 export default function VideoDetailScreen({ navigation }) {
   const route = useRoute();
   const { videoId } = route.params ?? {};
   const { height } = useWindowDimensions();
   const playerRef = useRef(null);
+  const { user: authUser } = useUser();
   const [video, setVideo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -27,7 +29,7 @@ export default function VideoDetailScreen({ navigation }) {
       .single();
     if (error || !data) { setError(true); setLoading(false); return; }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = authUser;
     let liked = false;
     let followed = false;
 

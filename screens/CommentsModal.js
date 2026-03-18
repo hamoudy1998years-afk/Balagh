@@ -19,8 +19,8 @@ import CommentHeader from '../components/comments/CommentHeader';
 import CommentList from '../components/comments/CommentList';
 import CommentInput from '../components/comments/CommentInput';
 import ReplyInput from '../components/comments/ReplyInput';
-import { supabase } from '../lib/supabase';
 import { COLORS } from '../constants/theme';
+import { useUser } from '../context/UserContext';
 
 function CustomBackdrop({ onClose }) {
   return (
@@ -56,7 +56,8 @@ export default function CommentsModal({
   const [newComment,     setNewComment]     = useState('');
   const [replyText,      setReplyText]      = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [currentUserId,  setCurrentUserId]  = useState(null);
+  const { user: authUser } = useUser();
+  const currentUserId = authUser?.id ?? null;
   const [activeMenuId,   setActiveMenuId]   = useState(null);
 
   // ─── Reply visibility state ───────────────────────────────────────────────
@@ -67,14 +68,6 @@ export default function CommentsModal({
   const snapPoints = ['68%'];
   const COMMENT_MAX = 300;
   const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
-
-  // ─── Auth ────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      setCurrentUserId(data.user?.id);
-    })();
-  }, []);
 
   // ─── Open / close ────────────────────────────────────────────────────────
   useEffect(() => {

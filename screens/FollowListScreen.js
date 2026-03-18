@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
+import { useUser } from '../context/UserContext';
 
 // ─── Single user row ──────────────────────────────────────────────────────────
 function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
@@ -74,7 +75,8 @@ export default function FollowListScreen({ route, navigation }) {
   const [users,         setUsers]         = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
-  const [currentUserId, setCurrentUserId] = useState(null);
+  const { user: authUser } = useUser();
+  const currentUserId = authUser?.id ?? null;
   const flatListRef = useRef(null);
 
   useFocusEffect(
@@ -82,12 +84,6 @@ export default function FollowListScreen({ route, navigation }) {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
     }, [])
   );
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentUserId(data.user?.id ?? null);
-    });
-  }, []);
 
   useEffect(() => {
     if (currentUserId !== null) loadUsers();

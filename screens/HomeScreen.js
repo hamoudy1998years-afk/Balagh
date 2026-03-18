@@ -12,6 +12,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import LiveVideoCard from '../components/LiveVideoCard';
 import { useVideoPlayerPool } from '../components/VideoPlayerPool';
 import { COLORS } from '../constants/theme';
+import { useUser } from '../context/UserContext';
 
 // ── Simple in-memory feed cache ────────────────────────────────────────────────
 const feedCache = {
@@ -130,6 +131,7 @@ function LiveFeed({ navigation }) {
 
 // ── Video Feed ─────────────────────────────────────────────────────────────────
 const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFocusedRef }, ref) => {
+  const { user: authUser } = useUser();
   const [videos, setVideos] = useState(() => feedCache[type] ?? []);
   const [loading, setLoading] = useState(() => !feedCache[type]);
   const [refreshing, setRefreshing] = useState(false);
@@ -158,7 +160,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   }, [type]);
 
   async function loadFollowingInBackground() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = authUser;
     if (!user) return;
 
     const { data: follows } = await supabase
@@ -273,7 +275,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     if (!background) { setLoading(true); setFeedError(null); }
 
     if (type === 'following') {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = authUser;
       if (!user) { setVideos([]); setLoading(false); return; }
 
       const { data: follows } = await supabase
@@ -330,7 +332,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   }
 
   async function loadMyInteractions(background = false) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = authUser;
     if (!user) return;
 
     const [likesRes, followsRes] = await Promise.all([
@@ -461,6 +463,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 // ── Home Screen ────────────────────────────────────────────────────────────────
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { user: authUser } = useUser();
   const [index, setIndex] = useState(1);
   const [routes] = useState([
     { key: 'following', title: 'Following' },
@@ -515,8 +518,8 @@ export default function HomeScreen({ navigation }) {
 
   async function preloadFollowingFeed() {
     if (isCacheValid('following')) return;
-    
-    const { data: { user } } = await supabase.auth.getUser();
+
+    const user = authUser;
     if (!user) return;
 
     const { data: follows } = await supabase

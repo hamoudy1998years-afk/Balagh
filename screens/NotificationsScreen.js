@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useUser } from '../context/UserContext';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, FlatList, ActivityIndicator,
@@ -142,7 +143,8 @@ export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
-  const [currentUserId, setCurrentUserId] = useState(null);
+  const { user: authUser } = useUser();
+  const currentUserId = authUser?.id ?? null;
   const flatListRef = useRef(null);
 
   const handleDelete = useCallback(async (id) => {
@@ -164,10 +166,6 @@ export default function NotificationsScreen({ navigation }) {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
     }, [])
   );
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => { if (data.user) setCurrentUserId(data.user.id); });
-  }, []);
 
   useEffect(() => {
     if (!currentUserId) return;
