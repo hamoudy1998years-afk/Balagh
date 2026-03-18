@@ -613,11 +613,13 @@ export default function ProfileScreen({ route, navigation }) {
 
   const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
 
-  if (userLoading) return null;
-  if (!globalUser) {
-    navigation.replace('Login');
-    return null;
-  }
+  useEffectHook(() => {
+    if (!userLoading && !globalUser) {
+      navigation.replace('Login');
+    }
+  }, [userLoading, globalUser]);
+
+  if (userLoading || !globalUser) return null;
 
   return (
     <View style={styles.container}>
