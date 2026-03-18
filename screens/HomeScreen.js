@@ -500,7 +500,6 @@ export default function HomeScreen({ navigation }) {
     };
   }, []);
 
-  // Add this useEffect in HomeScreen (around line 170, after the pulse animation effect):
   useEffect(() => {
     // Preload Following feed when For You tab is active
     if (index === 1 && isFocused) {
