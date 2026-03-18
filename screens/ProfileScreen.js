@@ -460,6 +460,10 @@ export default function ProfileScreen({ route, navigation }) {
   }, []);
   const openVideo = useCallback((videos, index) => navigation.navigate('ProfileVideos', { videos, startIndex: index }), [navigation]);
 
+  const renderItem = useCallback(({ item, index }) => (
+    <VideoGridItem item={item} onPress={() => openVideo(activeVideos, index)} onLongPress={handleLongPress} />
+  ), [activeVideos, openVideo, handleLongPress]);
+
   const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
       <View style={styles.avatarSection}>
@@ -621,9 +625,7 @@ export default function ProfileScreen({ route, navigation }) {
         estimatedItemSize={150}
         ListHeaderComponent={renderHeader}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} progressViewOffset={35} />}
-        renderItem={({ item, index }) => (
-          <VideoGridItem item={item} onPress={() => openVideo(activeVideos, index)} onLongPress={handleLongPress} />
-        )}
+        renderItem={renderItem}
         ListEmptyComponent={
           <View style={styles.emptyGrid}>
             <Text style={styles.emptyGridIcon}>{activeTab === 'videos' ? '🎥' : activeTab === 'private' ? '🔒' : '❤️'}</Text>
