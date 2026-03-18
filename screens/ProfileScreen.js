@@ -350,7 +350,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   async function uploadCroppedAvatar(croppedUri) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = currentUser;
       if (!user) { Alert.alert('Error', 'Not logged in.'); return; }
       const ext = 'jpg';
       const fileName = `${user.id}_avatar.${ext}`;
