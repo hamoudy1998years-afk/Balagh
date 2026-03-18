@@ -813,6 +813,8 @@ export default function LoginScreen({ navigation }) {
                   onFocus={closeDropdown}
                   secureTextEntry={!showPassword}
                   autoComplete="off"
+                  autoCorrect={false}
+                  autoCapitalize="none"
                   textContentType="none"
                 />
                 <TouchableOpacity 

@@ -152,6 +152,8 @@ export default function SignupScreen({ navigation }) {
             onChangeText={setPassword}
             secureTextEntry={!showPassword}
             autoComplete="off"
+            autoCorrect={false}
+            autoCapitalize="none"
             textContentType="none"
           />
           <TouchableOpacity 
@@ -182,6 +184,8 @@ export default function SignupScreen({ navigation }) {
             onChangeText={setConfirmPassword}
             secureTextEntry={!showConfirmPassword}
             autoComplete="off"
+            autoCorrect={false}
+            autoCapitalize="none"
             textContentType="none"
           />
           <TouchableOpacity 
