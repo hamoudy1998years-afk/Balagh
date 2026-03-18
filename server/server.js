@@ -1,7 +1,7 @@
 const express = require('express');
 const { RtcTokenBuilder, RtcRole } = require('agora-token');
 const cors = require('cors');
-require('dotenv').config({ path: require('path').join(__dirname, '.env'), override: false });
+require('dotenv').config();
 console.log('ENV CHECK:', !!process.env.AGORA_APP_ID, !!process.env.AGORA_APP_CERTIFICATE);
 
 const app = express();
