@@ -25,7 +25,7 @@ const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 
 // 🔧 FIXED: Removed trailing space
-const THUMBNAIL_SERVER_URL = 'https://balagh-server-production.up.railway.app';
+const THUMBNAIL_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 
 async function getAgoraToken(channelName, uid, role) {
   __DEV__ && console.log('🚀 Fetching token...');
@@ -402,7 +402,7 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   async function sendMessage() {
     if (!chatInput.trim() || !streamId || !currentUser) return;
-    const msg = chatInput.trim();
+    const msg = chatInput.replace(/<[^>]*>/g, '').trim();
     setChatInput('');
     await supabase.from('live_messages').insert({
       stream_id: streamId, user_id: currentUser.id, username, message: msg,

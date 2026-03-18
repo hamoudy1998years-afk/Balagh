@@ -19,7 +19,7 @@ import { COLORS } from '../constants/theme';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
-const TOKEN_SERVER_URL = 'https://balagh-server-production.up.railway.app';
+const TOKEN_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 const TOKEN_EXPIRY_SECONDS = 86400;
 const TOKEN_REFRESH_BUFFER_SECONDS = 300; // refresh if within 5 min of expiry
 const REACTIONS = ['❤️', '🤲', '☪️', '🌟', '👍'];
@@ -350,7 +350,7 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   async function sendMessage() {
     if (!chatInput.trim() || !stream.id || !currentUser) return;
-    const msg = chatInput.trim();
+    const msg = chatInput.replace(/<[^>]*>/g, '').trim();
     setChatInput('');
 
     try {
@@ -385,7 +385,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       return; 
     }
     
-    const q = questionInput.trim();
+    const q = questionInput.replace(/<[^>]*>/g, '').trim();
     setQuestionInput('');
 
     try {
