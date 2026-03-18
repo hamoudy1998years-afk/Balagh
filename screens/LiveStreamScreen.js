@@ -20,6 +20,7 @@ import { useEngagedViewers } from '../hooks/useEngagedViewers';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import RNFS from 'react-native-fs';
 import { COLORS } from '../constants/theme';
+import { useUser } from '../context/UserContext';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
@@ -109,7 +110,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [activeTab, setActiveTab] = useState('chat');
-  const [currentUser, setCurrentUser] = useState(null);
+  const { user: currentUser } = useUser();
   const [username, setUsername] = useState('');
   const [isFrontCamera, setIsFrontCamera] = useState(true);
   const [showViewerList, setShowViewerList] = useState(false);
@@ -201,27 +202,25 @@ export default function LiveStreamScreen({ navigation, route }) {
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      if (!currentUser) {
         setIsStarting(false); // 🔧 FIXED: Reset button state
         return;
       }
-      setCurrentUser(user);
 
       await supabase
         .from('live_streams')
         .delete()
-        .eq('user_id', user.id)
+        .eq('user_id', currentUser.id)
         .eq('is_live', true);
 
       const { data: profile } = await supabase
         .from('profiles')
         .select('username, avatar_url')
-        .eq('id', user.id)
+        .eq('id', currentUser.id)
         .single();
       setUsername(profile?.username ?? 'Scholar');
 
-      const channel = `bushrann_${user.id}_${Date.now()}`;
+      const channel = `bushrann_${currentUser.id}_${Date.now()}`;
       currentChannelRef.current = channel;
 
       const [hostToken, viewerToken] = await Promise.all([
