@@ -613,6 +613,12 @@ export default function ProfileScreen({ route, navigation }) {
 
   const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
 
+  if (userLoading) return null;
+  if (!globalUser) {
+    navigation.replace('Login');
+    return null;
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
