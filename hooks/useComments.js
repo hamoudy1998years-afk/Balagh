@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { useUser } from '../context/UserContext';
 
 export function useComments(videoId) {
+  const { user: authUser } = useUser();
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -13,11 +15,6 @@ export function useComments(videoId) {
   const [refreshTrigger, setRefreshTrigger] = useState(0); // ADDED: refresh trigger state
   const PAGE_SIZE = 20;
   const realtimeSubscription = useRef(null);
-
-  const getCurrentUser = async () => {
-    const { data } = await supabase.auth.getUser();
-    return data.user;
-  };
 
   // Fetch comments with pagination
   const fetchComments = useCallback(async (pageNum = 0, isRefresh = false) => {
@@ -51,7 +48,7 @@ export function useComments(videoId) {
 
         if (profilesError) throw profilesError;
 
-        const currentUser = await getCurrentUser();
+        const currentUser = authUser;
 
         const commentsWithUsers = commentsData.map(comment => ({
           ...comment,
@@ -102,7 +99,7 @@ export function useComments(videoId) {
     if (!content.trim()) return;
     setPosting(true);
     try {
-      const user = await getCurrentUser();
+      const user = authUser;
       if (!user) throw new Error('Not authenticated');
 
       const { data: newComment, error: insertError } = await supabase
@@ -189,7 +186,7 @@ export function useComments(videoId) {
   // Toggle like on comment
   const toggleLike = useCallback(async (commentId, isCurrentlyLiked) => {
     try {
-      const user = await getCurrentUser();
+      const user = authUser;
       if (!user) {
         alert('Please sign in to like comments');
         return;
