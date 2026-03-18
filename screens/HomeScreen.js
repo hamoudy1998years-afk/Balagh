@@ -234,8 +234,14 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     const nextVideo = videos[activeIndex + 1];
     if (nextVideo) playerPool.loadVideo('next', nextVideo.video_url);
 
+    const next2Video = videos[activeIndex + 2];
+    if (next2Video) playerPool.loadVideo('next2', next2Video.video_url);
+
     const prevVideo = videos[activeIndex - 1];
     if (prevVideo) playerPool.loadVideo('prev', prevVideo.video_url);
+
+    const prev2Video = videos[activeIndex - 2];
+    if (prev2Video) playerPool.loadVideo('prev2', prev2Video.video_url);
 
     prevIndexRef.current = activeIndex;
   }, [activeIndex, videos]);
@@ -390,9 +396,11 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
           if (!isVisible) return <View style={{ height: listHeight }} />;
 
           let slot = null;
-          if (index === activeIndex - 1) slot = 'prev';
+          if (index === activeIndex - 2) slot = 'prev2';
+          else if (index === activeIndex - 1) slot = 'prev';
           else if (index === activeIndex) slot = 'current';
           else if (index === activeIndex + 1) slot = 'next';
+          else if (index === activeIndex + 2) slot = 'next2';
 
           return (
             <VideoCard

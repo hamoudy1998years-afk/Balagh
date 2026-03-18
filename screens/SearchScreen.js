@@ -299,7 +299,7 @@ export default function SearchScreen({ navigation }) {
                     style={[styles.gridItem, { width: ITEM_SIZE, height: ITEM_SIZE * 1.3 }]}
                   >
                     <Image
-                      source={{ uri: item.thumbnail_url || item.video_url }}
+                      source={{ uri: item.thumbnail_url || item.video_url, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }}
                       style={styles.gridThumb}
                       resizeMode="cover"
                       defaultSource={require('../assets/placeholder.png')}

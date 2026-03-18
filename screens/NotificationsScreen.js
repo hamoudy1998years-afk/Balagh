@@ -18,7 +18,16 @@ const NotificationItem = React.memo(function NotificationItem({ item, onDelete, 
 
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 8 && Math.abs(g.dy) < 20,
+      // Don't claim on touch start — let taps pass through to the row
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      // Claim in the capture phase once the gesture is clearly horizontal.
+      // Using capture (not just bubble) is what makes this work reliably on iOS,
+      // where the parent ScrollView/FlatList would otherwise steal the gesture.
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
       onPanResponderMove: (_, g) => {
         if (isDeleting.current) return;
         translateX.setValue(g.dx);
@@ -32,6 +41,13 @@ const NotificationItem = React.memo(function NotificationItem({ item, onDelete, 
           Animated.spring(translateX, { toValue: 0, useNativeDriver: true, tension: 100, friction: 10 }).start();
           Animated.timing(deleteOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
         }
+      },
+      // Don't yield the gesture once claimed — prevents iOS from taking it back
+      onPanResponderTerminationRequest: () => false,
+      // If iOS does steal the gesture (e.g. Control Centre swipe), snap back cleanly
+      onPanResponderTerminate: () => {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true, tension: 100, friction: 10 }).start();
+        Animated.timing(deleteOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
       },
     })
   ).current;

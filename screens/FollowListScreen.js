@@ -37,7 +37,7 @@ function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
   return (
     <TouchableOpacity style={styles.userRow} onPress={onPress} activeOpacity={0.7}>
       {item.avatar_url ? (
-        <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+        <Image source={{ uri: item.avatar_url, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }} style={styles.avatar} />
       ) : (
         <View style={styles.avatarFallback}>
           <Text style={styles.avatarLetter}>{letter}</Text>

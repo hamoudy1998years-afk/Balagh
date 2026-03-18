@@ -392,7 +392,7 @@ function VideoCard({
           <AnimatedButton onPress={() => navigation.navigate('UserProfile', { profileUserId: item.user_id })}>
             <View style={[styles.creatorAvatar, followed && styles.creatorAvatarFollowed]}>
               {avatarUrl
-                ? <Image source={{ uri: avatarUrl }} style={{ width: s(48), height: s(48), borderRadius: s(24) }} />
+                ? <Image source={{ uri: avatarUrl, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }} style={{ width: s(48), height: s(48), borderRadius: s(24) }} />
                 : <Text style={styles.creatorAvatarText}>{avatarLetter}</Text>
               }
             </View>

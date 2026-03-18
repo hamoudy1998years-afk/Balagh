@@ -108,7 +108,7 @@ const Avatar = React.memo(function Avatar({ uri, username, size = 90, onPress })
   return (
     <AnimatedButton onPress={onPress}>
       {uri ? (
-        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#eee' }} />
+        <Image source={{ uri, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#eee' }} />
       ) : (
         <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontSize: size * 0.4, fontWeight: '700', color: '#fff' }}>{letter}</Text>
@@ -131,7 +131,7 @@ const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongP
   return (
     <Animated.View style={[styles.gridItem, { transform: [{ scale: scaleAnim }] }]}>
       <AnimatedButton style={StyleSheet.absoluteFill} onPress={onPress} onLongPress={handleLongPress} delayLongPress={400}>
-        <Image source={{ uri: item.thumbnail_url || item.video_url }} style={styles.gridThumb} resizeMode="cover" />
+        <Image source={{ uri: item.thumbnail_url || item.video_url, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }} style={styles.gridThumb} resizeMode="cover" />
         <View style={styles.gridOverlay}><Text style={styles.gridPlayCount}>▶ {formatCount(item.views_count)}</Text></View>
         {item.is_pinned && <View style={styles.pinnedLabel}><Text style={styles.pinnedLabelText}>📌</Text></View>}
         {item.is_private && <View style={styles.privateLabel}><Text style={styles.privateLabelText}>🔒</Text></View>}
@@ -660,7 +660,7 @@ export default function ProfileScreen({ route, navigation }) {
             <Text style={styles.enlargeCloseBtnText}>✕</Text>
           </View>
           {profile?.avatar_url && (
-            <Image source={{ uri: profile.avatar_url }} style={styles.enlargedAvatar} resizeMode="contain" />
+            <Image source={{ uri: profile.avatar_url, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }} style={styles.enlargedAvatar} resizeMode="contain" />
           )}
         </Pressable>
       </Modal>

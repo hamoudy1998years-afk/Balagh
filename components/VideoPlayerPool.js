@@ -15,7 +15,10 @@ if (module.hot) {
   });
 }
 
-// Pool of 3 video refs for react-native-video.
+// Pool of 5 video refs for react-native-video.
+// 5 slots (prev2, prev, current, next, next2) mean the video immediately
+// adjacent in either direction is always pre-buffered in a mounted <Video>,
+// so only the slot 2 positions away needs to buffer on fast scrolls.
 // IMPORTANT: play/pause is controlled entirely by the `paused` prop on <Video>
 // in VideoCard (isPaused = !isActive || paused || !isTabActive).
 // This pool only manages slot rotation and URL tracking — it does NOT
@@ -24,8 +27,10 @@ export function useVideoPlayerPool() {
   const player1Ref = useRef(null);
   const player2Ref = useRef(null);
   const player3Ref = useRef(null);
+  const player4Ref = useRef(null);
+  const player5Ref = useRef(null);
 
-  const playerRefs = useRef([player1Ref, player2Ref, player3Ref]).current;
+  const playerRefs = useRef([player1Ref, player2Ref, player3Ref, player4Ref, player5Ref]).current;
 
   // Register refs globally for hot reload cleanup
   playerRefs.forEach(ref => activeRefs.add(ref));
@@ -33,17 +38,20 @@ export function useVideoPlayerPool() {
   // Track which ref holds which video URL
   const videoMap = useRef(new Map()).current;
 
-  // Slot indices: which playerRefs index maps to prev/current/next
-  const indices = useRef({ prev: 0, current: 1, next: 2 }).current;
+  // Slot indices: which playerRefs index maps to each named position
+  const indices = useRef({ prev2: 0, prev: 1, current: 2, next: 3, next2: 4 }).current;
 
   // ── Rotate slots when scrolling down ──────────────────────────────────────
+  // prev2 is recycled into next2; everything else shifts one position back.
   const scrollNext = useCallback(() => {
-    const oldPrev = indices.prev;
-    indices.prev = indices.current;
-    indices.current = indices.next;
-    indices.next = oldPrev;
-    // Reset the recycled slot
-    const recycledRef = playerRefs[indices.next];
+    const recycleIdx = indices.prev2;
+    indices.prev2    = indices.prev;
+    indices.prev     = indices.current;
+    indices.current  = indices.next;
+    indices.next     = indices.next2;
+    indices.next2    = recycleIdx;
+    // Reset the recycled slot (old prev2, now next2)
+    const recycledRef = playerRefs[indices.next2];
     videoMap.delete(recycledRef);
     try {
       if (recycledRef?.current) recycledRef.current.seek(0);
@@ -51,13 +59,16 @@ export function useVideoPlayerPool() {
   }, [indices, playerRefs, videoMap]);
 
   // ── Rotate slots when scrolling up ────────────────────────────────────────
+  // next2 is recycled into prev2; everything else shifts one position forward.
   const scrollPrev = useCallback(() => {
-    const oldNext = indices.next;
-    indices.next = indices.current;
-    indices.current = indices.prev;
-    indices.prev = oldNext;
-    // Reset the recycled slot
-    const recycledRef = playerRefs[indices.prev];
+    const recycleIdx = indices.next2;
+    indices.next2    = indices.next;
+    indices.next     = indices.current;
+    indices.current  = indices.prev;
+    indices.prev     = indices.prev2;
+    indices.prev2    = recycleIdx;
+    // Reset the recycled slot (old next2, now prev2)
+    const recycledRef = playerRefs[indices.prev2];
     videoMap.delete(recycledRef);
     try {
       if (recycledRef?.current) recycledRef.current.seek(0);
@@ -66,9 +77,11 @@ export function useVideoPlayerPool() {
 
   // ── Get ref for a named slot ───────────────────────────────────────────────
   const getPlayerRef = useCallback((slot) => {
-    if (slot === 'prev') return playerRefs[indices.prev];
+    if (slot === 'prev2')   return playerRefs[indices.prev2];
+    if (slot === 'prev')    return playerRefs[indices.prev];
     if (slot === 'current') return playerRefs[indices.current];
-    if (slot === 'next') return playerRefs[indices.next];
+    if (slot === 'next')    return playerRefs[indices.next];
+    if (slot === 'next2')   return playerRefs[indices.next2];
     return null;
   }, [indices, playerRefs]);
 
