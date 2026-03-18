@@ -367,6 +367,35 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     if (viewableItems.length > 0) setActiveIndex(viewableItems[0].index);
   }).current;
 
+  const renderItem = useCallback(({ item, index }) => {
+    const isVisible = Math.abs(index - activeIndex) <= 5;
+    if (!isVisible) return <View style={{ height: listHeight }} />;
+
+    let slot = null;
+    if (index === activeIndex - 2) slot = 'prev2';
+    else if (index === activeIndex - 1) slot = 'prev';
+    else if (index === activeIndex) slot = 'current';
+    else if (index === activeIndex + 1) slot = 'next';
+    else if (index === activeIndex + 2) slot = 'next2';
+
+    return (
+      <VideoCard
+        item={item}
+        player={slot ? playerPool.getPlayerRef(slot) : null}
+        isActive={index === activeIndex}
+        isVisible={isVisible}
+        isTabActive={isTabActive}
+        initialLiked={myLikes.includes(item.id)}
+        initialFollowed={myFollows.includes(item.user_id)}
+        onFollowChange={updateMyFollows}
+        navigation={navigation}
+        cardHeight={listHeight}
+        username={item.profiles?.username ?? 'user'}
+        avatarUrl={item.profiles?.avatar_url ?? null}
+      />
+    );
+  }, [activeIndex, listHeight, myLikes, myFollows, isTabActive, playerPool, updateMyFollows, navigation]);
+
   if (feedError) {
     return (
       <View style={styles.loadingContainer}>
@@ -397,35 +426,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       </View>
     );
   }
-
-  const renderItem = useCallback(({ item, index }) => {
-    const isVisible = Math.abs(index - activeIndex) <= 5;
-    if (!isVisible) return <View style={{ height: listHeight }} />;
-
-    let slot = null;
-    if (index === activeIndex - 2) slot = 'prev2';
-    else if (index === activeIndex - 1) slot = 'prev';
-    else if (index === activeIndex) slot = 'current';
-    else if (index === activeIndex + 1) slot = 'next';
-    else if (index === activeIndex + 2) slot = 'next2';
-
-    return (
-      <VideoCard
-        item={item}
-        player={slot ? playerPool.getPlayerRef(slot) : null}
-        isActive={index === activeIndex}
-        isVisible={isVisible}
-        isTabActive={isTabActive}
-        initialLiked={myLikes.includes(item.id)}
-        initialFollowed={myFollows.includes(item.user_id)}
-        onFollowChange={updateMyFollows}
-        navigation={navigation}
-        cardHeight={listHeight}
-        username={item.profiles?.username ?? 'user'}
-        avatarUrl={item.profiles?.avatar_url ?? null}
-      />
-    );
-  }, [activeIndex, listHeight, myLikes, myFollows, isTabActive, playerPool, updateMyFollows, navigation]);
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
