@@ -204,6 +204,11 @@ export default function LoginScreen({ navigation }) {
             }
             
             __DEV__ && console.log('[LOGIN] Session created successfully');
+            if (data?.user) {
+              await userCache.clear();
+              await userCache.set(data.user);
+              await refreshUser();
+            }
             setLoading(false);
             navigation.navigate('Main');
             return;
@@ -642,6 +647,11 @@ export default function LoginScreen({ navigation }) {
           }
           
           __DEV__ && console.log('[PIN] Session created successfully');
+          if (data?.user) {
+            await userCache.clear();
+            await userCache.set(data.user);
+            await refreshUser();
+          }
           setPinModalVisible(false);
           setEnteredPin('');
           setPinError('');
