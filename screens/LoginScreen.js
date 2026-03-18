@@ -62,7 +62,7 @@ export default function LoginScreen({ navigation }) {
 
   const eyeOpacity = useRef(new Animated.Value(0)).current;
 
-  const { refreshUser } = useUser();
+  const { refreshUser, setUser } = useUser();
   const suppressDropdown = useRef(false);
   const silentReAuth = useRef(false);
 
@@ -205,9 +205,11 @@ export default function LoginScreen({ navigation }) {
             
             __DEV__ && console.log('[LOGIN] Session created successfully');
             if (data?.user) {
+              const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
+              const mergedUser = { ...data.user, ...profile };
               await userCache.clear();
-              await userCache.set(data.user);
-              await refreshUser();
+              await userCache.set(mergedUser);
+              setUser(mergedUser);
             }
             setLoading(false);
             navigation.navigate('Main');
@@ -648,9 +650,11 @@ export default function LoginScreen({ navigation }) {
           
           __DEV__ && console.log('[PIN] Session created successfully');
           if (data?.user) {
+            const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
+            const mergedUser = { ...data.user, ...profile };
             await userCache.clear();
-            await userCache.set(data.user);
-            await refreshUser();
+            await userCache.set(mergedUser);
+            setUser(mergedUser);
           }
           setPinModalVisible(false);
           setEnteredPin('');
