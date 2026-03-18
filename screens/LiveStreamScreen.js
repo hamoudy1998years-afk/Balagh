@@ -44,6 +44,10 @@ async function getAgoraToken(channelName, uid, role) {
       { method: 'GET', headers: { 'Accept': 'application/json' } },
       10000
     );
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Token server ${response.status}: ${text.slice(0, 200)}`);
+    }
     const data = await response.json();
     __DEV__ && console.log('✅ Token received:', data.token ? 'YES' : 'NO');
     return data.token;
@@ -195,6 +199,11 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function setup() {
+    if (!currentUser) {
+      setIsStarting(false);
+      return;
+    }
+
     const hasPermission = await requestPermissions();
     if (!hasPermission) {
       setIsStarting(false); // 🔧 FIXED: Reset button state
@@ -202,10 +211,6 @@ export default function LiveStreamScreen({ navigation, route }) {
     }
 
     try {
-      if (!currentUser) {
-        setIsStarting(false); // 🔧 FIXED: Reset button state
-        return;
-      }
 
       await supabase
         .from('live_streams')
