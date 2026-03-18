@@ -897,6 +897,7 @@ export default function LoginScreen({ navigation }) {
             <Modal
               animationType="slide"
               transparent={true}
+              statusBarTranslucent={true}
               visible={pinModalVisible}
               onRequestClose={() => {
                 setPinModalVisible(false);

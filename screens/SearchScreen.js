@@ -271,6 +271,8 @@ export default function SearchScreen({ navigation }) {
             ref={scrollRef}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
           >
           {profileResults.length > 0 && (
             <View style={styles.section}>
@@ -374,6 +376,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 6,
     marginLeft: 8,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   profileFollowingBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: COLORS.gold },
   profileFollowBtnText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
@@ -383,5 +388,5 @@ const styles = StyleSheet.create({
   gridItem: { padding: 1, backgroundColor: '#f0f0f0' },
   gridThumb: { width: '100%', height: '100%' },
   gridOverlay: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 4, borderRadius: 4 },
-  gridViews: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  gridViews: { color: '#fff', fontSize: 12, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
 });

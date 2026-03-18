@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Keyboard, Image } from 'react-native';
+import { View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -48,19 +48,6 @@ export default function UploadScreen({ navigation }) {
     }, [])
   );
 
-  const inputWrapperY = useRef(0);
-
-  useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
-      setTimeout(() => {
-        scrollRef.current?.scrollTo({ y: inputWrapperY.current - 388 + insets.top, animated: true });
-      }, 100);
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      scrollRef.current?.scrollTo({ y: 0, animated: true });
-    });
-    return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
 
   useEffect(() => { checkIfScholarInstant(); }, []);
 
@@ -367,7 +354,7 @@ export default function UploadScreen({ navigation }) {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Upload Video</Text>
         <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
@@ -415,7 +402,7 @@ export default function UploadScreen({ navigation }) {
         </AnimatedButton>
 
         <Text style={styles.label}>Caption</Text>
-        <View style={styles.inputWrapper} onLayout={(e) => { inputWrapperY.current = e.nativeEvent.layout.y; }}>
+        <View style={styles.inputWrapper}>
           <TextInput
             style={styles.input}
             placeholder="What is this video about?"
@@ -494,7 +481,7 @@ const styles = StyleSheet.create({
   liveDot: { fontSize: 18 },
   liveBtnText: { color: COLORS.live, fontSize: 16, fontWeight: '700', flex: 1 },
   scholarBadge: { backgroundColor: COLORS.live, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  scholarBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  scholarBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   videoPicker: { backgroundColor: '#f5f5f5', borderRadius: 16, borderWidth: 2, borderColor: '#e5e5e5', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
   videoPlaceholder: { padding: 40, alignItems: 'center' },
   videoPlaceholderIcon: { fontSize: 48, marginBottom: 12 },

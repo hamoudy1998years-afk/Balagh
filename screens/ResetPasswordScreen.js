@@ -1,11 +1,13 @@
-import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator, Animated, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator, Animated, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ResetPasswordScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -63,7 +65,11 @@ export default function ResetPasswordScreen({ navigation }) {
   }
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <ScrollView
+      contentContainerStyle={[styles.container, { paddingTop: Math.max(28, insets.top + 16), paddingBottom: Math.max(28, insets.bottom + 16) }]}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.title}>Reset Password</Text>
       <Text style={styles.subtitle}>Enter your new password below</Text>
       
@@ -131,16 +137,17 @@ export default function ResetPasswordScreen({ navigation }) {
           : <Text style={styles.buttonText}>Save New Password</Text>
         }
       </AnimatedButton>
-    </View>
+    </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: COLORS.bgDark, 
-    padding: 28, 
-    justifyContent: 'center' 
+  container: {
+    flexGrow: 1,
+    backgroundColor: COLORS.bgDark,
+    paddingHorizontal: 28,
+    justifyContent: 'center',
   },
   title: { 
     fontSize: 28, 

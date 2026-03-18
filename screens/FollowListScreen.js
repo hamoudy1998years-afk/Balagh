@@ -280,6 +280,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 16,
     alignItems: 'center',
+    minHeight: 36,
+    justifyContent: 'center',
   },
   followingBtn: {
     backgroundColor: 'transparent',

@@ -591,7 +591,7 @@ export default function ProfileScreen({ route, navigation }) {
         </AnimatedButton>
       </View>
     </View>
-  ), [profile, isScholar, scholarData, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, activeTab, currentUser, targetUserId, navigation]);
+  ), [profile, isScholar, scholarData, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation]);
 
   const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
 
@@ -716,7 +716,7 @@ const styles = StyleSheet.create({
   gridItem: { flex: 1, aspectRatio: 0.8, margin: 0.5, backgroundColor: '#f0f0f0' },
   gridThumb: { width: '100%', height: '100%' },
   gridOverlay: { position: 'absolute', bottom: 4, left: 4 },
-  gridPlayCount: { color: '#fff', fontSize: 11, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  gridPlayCount: { color: '#fff', fontSize: 12, fontWeight: '600', textShadowColor: '#000', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
   pinnedLabel: { position: 'absolute', top: 4, left: 4 },
   pinnedLabelText: { fontSize: 14 },
   privateLabel: { position: 'absolute', top: 4, right: 4 },

@@ -23,6 +23,7 @@
       }
     },
     "android": {
+      "minSdkVersion": 24,
       "largeHeap": true,
       "navigationBar": {
         "backgroundColor": "#000000",

@@ -133,6 +133,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [videos, setVideos] = useState(() => feedCache[type] ?? []);
   const [loading, setLoading] = useState(() => !feedCache[type]);
   const [refreshing, setRefreshing] = useState(false);
+  const [feedError, setFeedError] = useState(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const { width, height } = useWindowDimensions();
   const [listHeight, setListHeight] = useState(height);
@@ -269,7 +270,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   }, [type]);
 
   async function loadVideos(background = false) {
-    if (!background) setLoading(true);
+    if (!background) { setLoading(true); setFeedError(null); }
 
     if (type === 'following') {
       const { data: { user } } = await supabase.auth.getUser();
@@ -296,7 +297,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .order('created_at', { ascending: false })
         .limit(20);
 
-      if (error) { __DEV__ && console.warn('Following feed error:', error.message); setLoading(false); return; }
+      if (error) { __DEV__ && console.warn('Following feed error:', error.message); setFeedError('Could not load your feed.'); setLoading(false); return; }
       const result = data ?? [];
       feedCache.following = result;
       feedCache.ts.following = Date.now();
@@ -311,7 +312,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .order('created_at', { ascending: false })
         .limit(20);
 
-      if (error) { __DEV__ && console.warn('ForYou feed error:', error.message); setLoading(false); return; }
+      if (error) { __DEV__ && console.warn('ForYou feed error:', error.message); setFeedError('Could not load your feed.'); setLoading(false); return; }
       const arr = [...(data ?? [])];
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -363,6 +364,19 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0) setActiveIndex(viewableItems[0].index);
   }).current;
+
+  if (feedError) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.emptyIcon}>⚠️</Text>
+        <Text style={styles.loadingText}>Couldn't load videos</Text>
+        <Text style={styles.emptySubtext}>Check your connection and try again.</Text>
+        <AnimatedButton style={styles.retryBtn} onPress={() => loadVideos()}>
+          <Text style={styles.retryBtnText}>Retry</Text>
+        </AnimatedButton>
+      </View>
+    );
+  }
 
   if (loading) {
     return (
@@ -668,4 +682,6 @@ const styles = StyleSheet.create({
   loadingText: { color: COLORS.textWhite, fontSize: 16, fontWeight: '600' },
   emptyIcon: { fontSize: 48 },
   emptySubtext: { color: '#64748b', fontSize: 14, textAlign: 'center', paddingHorizontal: 40 },
+  retryBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 32, paddingVertical: 12, marginTop: 4 },
+  retryBtnText: { color: '#0a0f1e', fontSize: 15, fontWeight: '700' },
 });
