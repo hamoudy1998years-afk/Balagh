@@ -4,7 +4,7 @@ import {
   StatusBar, RefreshControl, Animated, Pressable,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import React, { useState, useEffect as useEffectHook, useCallback, useRef } from 'react';
+import React, { useReducer, useEffect as useEffectHook, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +18,83 @@ import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
 
 const downloadedVideoIds = new Set();
+
+// ─── Reducers ───────────────────────────────────────────────────────────────
+
+const initialProfileState = {
+  profile: null,
+  currentUser: null,
+  isOwnProfile: true,
+  following: false,
+  blocked: false,
+  followersCount: 0,
+  followingCount: 0,
+  isScholar: false,
+  scholarData: null,
+};
+
+function profileReducer(state, action) {
+  switch (action.type) {
+    case 'RESET': return { ...initialProfileState };
+    case 'SET_USER': return { ...state, currentUser: action.currentUser, isOwnProfile: action.isOwnProfile };
+    case 'SET_PROFILE': return { ...state, profile: action.profile };
+    case 'UPDATE_AVATAR': return { ...state, profile: state.profile ? { ...state.profile, avatar_url: action.url } : state.profile };
+    case 'SET_SCHOLAR': return { ...state, isScholar: action.isScholar, scholarData: action.scholarData };
+    case 'SET_FOLLOW_COUNTS': return { ...state, followersCount: action.followersCount, followingCount: action.followingCount };
+    case 'SET_FOLLOWING': return { ...state, following: action.following };
+    case 'SET_BLOCKED': return { ...state, blocked: action.blocked };
+    case 'FOLLOW_CHANGE': return { ...state, following: action.following, followersCount: Math.max(0, state.followersCount + action.delta) };
+    case 'BLOCK': return { ...state, blocked: true, following: false };
+    case 'UNBLOCK': return { ...state, blocked: false };
+    case 'ADJUST_FOLLOWING_COUNT': return { ...state, followingCount: Math.max(0, state.followingCount + action.delta) };
+    default: return state;
+  }
+}
+
+const initialVideoState = {
+  publicVideos: [],
+  privateVideos: [],
+  likedVideos: [],
+  totalLikes: 0,
+  activeTab: 'videos',
+};
+
+function videoReducer(state, action) {
+  switch (action.type) {
+    case 'RESET': return { ...initialVideoState };
+    case 'SET_PUBLIC': return { ...state, publicVideos: action.videos, totalLikes: action.totalLikes };
+    case 'SET_PRIVATE': return { ...state, privateVideos: action.videos };
+    case 'SET_LIKED': return { ...state, likedVideos: action.videos };
+    case 'SET_ACTIVE_TAB': return { ...state, activeTab: action.tab };
+    case 'REMOVE_VIDEO': return {
+      ...state,
+      publicVideos: state.publicVideos.filter(v => v.id !== action.id),
+      privateVideos: state.privateVideos.filter(v => v.id !== action.id),
+    };
+    default: return state;
+  }
+}
+
+const initialUIState = {
+  loading: true,
+  refreshing: false,
+  avatarModal: false,
+  enlargeAvatar: false,
+  isDownloading: false,
+  downloadProgress: 0,
+};
+
+function uiReducer(state, action) {
+  switch (action.type) {
+    case 'SET_LOADING': return { ...state, loading: action.loading };
+    case 'SET_REFRESHING': return { ...state, refreshing: action.refreshing };
+    case 'SET_AVATAR_MODAL': return { ...state, avatarModal: action.open };
+    case 'SET_ENLARGE_AVATAR': return { ...state, enlargeAvatar: action.open };
+    case 'SET_DOWNLOADING': return { ...state, isDownloading: action.isDownloading, downloadProgress: action.progress ?? state.downloadProgress };
+    case 'SET_DOWNLOAD_PROGRESS': return { ...state, downloadProgress: action.progress };
+    default: return state;
+  }
+}
 
 function formatCount(n) {
   if (!n || n === 0) return '0';
@@ -96,26 +173,13 @@ export default function ProfileScreen({ route, navigation }) {
   const downloadContext = useDownload();
   const showVideoOptionsSheet = downloadContext?.showVideoOptionsSheet;
 
-  const [profile, setProfile] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [isOwnProfile, setIsOwnProfile] = useState(true);
-  const [following, setFollowing] = useState(false);
-  const [blocked, setBlocked] = useState(false);
-  const [followersCount, setFollowersCount] = useState(0);
-  const [followingCount, setFollowingCount] = useState(0);
-  const [isScholar, setIsScholar] = useState(false);
-  const [scholarData, setScholarData] = useState(null);
-  const [activeTab, setActiveTab] = useState('videos');
-  const [publicVideos, setPublicVideos] = useState([]);
-  const [privateVideos, setPrivateVideos] = useState([]);
-  const [likedVideos, setLikedVideos] = useState([]);
-  const [totalLikes, setTotalLikes] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [avatarModal, setAvatarModal] = useState(false);
-  const [enlargeAvatar, setEnlargeAvatar] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [profileState, dispatchProfile] = useReducer(profileReducer, initialProfileState);
+  const [videoState, dispatchVideo] = useReducer(videoReducer, initialVideoState);
+  const [uiState, dispatchUI] = useReducer(uiReducer, initialUIState);
+
+  const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData } = profileState;
+  const { publicVideos, privateVideos, likedVideos, totalLikes, activeTab } = videoState;
+  const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress } = uiState;
 
   useEffectHook(() => {
     const unsubscribe = navigation.addListener('focus', async () => {
@@ -132,7 +196,7 @@ export default function ProfileScreen({ route, navigation }) {
     const { DeviceEventEmitter } = require('react-native');
     const sub = DeviceEventEmitter.addListener('followChanged', ({ userId, isFollowing }) => {
       if (userId === currentUser?.id) return;
-      setFollowingCount(prev => isFollowing ? prev + 1 : prev - 1);
+      dispatchProfile({ type: 'ADJUST_FOLLOWING_COUNT', delta: isFollowing ? 1 : -1 });
     });
     return () => sub.remove();
   }, [currentUser]);
@@ -160,23 +224,14 @@ export default function ProfileScreen({ route, navigation }) {
   }, [targetUserId]);
 
   async function init() {
-    setProfile(null);
-    setPublicVideos([]);
-    setPrivateVideos([]);
-    setLikedVideos([]);
-    setFollowersCount(0);
-    setFollowingCount(0);
-    setTotalLikes(0);
-    setIsScholar(false);
-    setScholarData(null);
-    setFollowing(false);
+    dispatchProfile({ type: 'RESET' });
+    dispatchVideo({ type: 'RESET' });
 
     if (globalUser) {
-      setCurrentUser(globalUser);
       const viewingId = targetUserId ?? globalUser.id;
       const ownProfile = viewingId === globalUser.id;
-      setIsOwnProfile(ownProfile);
-      setLoading(false);
+      dispatchProfile({ type: 'SET_USER', currentUser: globalUser, isOwnProfile: ownProfile });
+      dispatchUI({ type: 'SET_LOADING', loading: false });
 
       Promise.all([
         loadProfile(viewingId),
@@ -189,14 +244,14 @@ export default function ProfileScreen({ route, navigation }) {
           .eq('follower_id', globalUser.id)
           .eq('following_id', viewingId)
           .maybeSingle()
-          .then(({ data }) => setFollowing(!!data));
+          .then(({ data }) => dispatchProfile({ type: 'SET_FOLLOWING', following: !!data }));
 
         supabase.from('blocks')
           .select('id')
           .eq('blocker_id', globalUser.id)
           .eq('blocked_id', viewingId)
           .maybeSingle()
-          .then(({ data }) => setBlocked(!!data));
+          .then(({ data }) => dispatchProfile({ type: 'SET_BLOCKED', blocked: !!data }));
       } else {
         loadLikedVideos(globalUser.id);
       }
@@ -206,11 +261,10 @@ export default function ProfileScreen({ route, navigation }) {
     if (!userLoading) {
       const cachedUser = await userCache.get();
       if (cachedUser) {
-        setCurrentUser(cachedUser);
         const viewingId = targetUserId ?? cachedUser.id;
         const ownProfile = viewingId === cachedUser.id;
-        setIsOwnProfile(ownProfile);
-        setLoading(false);
+        dispatchProfile({ type: 'SET_USER', currentUser: cachedUser, isOwnProfile: ownProfile });
+        dispatchUI({ type: 'SET_LOADING', loading: false });
         Promise.all([
           loadProfile(viewingId),
           loadVideos(viewingId, ownProfile),
@@ -222,43 +276,43 @@ export default function ProfileScreen({ route, navigation }) {
   async function loadProfile(userId) {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (data) {
-      setProfile(data);
+      dispatchProfile({ type: 'SET_PROFILE', profile: data });
       checkScholarStatus(userId, data.is_scholar);
       const [{ count: frsCount }, { count: fngCount }] = await Promise.all([
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId),
       ]);
-      setFollowersCount(frsCount ?? 0);
-      setFollowingCount(fngCount ?? 0);
+      dispatchProfile({ type: 'SET_FOLLOW_COUNTS', followersCount: frsCount ?? 0, followingCount: fngCount ?? 0 });
     }
   }
 
   async function loadVideos(userId, isOwner) {
     const { data: pub } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', false)
       .order('is_pinned', { ascending: false }).order('pin_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
-    setPublicVideos(pub ?? []);
-    setTotalLikes((pub ?? []).reduce((sum, v) => sum + (v.likes_count ?? 0), 0));
+    const pubVideos = pub ?? [];
+    dispatchVideo({ type: 'SET_PUBLIC', videos: pubVideos, totalLikes: pubVideos.reduce((sum, v) => sum + (v.likes_count ?? 0), 0) });
     if (isOwner) {
       const { data: priv } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', true).order('created_at', { ascending: false });
-      setPrivateVideos(priv ?? []);
+      dispatchVideo({ type: 'SET_PRIVATE', videos: priv ?? [] });
     }
   }
 
   async function loadLikedVideos(userId) {
     const { data } = await supabase.from('likes').select('video_id, videos(*)').eq('user_id', userId).order('created_at', { ascending: false });
-    setLikedVideos(data?.map(l => l.videos).filter(Boolean) ?? []);
+    dispatchVideo({ type: 'SET_LIKED', videos: data?.map(l => l.videos).filter(Boolean) ?? [] });
   }
 
   async function checkScholarStatus(userId, isScholarValue) {
     const scholar = isScholarValue === true;
-    setIsScholar(scholar);
     if (scholar) {
       const { data: scholarInfo } = await supabase.from('scholar_applications').select('*')
         .eq('user_id', userId)
         .order('submitted_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      setScholarData(scholarInfo);
+      dispatchProfile({ type: 'SET_SCHOLAR', isScholar: true, scholarData: scholarInfo ?? null });
+    } else {
+      dispatchProfile({ type: 'SET_SCHOLAR', isScholar: false, scholarData: null });
     }
   }
 
@@ -268,14 +322,13 @@ export default function ProfileScreen({ route, navigation }) {
       await supabase.from('blocks').delete()
         .eq('blocker_id', currentUser.id)
         .eq('blocked_id', targetUserId);
-      setBlocked(false);
+      dispatchProfile({ type: 'UNBLOCK' });
     } else {
       await supabase.from('blocks').insert({
         blocker_id: currentUser.id,
         blocked_id: targetUserId,
       });
-      setBlocked(true);
-      setFollowing(false);
+      dispatchProfile({ type: 'BLOCK' });
       await supabase.from('follows').delete()
         .eq('follower_id', currentUser.id)
         .eq('following_id', targetUserId);
@@ -285,13 +338,13 @@ export default function ProfileScreen({ route, navigation }) {
   async function handleFollow() {
     if (!currentUser || isOwnProfile) return;
     if (following) {
-      setFollowing(false); setFollowersCount(prev => prev - 1);
+      dispatchProfile({ type: 'FOLLOW_CHANGE', following: false, delta: -1 });
       const { error } = await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', targetUserId);
-      if (error) { setFollowing(true); setFollowersCount(prev => prev + 1); Alert.alert('Error', 'Could not unfollow. Please try again.'); }
+      if (error) { dispatchProfile({ type: 'FOLLOW_CHANGE', following: true, delta: 1 }); Alert.alert('Error', 'Could not unfollow. Please try again.'); }
     } else {
-      setFollowing(true); setFollowersCount(prev => prev + 1);
+      dispatchProfile({ type: 'FOLLOW_CHANGE', following: true, delta: 1 });
       const { error } = await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: targetUserId });
-      if (error) { setFollowing(false); setFollowersCount(prev => prev - 1); Alert.alert('Error', 'Could not follow. Please try again.'); }
+      if (error) { dispatchProfile({ type: 'FOLLOW_CHANGE', following: false, delta: -1 }); Alert.alert('Error', 'Could not follow. Please try again.'); }
     }
   }
 
@@ -308,7 +361,7 @@ export default function ProfileScreen({ route, navigation }) {
       const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
       const cacheBustedUrl = `${publicUrl}?t=${Date.now()}`;
       await supabase.from('profiles').update({ avatar_url: cacheBustedUrl }).eq('id', user.id);
-      setProfile(prev => ({ ...prev, avatar_url: cacheBustedUrl }));
+      dispatchProfile({ type: 'UPDATE_AVATAR', url: cacheBustedUrl });
     } catch (e) {
       Alert.alert('Error', 'Could not upload avatar. Please try again.');
       __DEV__ && console.error('Upload error:', e);
@@ -316,7 +369,7 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   async function handleChangeAvatar() {
-    setAvatarModal(false);
+    dispatchUI({ type: 'SET_AVATAR_MODAL', open: false });
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: false,
@@ -347,8 +400,7 @@ export default function ProfileScreen({ route, navigation }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         await supabase.from('videos').delete().eq('id', video.id);
-        setPublicVideos(prev => prev.filter(v => v.id !== video.id));
-        setPrivateVideos(prev => prev.filter(v => v.id !== video.id));
+        dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
         Alert.alert('Deleted', 'Video has been deleted.');
       }},
     ]);
@@ -366,24 +418,23 @@ export default function ProfileScreen({ route, navigation }) {
         Alert.alert('Permission Denied', 'Please allow access to your media library.');
         return;
       }
-      setIsDownloading(true);
-      setDownloadProgress(0);
+      dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: true, progress: 0 });
       const fileUri = FileSystem.documentDirectory + `balagh_${video.id}.mp4`;
       const downloadResumable = FileSystem.createDownloadResumable(
         video.video_url, fileUri, {},
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          if (totalBytesExpectedToWrite > 0) setDownloadProgress(totalBytesWritten / totalBytesExpectedToWrite);
+          if (totalBytesExpectedToWrite > 0) dispatchUI({ type: 'SET_DOWNLOAD_PROGRESS', progress: totalBytesWritten / totalBytesExpectedToWrite });
         }
       );
       const result = await downloadResumable.downloadAsync();
       if (!result?.uri) throw new Error('Download failed');
       await MediaLibrary.saveToLibraryAsync(result.uri);
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
-      setIsDownloading(false);
+      dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: false, progress: 0 });
       downloadedVideoIds.add(video.id);
       Alert.alert('Downloaded ✅', 'Video saved to your gallery!');
     } catch (e) {
-      setIsDownloading(false);
+      dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: false, progress: 0 });
       Alert.alert('Error', 'Could not download the video. Please try again.');
       __DEV__ && console.error('Download error:', e);
     }
@@ -400,11 +451,11 @@ export default function ProfileScreen({ route, navigation }) {
   }, [showVideoOptionsSheet, isOwnProfile]);
 
   const onRefresh = useCallback(async () => {
-    setRefreshing(true);
+    dispatchUI({ type: 'SET_REFRESHING', refreshing: true });
     try {
       await init();
     } finally {
-      setRefreshing(false);
+      dispatchUI({ type: 'SET_REFRESHING', refreshing: false });
     }
   }, []);
   const openVideo = useCallback((videos, index) => navigation.navigate('ProfileVideos', { videos, startIndex: index }), [navigation]);
@@ -416,7 +467,7 @@ export default function ProfileScreen({ route, navigation }) {
           uri={profile?.avatar_url}
           username={profile?.username}
           size={90}
-          onPress={() => { if (isOwnProfile) setAvatarModal(true); else if (profile?.avatar_url) setEnlargeAvatar(true); }}
+          onPress={() => { if (isOwnProfile) dispatchUI({ type: 'SET_AVATAR_MODAL', open: true }); else if (profile?.avatar_url) dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: true }); }}
         />
         {isScholar && <View style={styles.scholarBadge}><Text style={styles.scholarBadgeText}>✓ Scholar</Text></View>}
       </View>
@@ -527,15 +578,15 @@ export default function ProfileScreen({ route, navigation }) {
       )}
 
       <View style={styles.tabs}>
-        <AnimatedButton style={[styles.tab, activeTab === 'videos' && styles.activeTab]} onPress={() => setActiveTab('videos')}>
+        <AnimatedButton style={[styles.tab, activeTab === 'videos' && styles.activeTab]} onPress={() => dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'videos' })}>
           <Text style={[styles.tabText, activeTab === 'videos' && styles.activeTabText]}>🎥</Text>
         </AnimatedButton>
         {isOwnProfile && (
-          <AnimatedButton style={[styles.tab, activeTab === 'private' && styles.activeTab]} onPress={() => setActiveTab('private')}>
+          <AnimatedButton style={[styles.tab, activeTab === 'private' && styles.activeTab]} onPress={() => dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'private' })}>
             <Text style={[styles.tabText, activeTab === 'private' && styles.activeTabText]}>🔒</Text>
           </AnimatedButton>
         )}
-        <AnimatedButton style={[styles.tab, activeTab === 'liked' && styles.activeTab]} onPress={() => setActiveTab('liked')}>
+        <AnimatedButton style={[styles.tab, activeTab === 'liked' && styles.activeTab]} onPress={() => dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'liked' })}>
           <Text style={[styles.tabText, activeTab === 'liked' && styles.activeTabText]}>❤️</Text>
         </AnimatedButton>
       </View>
@@ -585,26 +636,26 @@ export default function ProfileScreen({ route, navigation }) {
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
 
-      <Modal visible={avatarModal} transparent animationType="slide" onRequestClose={() => setAvatarModal(false)} statusBarTranslucent>
-        <Pressable style={styles.modalBackdrop} onPress={() => setAvatarModal(false)} />
+      <Modal visible={avatarModal} transparent animationType="slide" onRequestClose={() => dispatchUI({ type: 'SET_AVATAR_MODAL', open: false })} statusBarTranslucent>
+        <Pressable style={styles.modalBackdrop} onPress={() => dispatchUI({ type: 'SET_AVATAR_MODAL', open: false })} />
         <View style={styles.modalSheet}>
           <Text style={styles.modalTitle}>Profile Photo</Text>
           {profile?.avatar_url && (
-            <AnimatedButton style={styles.modalOption} onPress={() => { setAvatarModal(false); setEnlargeAvatar(true); }}>
+            <AnimatedButton style={styles.modalOption} onPress={() => { dispatchUI({ type: 'SET_AVATAR_MODAL', open: false }); dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: true }); }}>
               <Text style={styles.modalOptionText}>👁️ View Photo</Text>
             </AnimatedButton>
           )}
           <AnimatedButton style={styles.modalOption} onPress={handleChangeAvatar}>
             <Text style={styles.modalOptionText}>📷 Change Photo</Text>
           </AnimatedButton>
-          <AnimatedButton style={styles.modalOption} onPress={() => setAvatarModal(false)}>
+          <AnimatedButton style={styles.modalOption} onPress={() => dispatchUI({ type: 'SET_AVATAR_MODAL', open: false })}>
             <Text style={[styles.modalOptionText, { color: '#ef4444' }]}>Cancel</Text>
           </AnimatedButton>
         </View>
       </Modal>
 
-      <Modal visible={enlargeAvatar} transparent animationType="fade" onRequestClose={() => setEnlargeAvatar(false)} statusBarTranslucent>
-        <Pressable style={styles.enlargeBackdrop} onPress={() => setEnlargeAvatar(false)}>
+      <Modal visible={enlargeAvatar} transparent animationType="fade" onRequestClose={() => dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: false })} statusBarTranslucent>
+        <Pressable style={styles.enlargeBackdrop} onPress={() => dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: false })}>
           <View style={[styles.enlargeCloseBtn, { top: insets.top + 12 }]}>
             <Text style={styles.enlargeCloseBtnText}>✕</Text>
           </View>

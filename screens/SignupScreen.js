@@ -26,11 +26,6 @@ export default function SignupScreen({ navigation }) {
 
   const { saveAccount } = useBiometricAuth();
 
-  const generateFakeEmail = (username, phone) => {
-    const cleanPhone = phone.replace(/[^0-9]/g, '');
-    return `${username.toLowerCase().trim()}_${cleanPhone}@balagh.app`;
-  };
-
   // Toggle functions with animation
   const togglePassword = () => {
     setShowPassword(!showPassword);
@@ -56,17 +51,16 @@ export default function SignupScreen({ navigation }) {
     if (password.trim().length < 8) { Alert.alert('Weak Password', 'Password must be at least 8 characters.'); return; }
     if (password.trim() !== confirmPassword.trim()) { Alert.alert('Password Mismatch', 'Passwords do not match.'); return; }
 
-    const hasRealEmail = email.trim().length > 0 && email.includes('@');
-    const hasPhone = phone.trim().length > 0;
-
-    if (!hasRealEmail && !hasPhone) {
-      Alert.alert('Missing Field', 'Please enter either your email or phone number to create an account.');
+    if (!email.trim() || !email.includes('@')) {
+      Alert.alert('Email Required', 'Please enter a valid email address to create your account.');
       return;
     }
 
+    const hasPhone = phone.trim().length > 0;
+
     setLoading(true);
 
-    const authEmail = hasRealEmail ? email.trim() : generateFakeEmail(username, phone);
+    const authEmail = email.trim();
 
     const { data, error } = await supabase.auth.signUp({
       email: authEmail,
@@ -127,7 +121,7 @@ export default function SignupScreen({ navigation }) {
         />
         <TextInput
           style={styles.input}
-          placeholder="Email (optional)"
+          placeholder="Email *"
           placeholderTextColor={COLORS.textGray}
           value={email}
           onChangeText={setEmail}
@@ -138,7 +132,7 @@ export default function SignupScreen({ navigation }) {
         />
         <TextInput
           style={styles.input}
-          placeholder="Phone Number (required if no email)"
+          placeholder="Phone Number (optional)"
           placeholderTextColor={COLORS.textGray}
           value={phone}
           onChangeText={setPhone}
@@ -207,8 +201,8 @@ export default function SignupScreen({ navigation }) {
         </View>
 
         <Text style={styles.helperText}>
-          * Username and password are required.{'\n'}
-          Provide either email or phone number to sign up.
+          * Username, email, and password are required.{'\n'}
+          Phone number is optional.
         </Text>
 
         <AnimatedButton style={styles.button} onPress={handleSignup} disabled={loading}>

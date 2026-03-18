@@ -19,6 +19,9 @@ import { COLORS } from '../constants/theme';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
+const TOKEN_SERVER_URL = 'https://balagh-server-production.up.railway.app';
+const TOKEN_EXPIRY_SECONDS = 86400;
+const TOKEN_REFRESH_BUFFER_SECONDS = 300; // refresh if within 5 min of expiry
 const REACTIONS = ['❤️', '🤲', '☪️', '🌟', '👍'];
 const HOST_TIMEOUT_MS = 30000; // ⏱️ TIMEOUT: 30 seconds
 
@@ -120,12 +123,35 @@ export default function WatchLiveScreen({ navigation, route }) {
         .single();
       setUsername(profile?.username ?? 'viewer');
 
-      const token = stream.viewer_token;
+      const rawToken = stream.viewer_token;
 
-      if (!token) {
+      if (!rawToken) {
         Alert.alert('Error', 'Stream token not available.');
         navigation.goBack();
         return;
+      }
+
+      // Check token expiry and refresh if needed
+      let token = rawToken;
+      if (stream?.created_at) {
+        const streamCreatedAt = Math.floor(new Date(stream.created_at).getTime() / 1000);
+        const tokenExpiresAt = streamCreatedAt + TOKEN_EXPIRY_SECONDS;
+        const now = Math.floor(Date.now() / 1000);
+        if (now >= tokenExpiresAt - TOKEN_REFRESH_BUFFER_SECONDS) {
+          __DEV__ && console.log('Viewer token expired or near expiry, fetching fresh token...');
+          try {
+            const response = await fetch(
+              `${TOKEN_SERVER_URL}/token?channelName=${stream.channel_name}&role=subscriber`
+            );
+            const data = await response.json();
+            if (data?.token) {
+              token = data.token;
+              __DEV__ && console.log('Fresh viewer token obtained.');
+            }
+          } catch (e) {
+            __DEV__ && console.warn('Token refresh failed, using existing token:', e);
+          }
+        }
       }
 
       // ✅ REMOVED: No more increment_viewer_count RPC call

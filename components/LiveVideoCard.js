@@ -28,8 +28,10 @@ export default function LiveVideoCard({ stream, onPress }) {
     <TouchableOpacity onPress={onPress} style={styles.container}>
       {/* Thumbnail (actual stream frame) - SHOWS LIVE PREVIEW */}
       <Image
-        source={{ 
-          uri: stream.thumbnail_url || stream.user?.avatar 
+        source={{
+          uri: stream.thumbnail_url || stream.user?.avatar,
+          cache: 'force-cache',
+          headers: { 'Cache-Control': 'max-age=86400' },
         }}
         style={styles.thumbnail}
         resizeMode="cover"
@@ -52,8 +54,12 @@ export default function LiveVideoCard({ stream, onPress }) {
       
       {/* Streamer info */}
       <View style={styles.streamerInfo}>
-        <Image 
-          source={{ uri: stream.user?.avatar }} 
+        <Image
+          source={{
+            uri: stream.user?.avatar,
+            cache: 'force-cache',
+            headers: { 'Cache-Control': 'max-age=86400' },
+          }}
           style={styles.avatar}
         />
         <Text style={styles.username} numberOfLines={1}>
