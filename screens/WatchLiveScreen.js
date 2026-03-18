@@ -108,17 +108,17 @@ export default function WatchLiveScreen({ navigation, route }) {
   }, [joining, hostJoined, hostTimeoutReached, streamEnded]);
 
   async function setup() {
-    try {
-      if (!currentUser) {
-        Alert.alert('Error', 'Please login to watch streams');
-        navigation.goBack();
-        return;
-      }
+    if (!currentUser) {
+      Alert.alert('Error', 'Please login to watch streams');
+      navigation.goBack();
+      return;
+    }
 
+    try {
       const { data: profile } = await supabase
         .from('profiles')
         .select('username')
-        .eq('id', user.id)
+        .eq('id', currentUser.id)
         .single();
       setUsername(profile?.username ?? 'viewer');
 
@@ -142,6 +142,10 @@ export default function WatchLiveScreen({ navigation, route }) {
             const response = await fetch(
               `${TOKEN_SERVER_URL}/token?channelName=${stream.channel_name}&role=subscriber`
             );
+            if (!response.ok) {
+              const text = await response.text();
+              throw new Error(`Token server ${response.status}: ${text.slice(0, 200)}`);
+            }
             const data = await response.json();
             if (data?.token) {
               token = data.token;
@@ -219,7 +223,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         .from('live_questions')
         .select('*', { count: 'exact' })
         .eq('stream_id', stream.id)
-        .eq('user_id', user.id);
+        .eq('user_id', currentUser.id);
       setQuestionsLeft(Math.max(0, (stream.max_questions ?? 5) - (count ?? 0)));
 
       subscribeToChat();
