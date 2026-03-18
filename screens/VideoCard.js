@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
+import { useUser } from '../context/UserContext';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
   useWindowDimensions, Animated, Pressable, Image,
@@ -46,8 +47,8 @@ function VideoCard({
   const [isLiking, setIsLiking] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
-  const [currentUserId, setCurrentUserId] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const { user: authUser, loading: authLoading } = useUser();
+  const currentUserId = authUser?.id ?? null;
   const [paused, setPaused] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [showPauseIcon, setShowPauseIcon] = useState(false);
@@ -148,12 +149,6 @@ function VideoCard({
     setFollowed(initialFollowed); 
   }, [item.user_id]);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentUserId(data.user?.id ?? null);
-      setAuthLoading(false);
-    });
-  }, []);
 
   const handleLike = useCallback(async () => {
     if (!requireAuth() || isLiking) return;
@@ -191,20 +186,18 @@ function VideoCard({
   }, [liked, item, requireAuth, currentUserId, isLiking]);
 
   const handleFollow = useCallback(async () => {
-    if (!requireAuth()) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || user.id === item.user_id) return;
+    if (!requireAuth() || !currentUserId || currentUserId === item.user_id) return;
     const newFollowed = !followed;
     setFollowed(newFollowed);
     if (onFollowChange) onFollowChange(item.user_id, newFollowed);
     const { DeviceEventEmitter } = require('react-native');
     DeviceEventEmitter.emit('followChanged', { userId: item.user_id, isFollowing: newFollowed });
     if (followed) {
-      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', item.user_id);
+      await supabase.from('follows').delete().eq('follower_id', currentUserId).eq('following_id', item.user_id);
     } else {
-      await supabase.from('follows').insert({ follower_id: user.id, following_id: item.user_id });
+      await supabase.from('follows').insert({ follower_id: currentUserId, following_id: item.user_id });
     }
-  }, [followed, item, onFollowChange, requireAuth]);
+  }, [followed, item, currentUserId, onFollowChange, requireAuth]);
 
   const handleTap = useCallback(() => {
     const now = Date.now();
@@ -397,7 +390,6 @@ function VideoCard({
               }
             </View>
           </AnimatedButton>
-          {/* FIX: currentUserId check prevents follow button flash on own videos */}
           <AnimatedButton onPress={handleFollow}>
             {currentUserId && currentUserId !== item.user_id && (
               !followed ? (
