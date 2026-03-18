@@ -4,9 +4,11 @@ import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useUser } from '../context/UserContext';
 
 export default function ApplyScholarScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { user: authUser } = useUser();
   const [fullName,   setFullName]   = useState('');
   const [age,        setAge]        = useState('');
   const [location,   setLocation]   = useState('');
@@ -44,7 +46,7 @@ export default function ApplyScholarScreen({ navigation }) {
     if (!b)            { Alert.alert('Missing Field', 'Bio is required.');                                 return; }
     if (b.length < 30) { Alert.alert('Too Short',     'Bio must be at least 30 characters.');             return; }
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = authUser;
     if (!user) { setLoading(false); Alert.alert('Error', 'You must be logged in to apply.'); return; }
 
     const { data: existing } = await supabase
