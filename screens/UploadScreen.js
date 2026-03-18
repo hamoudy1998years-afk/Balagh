@@ -12,12 +12,14 @@ import { COLORS } from '../constants/theme';
 import { Linking } from 'react-native';
 import ModernDialog from './ModernDialog';
 import { decode } from 'base64-arraybuffer';
+import { useUser } from '../context/UserContext';
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
 
 export default function UploadScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { user: authUser } = useUser();
   const [video, setVideo] = useState(null);
   const [thumbnailUri, setThumbnailUri] = useState(null); // NEW: store thumbnail preview
   const [generatingThumb, setGeneratingThumb] = useState(false); // NEW: loading state
@@ -57,7 +59,7 @@ export default function UploadScreen({ navigation }) {
       setIsScholar(cached.is_scholar);
       setScholarChecked(true);
     }
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = authUser;
     if (!user) return;
     const { data } = await supabase.from('profiles').select('is_scholar').eq('id', user.id).single();
     setIsScholar(data?.is_scholar ?? false);
@@ -155,7 +157,7 @@ export default function UploadScreen({ navigation }) {
     setProgressPercent(0);
     setProgressLabel('Uploading video...');
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = authUser;
     if (!user) {
       setDialog({
         visible: true,
