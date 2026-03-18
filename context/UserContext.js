@@ -21,7 +21,12 @@ export function UserProvider({ children }) {
 
     const { data: { user: freshUser } } = await supabase.auth.getUser();
     if (freshUser) {
-      const mergedUser = { ...freshUser, ...cached };
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', freshUser.id)
+        .single();
+      const mergedUser = { ...cached, ...freshUser, ...profile };
       setUser(mergedUser);
       await userCache.set(mergedUser);
     }
