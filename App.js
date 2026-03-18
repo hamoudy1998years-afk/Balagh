@@ -365,7 +365,7 @@ export default function App() {
           <SafeAreaProvider>
             <BottomSheetModalProvider>
               <NavigationContainer ref={navigationRef} linking={linking}>
-                <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
+                <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }} initialRouteName={session ? 'Main' : 'Login'}>
                   <Stack.Screen name="Main">
                     {() => <MainTabs session={session} />}
                   </Stack.Screen>
