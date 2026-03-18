@@ -46,7 +46,7 @@ setInterval(() => {
 // Apply rate limit to token endpoint
 app.get('/token', rateLimit, (req, res) => {
   const channelName = req.query.channelName;
-  const uid = req.query.uid || 0;
+  const uid = parseInt(req.query.uid, 10) || 0;
   const role = req.query.role === 'publisher' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
   const expirationTimeInSeconds = 86400; // 24 hours
   const currentTimestamp = Math.floor(Date.now() / 1000);
@@ -56,16 +56,25 @@ app.get('/token', rateLimit, (req, res) => {
     return res.status(400).json({ error: 'channelName is required' });
   }
 
-  const token = RtcTokenBuilder.buildTokenWithUid(
-    process.env.AGORA_APP_ID,
-    process.env.AGORA_APP_CERTIFICATE,
-    channelName,
-    uid,
-    role,
-    privilegeExpiredTs
-  );
+  if (!process.env.AGORA_APP_ID || !process.env.AGORA_APP_CERTIFICATE) {
+    console.error('Missing AGORA_APP_ID or AGORA_APP_CERTIFICATE env vars');
+    return res.status(500).json({ error: 'Server misconfiguration' });
+  }
 
-  res.json({ token, uid, channelName });
+  try {
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      process.env.AGORA_APP_ID,
+      process.env.AGORA_APP_CERTIFICATE,
+      channelName,
+      uid,
+      role,
+      privilegeExpiredTs
+    );
+    res.json({ token, uid, channelName });
+  } catch (e) {
+    console.error('Token generation failed:', e.message);
+    res.status(500).json({ error: 'Failed to generate token' });
+  }
 });
 
 // Health check endpoint
