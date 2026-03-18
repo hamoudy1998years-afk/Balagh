@@ -243,7 +243,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       const { data: stream, error: streamError } = await supabase
         .from('live_streams')
         .insert({
-          user_id: user.id,
+          user_id: currentUser.id,
           title,
           channel_name: channel,
           max_questions: maxQuestions,
