@@ -78,15 +78,17 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
-    if (hasPhone && data?.user) {
+    if (data?.user) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      const { error: phoneError } = await supabase
+      const profileUpdate = { username: username.trim() };
+      if (hasPhone) profileUpdate.phone = phone.trim();
+      const { error: profileError } = await supabase
         .from('profiles')
-        .update({ phone: phone.trim() })
+        .update(profileUpdate)
         .eq('id', data.user.id);
-      if (phoneError) {
-        __DEV__ && console.warn('Phone save failed:', phoneError.message);
-        Alert.alert('Note', 'Account created but phone number could not be saved. You can update it in your profile.');
+      if (profileError) {
+        __DEV__ && console.warn('Profile save failed:', profileError.message);
+        Alert.alert('Note', 'Account created but profile could not be saved. You can update it in your profile.');
       }
     }
 
