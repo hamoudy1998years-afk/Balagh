@@ -212,6 +212,7 @@ export default function LoginScreen({ navigation }) {
               setUser(mergedUser);
             }
             setLoading(false);
+            await new Promise(resolve => setTimeout(resolve, 100));
             navigation.navigate('Main');
             return;
           }
