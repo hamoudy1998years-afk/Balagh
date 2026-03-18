@@ -1,10 +1,11 @@
 import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image, ScrollView, useWindowDimensions } from 'react-native';
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import { useUser } from '../context/UserContext';
 
 const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
@@ -60,18 +61,13 @@ export default function SearchScreen({ navigation }) {
   const [videoResults, setVideoResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [currentUserId, setCurrentUserId] = useState(null);
+  const { user: authUser } = useUser();
+  const currentUserId = authUser?.id ?? null;
   const [followingIds, setFollowingIds] = useState(new Set());
   const scrollRef = useRef(null);
   const searchTimeout = useRef(null);
 
   const ITEM_SIZE = (width - 2) / 3;
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
-    });
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
