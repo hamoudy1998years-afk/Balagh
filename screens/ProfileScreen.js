@@ -210,6 +210,7 @@ export default function ProfileScreen({ route, navigation }) {
     }, [])
   );
 
+  // Re-run when screen is focused (globalUser already loaded by then)
   useFocusEffect(
     useCallback(() => {
       if (globalUser && !hasLoaded.current) {
@@ -218,6 +219,14 @@ export default function ProfileScreen({ route, navigation }) {
       }
     }, [globalUser])
   );
+
+  // Re-run when globalUser loads after the screen is already focused
+  useEffectHook(() => {
+    if (globalUser && !hasLoaded.current) {
+      hasLoaded.current = true;
+      init();
+    }
+  }, [globalUser]);
 
   useEffectHook(() => {
     hasLoaded.current = false;
