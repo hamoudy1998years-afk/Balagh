@@ -230,7 +230,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   useEffectHook(() => {
     hasLoaded.current = false;
-  }, [targetUserId]);
+  }, [targetUserId, globalUser?.id]);
 
   async function init() {
     dispatchProfile({ type: 'RESET' });
