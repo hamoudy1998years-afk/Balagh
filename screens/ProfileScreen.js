@@ -213,6 +213,7 @@ export default function ProfileScreen({ route, navigation }) {
   // Re-run when screen is focused (globalUser already loaded by then)
   useFocusEffect(
     useCallback(() => {
+      __DEV__ && console.log('[ProfileScreen] useFocusEffect - globalUser:', globalUser?.id, 'hasLoaded:', hasLoaded.current);
       if (globalUser && !hasLoaded.current) {
         hasLoaded.current = true;
         init();
@@ -222,6 +223,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   // Re-run when globalUser loads after the screen is already focused
   useEffectHook(() => {
+    __DEV__ && console.log('[ProfileScreen] useEffect[globalUser] - globalUser:', globalUser?.id, 'hasLoaded:', hasLoaded.current);
     if (globalUser && !hasLoaded.current) {
       hasLoaded.current = true;
       init();
@@ -229,16 +231,19 @@ export default function ProfileScreen({ route, navigation }) {
   }, [globalUser]);
 
   useEffectHook(() => {
+    __DEV__ && console.log('[ProfileScreen] reset hasLoaded - targetUserId:', targetUserId, 'globalUser.id:', globalUser?.id);
     hasLoaded.current = false;
   }, [targetUserId, globalUser?.id]);
 
   async function init() {
+    __DEV__ && console.log('[ProfileScreen] init() called - globalUser:', globalUser?.id, 'targetUserId:', targetUserId);
     dispatchProfile({ type: 'RESET' });
     dispatchVideo({ type: 'RESET' });
 
     if (globalUser) {
       const viewingId = targetUserId ?? globalUser.id;
       const ownProfile = viewingId === globalUser.id;
+      __DEV__ && console.log('[ProfileScreen] loading profile for userId:', viewingId, 'isOwnProfile:', ownProfile);
       dispatchProfile({ type: 'SET_USER', currentUser: globalUser, isOwnProfile: ownProfile });
       dispatchUI({ type: 'SET_LOADING', loading: false });
 
