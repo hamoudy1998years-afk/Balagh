@@ -9,6 +9,7 @@ import { userCache } from '../utils/userCache';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
 import { clearFeedCache } from './HomeScreen';
+import { useUser } from '../context/UserContext';
 
 const ACCENT     = COLORS.gold;
 const ACCENT_DIM = `${COLORS.gold}18`;
@@ -151,10 +152,10 @@ function SavingBanner({ visible }) {
 
 export default function SettingsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { user: currentUser } = useUser();
   const [screen, setScreen] = useState(null);
 
   const [profile,     setProfile]     = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
 
   const [notifAll,       setNotifAll]       = useState(true);
   const [notifComments,  setNotifComments]  = useState(true);
@@ -192,13 +193,11 @@ export default function SettingsScreen({ navigation }) {
   }, [screen]);
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setCurrentUser(user);
+    if (!currentUser) return;
     const { data } = await supabase
       .from('profiles')
       .select('username, full_name, avatar_url, phone, notif_all, notif_comments, notif_likes, notif_followers, notif_messages, comment_permission, show_likes')
-      .eq('id', user.id)
+      .eq('id', currentUser.id)
       .single();
     if (data) {
       setProfile(data);
@@ -295,9 +294,8 @@ export default function SettingsScreen({ navigation }) {
     Alert.alert('Reset Password', 'Send a password reset link to your email?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Send Link', onPress: async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user?.email) {
-          await supabase.auth.resetPasswordForEmail(user.email);
+        if (currentUser?.email) {
+          await supabase.auth.resetPasswordForEmail(currentUser.email);
           Alert.alert('Sent! ✉️', 'Check your email for the reset link.');
         }
       }},
