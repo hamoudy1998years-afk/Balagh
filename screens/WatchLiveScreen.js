@@ -16,6 +16,7 @@ import AnimatedButton from './AnimatedButton';
 import { useViewerTracking } from '../hooks/useViewerTracking';
 import { useViewerCount } from '../hooks/useViewerCount';
 import { COLORS } from '../constants/theme';
+import { useUser } from '../context/UserContext';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
@@ -39,7 +40,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [chatInput, setChatInput] = useState('');
   const [questionInput, setQuestionInput] = useState('');
   const [activeTab, setActiveTab] = useState('chat');
-  const [currentUser, setCurrentUser] = useState(null);
+  const { user: currentUser } = useUser();
   const [username, setUsername] = useState('');
   const [questionsLeft, setQuestionsLeft] = useState(stream.max_questions ?? 5);
   const [floatingReactions, setFloatingReactions] = useState([]);
@@ -108,13 +109,11 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   async function setup() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      if (!currentUser) {
         Alert.alert('Error', 'Please login to watch streams');
         navigation.goBack();
         return;
       }
-      setCurrentUser(user);
 
       const { data: profile } = await supabase
         .from('profiles')
