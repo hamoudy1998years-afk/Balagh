@@ -2,12 +2,6 @@ const express = require('express');
 const { RtcTokenBuilder, RtcRole } = require('agora-token');
 const cors = require('cors');
 require('dotenv').config();
-console.log('ENV CHECK:', JSON.stringify({
-  hasAppId: !!process.env.AGORA_APP_ID,
-  hasCert: !!process.env.AGORA_APP_CERTIFICATE,
-  nodeEnv: process.env.NODE_ENV,
-  allAgoraKeys: Object.keys(process.env).filter(k => k.toLowerCase().includes('agora'))
-}));
 
 const app = express();
 app.set('trust proxy', true);
