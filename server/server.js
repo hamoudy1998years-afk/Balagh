@@ -1,10 +1,28 @@
 const express = require('express');
 const { RtcTokenBuilder, RtcRole } = require('agora-token');
 const cors = require('cors');
+const helmet = require('helmet');
 require('dotenv').config();
 
 const app = express();
 app.set('trust proxy', true);
+
+// Force HTTPS in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, 'https://' + req.headers.host + req.url);
+    }
+    next();
+  });
+}
+
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: false, // Allow Agora/Supabase connections
+  crossOriginEmbedderPolicy: false
+}));
+
 app.use(cors());
 app.use(express.json());
 
