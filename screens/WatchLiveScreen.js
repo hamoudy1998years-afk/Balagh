@@ -430,6 +430,14 @@ export default function WatchLiveScreen({ navigation, route }) {
     }
   }
 
+  const handleTabChat = React.useCallback(() => {
+    setActiveTab('chat');
+  }, []);
+
+  const handleTabQuestion = React.useCallback(() => {
+    setActiveTab('question');
+  }, []);
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -444,7 +452,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       <View style={styles.loadingContainer}>
         <Text style={{ fontSize: 48 }}>🎙️</Text>
         <Text style={styles.loadingText}>Stream has ended</Text>
-        <AnimatedButton style={styles.goBackBtn} onPress={() => navigation.goBack()}>
+        <AnimatedButton style={styles.goBackBtn} onPress={navigation.goBack}>
           <Text style={styles.goBackBtnText}>Go Back</Text>
         </AnimatedButton>
       </View>
@@ -477,7 +485,7 @@ export default function WatchLiveScreen({ navigation, route }) {
           <AnimatedButton style={styles.retryBtn} onPress={handleRetryJoin}>
             <Text style={styles.retryBtnText}>🔄 Try Again</Text>
           </AnimatedButton>
-          <AnimatedButton style={[styles.retryBtn, { backgroundColor: '#4b5563', marginTop: 8 }]} onPress={() => navigation.goBack()}>
+          <AnimatedButton style={[styles.retryBtn, { backgroundColor: '#4b5563', marginTop: 8 }]} onPress={navigation.goBack}>
             <Text style={styles.retryBtnText}>← Go Back</Text>
           </AnimatedButton>
         </View>
@@ -508,7 +516,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         <View style={styles.viewerBadge}>
           <Text style={styles.viewerText}>👁️ {viewerCount}</Text>
         </View>
-        <AnimatedButton style={styles.closeBtn} onPress={() => navigation.goBack()}>
+        <AnimatedButton style={styles.closeBtn} onPress={navigation.goBack}>
           <Text style={styles.closeBtnText}>✕</Text>
         </AnimatedButton>
       </View>
@@ -522,10 +530,10 @@ export default function WatchLiveScreen({ navigation, route }) {
 
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
         <View style={styles.tabs}>
-          <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={() => setActiveTab('chat')}>
+          <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={handleTabChat}>
             <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>💬 Chat</Text>
           </AnimatedButton>
-          <AnimatedButton style={[styles.tab, activeTab === 'question' && styles.tabActive]} onPress={() => setActiveTab('question')}>
+          <AnimatedButton style={[styles.tab, activeTab === 'question' && styles.tabActive]} onPress={handleTabQuestion}>
             <Text style={[styles.tabText, activeTab === 'question' && styles.tabTextActive]}>❓ Ask ({questionsLeft} left)</Text>
           </AnimatedButton>
         </View>

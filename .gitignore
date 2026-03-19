@@ -40,3 +40,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Keep iOS Privacy Manifest (required for App Store)
+!ios/Bushrann/PrivacyInfo.xcprivacy
+!ios/PRIVACY_MANIFEST.md
+
+# asset compression backups
+assets/*.backup

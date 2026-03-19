@@ -121,7 +121,7 @@ export default function AvatarCropScreen({ route, navigation }) {
 
       {/* Top bar */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.topBtn}>
+        <TouchableOpacity onPress={navigation.goBack} style={styles.topBtn}>
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
         <Text style={styles.topTitle}>Move and Scale</Text>

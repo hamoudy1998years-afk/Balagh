@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, FlatList, RefreshControl, Dimensions } from 'react-native';
 import { supabase } from '../lib/supabase';
 import LiveVideoCard from '../components/LiveVideoCard';
+import { ROUTES } from '../constants/routes';
 
 const { width } = Dimensions.get('window');
 const numColumns = 2;
@@ -47,7 +48,7 @@ export default function LiveFeedScreen({ navigation }) {
             <View style={{ width: width / numColumns - 4, margin: 4 }}>
               <LiveVideoCard 
                 stream={item} 
-                onPress={() => navigation.navigate('WatchLive', { 
+                onPress={() => navigation.navigate(ROUTES.WATCH_LIVE, { 
                   stream: {
                     ...item,
                     viewer_token: item.viewer_token

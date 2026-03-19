@@ -65,7 +65,7 @@ export default function VideoDetailScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <TouchableOpacity
-        onPress={() => navigation.goBack()}
+        onPress={navigation.goBack}
         style={styles.backBtn}
       >
         <Text style={styles.backText}>←</Text>

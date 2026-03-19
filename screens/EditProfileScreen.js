@@ -138,6 +138,10 @@ export default function EditProfileScreen({ navigation }) {
     }, 150);
   }
 
+  const handleCloseDialog = useCallback(() => {
+    setDialog(prev => ({ ...prev, visible: false }));
+  }, []);
+
   if (loading) {
     return <View style={epStyles.loadingContainer}><ActivityIndicator color={COLORS.gold} size="large" /></View>;
   }
@@ -153,7 +157,7 @@ export default function EditProfileScreen({ navigation }) {
         scrollEnabled={true}
       >
         <View style={epStyles.headerRow}>
-          <AnimatedButton onPress={() => navigation.goBack()} style={epStyles.backBtn}>
+          <AnimatedButton onPress={navigation.goBack} style={epStyles.backBtn}>
             <Text style={epStyles.backBtnText}>←</Text>
           </AnimatedButton>
           <Text style={epStyles.title}>Edit Profile</Text>
@@ -268,7 +272,7 @@ export default function EditProfileScreen({ navigation }) {
           <Text style={epStyles.saveBtnText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
         </AnimatedButton>
 
-        <AnimatedButton style={epStyles.cancelBtn} onPress={() => navigation.goBack()}>
+        <AnimatedButton style={epStyles.cancelBtn} onPress={navigation.goBack}>
           <Text style={epStyles.cancelBtnText}>Cancel</Text>
         </AnimatedButton>
 
@@ -278,7 +282,7 @@ export default function EditProfileScreen({ navigation }) {
           message={dialog.message}
           type={dialog.type}
           buttons={dialog.buttons}
-          onDismiss={() => setDialog({ ...dialog, visible: false })}
+          onDismiss={handleCloseDialog}
         />
       </ScrollView>
     </View>

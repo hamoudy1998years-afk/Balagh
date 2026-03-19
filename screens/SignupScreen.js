@@ -3,11 +3,12 @@ import {
   Alert, ScrollView, KeyboardAvoidingView, Platform,
   TouchableOpacity, Animated,
 } from 'react-native';
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function SignupScreen({ navigation }) {
@@ -95,15 +96,20 @@ export default function SignupScreen({ navigation }) {
     await saveAccount(username.trim(), authEmail, 'email');
 
     setLoading(false);
+
     Alert.alert('Account Created! 🎉', 'Your account is ready. You can now log in.', [
-      { text: 'Go to Login', onPress: () => navigation.navigate('Login') }
+      { text: 'Go to Login', onPress: () => navigation.navigate(ROUTES.LOGIN) }
     ]);
   }
+
+  const handleNavigateLogin = useCallback(() => {
+    navigation.navigate(ROUTES.LOGIN);
+  }, [navigation]);
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <AnimatedButton onPress={() => navigation.goBack()} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+        <AnimatedButton onPress={navigation.goBack} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
           <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
         </AnimatedButton>
 
@@ -215,7 +221,7 @@ export default function SignupScreen({ navigation }) {
           <Text style={styles.buttonText}>{loading ? 'Creating account...' : 'Create Account'}</Text>
         </AnimatedButton>
 
-        <AnimatedButton onPress={() => navigation.navigate('Login')}>
+        <AnimatedButton onPress={handleNavigateLogin}>
           <Text style={styles.link}>
             Already have an account?{' '}
             <Text style={styles.linkBold}>Login</Text>

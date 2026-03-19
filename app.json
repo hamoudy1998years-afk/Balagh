@@ -15,11 +15,13 @@
     },
     "ios": {
       "supportsTablet": false,
-      "facebookAppId": "26245191448425849",
+      "facebookAppId": "${EXPO_PUBLIC_FACEBOOK_APP_ID}",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Bushrann to access your photos to update your profile picture.",
         "NSPhotoLibraryAddUsageDescription": "Allow Bushrann to save videos to your photo library.",
-        "NSCameraUsageDescription": "Allow Bushrann to access your camera to take a profile photo."
+        "NSCameraUsageDescription": "Allow Bushrann to access your camera to take a profile photo and record videos.",
+        "NSMicrophoneUsageDescription": "Allow Bushrann to access your microphone for live streaming and video recording.",
+        "NSFaceIDUsageDescription": "Allow Bushrann to use Face ID for secure and quick sign in."
       }
     },
     "android": {
@@ -35,7 +37,7 @@
       },
       "package": "com.bushrann.app",
       "googleServicesFile": "./android/app/google-services.json",
-      "facebookAppId": "26245191448425849",
+      "facebookAppId": "${EXPO_PUBLIC_FACEBOOK_APP_ID}",
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",

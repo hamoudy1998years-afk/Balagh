@@ -81,7 +81,7 @@ export default function ApplyScholarScreen({ navigation }) {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
-      <AnimatedButton onPress={() => navigation.goBack()} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+      <AnimatedButton onPress={navigation.goBack} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
         <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
       </AnimatedButton>
 
@@ -110,7 +110,7 @@ export default function ApplyScholarScreen({ navigation }) {
         <Text style={styles.submitBtnText}>{loading ? 'Submitting...' : 'Submit Application'}</Text>
       </AnimatedButton>
 
-      <AnimatedButton style={styles.cancelBtn} onPress={() => navigation.goBack()}>
+      <AnimatedButton style={styles.cancelBtn} onPress={navigation.goBack}>
         <Text style={styles.cancelBtnText}>Cancel</Text>
       </AnimatedButton>
     </ScrollView>

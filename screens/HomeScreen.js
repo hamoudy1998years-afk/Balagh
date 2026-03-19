@@ -12,6 +12,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import LiveVideoCard from '../components/LiveVideoCard';
 import { useVideoPlayerPool } from '../components/VideoPlayerPool';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 
 // ── Simple in-memory feed cache ────────────────────────────────────────────────
@@ -120,7 +121,7 @@ function LiveFeed({ navigation }) {
           <View style={{ width: width / 2 - 8, margin: 4 }}>
             <LiveVideoCard
               stream={item}
-              onPress={() => item.is_live && navigation.navigate('WatchLive', { stream: item })}
+              onPress={item.is_live ? () => navigation.navigate(ROUTES.WATCH_LIVE, { stream: item }) : undefined}
             />
           </View>
         )}
@@ -402,7 +403,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         <Text style={styles.emptyIcon}>⚠️</Text>
         <Text style={styles.loadingText}>Couldn't load videos</Text>
         <Text style={styles.emptySubtext}>Check your connection and try again.</Text>
-        <AnimatedButton style={styles.retryBtn} onPress={() => loadVideos()}>
+        <AnimatedButton style={styles.retryBtn} onPress={loadVideos}>
           <Text style={styles.retryBtnText}>Retry</Text>
         </AnimatedButton>
       </View>
@@ -660,7 +661,7 @@ export default function HomeScreen({ navigation }) {
               );
             })}
           </View>
-          <AnimatedButton onPress={() => navigation.navigate('Search')}>
+          <AnimatedButton onPress={() => navigation.navigate(ROUTES.SEARCH)}>
             <Text style={{ fontSize: 22 }}>🔍</Text>
           </AnimatedButton>
         </View>

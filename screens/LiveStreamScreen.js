@@ -28,8 +28,18 @@ const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 // 🔧 FIXED: Removed trailing space
 const THUMBNAIL_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 
+// 🔍 DEBUG: Log environment variables on module load
+__DEV__ && console.log('📹 [LiveStreamScreen] Module loaded');
+__DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID exists:', !!AGORA_APP_ID);
+__DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID length:', AGORA_APP_ID?.length);
+__DEV__ && console.log('📹 [LiveStreamScreen] THUMBNAIL_SERVER_URL exists:', !!THUMBNAIL_SERVER_URL);
+
 async function getAgoraToken(channelName, uid, role) {
-  __DEV__ && console.log('🚀 Fetching token...');
+  __DEV__ && console.log('🚀 [getAgoraToken] Fetching token...');
+  __DEV__ && console.log('🚀 [getAgoraToken] Channel:', channelName);
+  __DEV__ && console.log('🚀 [getAgoraToken] UID:', uid);
+  __DEV__ && console.log('🚀 [getAgoraToken] Role:', role);
+  __DEV__ && console.log('🚀 [getAgoraToken] Server URL:', THUMBNAIL_SERVER_URL);
   const fetchWithTimeout = (url, options, timeout = 10000) => {
     return Promise.race([
       fetch(url, options),
@@ -49,10 +59,14 @@ async function getAgoraToken(channelName, uid, role) {
       throw new Error(`Token server ${response.status}: ${text.slice(0, 200)}`);
     }
     const data = await response.json();
-    __DEV__ && console.log('✅ Token received:', data.token ? 'YES' : 'NO');
+    __DEV__ && console.log('✅ [getAgoraToken] Token received:', data.token ? 'YES' : 'NO');
+    __DEV__ && console.log('✅ [getAgoraToken] Token length:', data.token?.length);
+    __DEV__ && console.log('✅ [getAgoraToken] Response UID:', data.uid);
+    __DEV__ && console.log('✅ [getAgoraToken] Response channel:', data.channelName);
     return data.token;
   } catch (error) {
-    __DEV__ && console.error('❌ Token error:', error);
+    __DEV__ && console.error('❌ [getAgoraToken] Error:', error.message);
+    __DEV__ && console.error('❌ [getAgoraToken] Error stack:', error.stack);
     return null;
   }
 }
@@ -142,6 +156,9 @@ export default function LiveStreamScreen({ navigation, route }) {
   const { enabled: showEngagedTab } = useFeatureFlag('engaged_viewers_tab');
 
   useEffect(() => {
+      __DEV__ && console.log('📹 [LiveStreamScreen] Component MOUNTED');
+      __DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID valid:', !!AGORA_APP_ID && AGORA_APP_ID.length === 32);
+      
       // REMOVED: setup() - now called manually when pressing "Start Streaming"
       appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
         if (nextAppState === 'background' || nextAppState === 'inactive') {
@@ -177,34 +194,67 @@ export default function LiveStreamScreen({ navigation, route }) {
     }, []);
 
   async function requestPermissions() {
+    __DEV__ && console.log('🔐 [requestPermissions] Checking permissions...');
+    
     if (Platform.OS === 'android') {
+      __DEV__ && console.log('🔐 [requestPermissions] Android detected, requesting permissions...');
       const results = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.CAMERA,
         PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
       ]);
-      if (results[PermissionsAndroid.PERMISSIONS.CAMERA] !== PermissionsAndroid.RESULTS.GRANTED) {
-        __DEV__ && console.log('❌ Camera permission denied');
+      
+      const cameraGranted = results[PermissionsAndroid.PERMISSIONS.CAMERA] === PermissionsAndroid.RESULTS.GRANTED;
+      const audioGranted = results[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED;
+      
+      __DEV__ && console.log('🔐 [requestPermissions] Camera granted:', cameraGranted);
+      __DEV__ && console.log('🔐 [requestPermissions] Audio granted:', audioGranted);
+      
+      if (!cameraGranted) {
+        __DEV__ && console.log('❌ [requestPermissions] Camera permission DENIED');
         Alert.alert('Permission Required', 'Camera permission is needed to stream');
         return false;
       }
+      
+      if (!audioGranted) {
+        __DEV__ && console.log('⚠️ [requestPermissions] Audio permission DENIED (camera ok, continuing)');
+      }
+      
+      __DEV__ && console.log('✅ [requestPermissions] All required permissions granted');
+    } else {
+      __DEV__ && console.log('🔐 [requestPermissions] iOS detected, permissions checked via Info.plist');
     }
     return true;
   }
 
   function switchCamera() {
+    __DEV__ && console.log('🎥 [switchCamera] Switching camera...');
+    __DEV__ && console.log('🎥 [switchCamera] Engine exists:', !!engineRef.current);
+    
     if (engineRef.current) {
-      engineRef.current.switchCamera();
-      setIsFrontCamera(!isFrontCamera);
+      try {
+        engineRef.current.switchCamera();
+        setIsFrontCamera(!isFrontCamera);
+        __DEV__ && console.log('✅ [switchCamera] Camera switched to:', !isFrontCamera ? 'front' : 'back');
+      } catch (e) {
+        __DEV__ && console.error('❌ [switchCamera] Error:', e);
+      }
+    } else {
+      __DEV__ && console.warn('⚠️ [switchCamera] No engine available');
     }
   }
 
   async function setup() {
+    __DEV__ && console.log('🎬 [setup] ========== SETUP STARTED ==========');
+    __DEV__ && console.log('🎬 [setup] currentUser exists:', !!currentUser);
+    
     if (!currentUser) {
+      __DEV__ && console.log('❌ [setup] No currentUser, aborting');
       setIsStarting(false);
       return;
     }
 
     const hasPermission = await requestPermissions();
+    __DEV__ && console.log('🎬 [setup] Permissions result:', hasPermission);
     if (!hasPermission) {
       setIsStarting(false); // 🔧 FIXED: Reset button state
       return;
@@ -227,13 +277,19 @@ export default function LiveStreamScreen({ navigation, route }) {
 
       const channel = `bushrann_${currentUser.id}_${Date.now()}`;
       currentChannelRef.current = channel;
+      __DEV__ && console.log('🎬 [setup] Channel name:', channel);
 
+      __DEV__ && console.log('🎬 [setup] Fetching tokens...');
       const [hostToken, viewerToken] = await Promise.all([
         getAgoraToken(channel, 1, 'host'),
         getAgoraToken(channel, 0, 'audience')
       ]);
 
+      __DEV__ && console.log('🎬 [setup] Host token received:', !!hostToken);
+      __DEV__ && console.log('🎬 [setup] Viewer token received:', !!viewerToken);
+
       if (!hostToken) {
+        __DEV__ && console.log('❌ [setup] No host token, aborting');
         Alert.alert('Error', 'Could not get streaming token. Please try again.');
         setIsStarting(false); // 🔧 FIXED: Reset button state
         navigation.goBack();
@@ -266,13 +322,29 @@ export default function LiveStreamScreen({ navigation, route }) {
       setStreamId(currentStreamId);
       currentStreamIdRef.current = currentStreamId;
 
+      __DEV__ && console.log('🎬 [setup] Creating Agora engine...');
       const engine = createAgoraRtcEngine();
       engineRef.current = engine;
-      engine.initialize({ appId: AGORA_APP_ID });
+      __DEV__ && console.log('🎬 [setup] Engine created:', !!engine);
+      
+      __DEV__ && console.log('🎬 [setup] Initializing Agora SDK...');
+      __DEV__ && console.log('🎬 [setup] Using APP_ID:', AGORA_APP_ID?.substring(0, 8) + '...');
+      
+      try {
+        const initResult = engine.initialize({ appId: AGORA_APP_ID });
+        __DEV__ && console.log('🎬 [setup] Agora SDK initialized, result:', initResult);
+      } catch (initError) {
+        __DEV__ && console.error('❌ [setup] Agora SDK initialization FAILED:', initError);
+        throw initError;
+      }
 
+      __DEV__ && console.log('🎬 [setup] Registering event handlers...');
+      
       engine.registerEventHandler({
         onJoinChannelSuccess: (connection, elapsed) => {
-          __DEV__ && console.log('✅ Joined channel:', connection.channelId, 'uid:', connection.localUid);
+          __DEV__ && console.log('✅ [Agora] Joined channel:', connection.channelId);
+          __DEV__ && console.log('✅ [Agora] Local UID:', connection.localUid);
+          __DEV__ && console.log('✅ [Agora] Elapsed time:', elapsed);
 
           snapshotTimeoutRef.current = setTimeout(() => {
             // 🔧 FIXED: Use platform-specific path
@@ -287,7 +359,10 @@ export default function LiveStreamScreen({ navigation, route }) {
         },
 
         onSnapshotTaken: (connection, uid, filePath, width, height, errCode) => {
-          __DEV__ && console.log('📸 Snapshot taken! uid:', uid, 'Path:', filePath, 'Error:', errCode);
+          __DEV__ && console.log('📸 [Agora] Snapshot taken! uid:', uid);
+          __DEV__ && console.log('📸 [Agora] Path:', filePath);
+          __DEV__ && console.log('📸 [Agora] Dimensions:', width, 'x', height);
+          __DEV__ && console.log('📸 [Agora] Error code:', errCode);
           if (errCode === 0 && filePath) {
             uploadThumbnail(filePath, currentStreamIdRef.current);
           } else {
@@ -296,24 +371,57 @@ export default function LiveStreamScreen({ navigation, route }) {
         },
 
         onError: (errCode, msg) => {
-          __DEV__ && console.log('❌ Agora error:', errCode, msg);
+          __DEV__ && console.error('❌ [Agora] SDK Error - Code:', errCode, 'Message:', msg);
         },
         onLocalVideoStateChanged: (state, error) => {
-          __DEV__ && console.log('📹 Local video state:', state, 'error:', error);
+          __DEV__ && console.log('📹 [Agora] Local video state:', state, 'error:', error);
+          __DEV__ && console.log('📹 [Agora] State meaning:', state === 0 ? 'Stopped' : state === 1 ? 'Capturing' : state === 2 ? 'Encoding' : 'Unknown');
+        },
+        onUserJoined: (connection, uid, elapsed) => {
+          __DEV__ && console.log('👤 [Agora] User joined - UID:', uid);
+        },
+        onUserOffline: (connection, uid, reason) => {
+          __DEV__ && console.log('👋 [Agora] User offline - UID:', uid, 'Reason:', reason);
+        },
+        onConnectionStateChanged: (connection, state, reason) => {
+          __DEV__ && console.log('🔗 [Agora] Connection state:', state, 'Reason:', reason);
         }
       });
 
+      __DEV__ && console.log('🎬 [setup] Setting channel profile to LIVE BROADCASTING');
       engine.setChannelProfile(ChannelProfileType.ChannelProfileLiveBroadcasting);
+      
+      __DEV__ && console.log('🎬 [setup] Setting client role to BROADCASTER');
       engine.setClientRole(ClientRoleType.ClientRoleBroadcaster);
-      engine.enableVideo();
-      engine.startPreview();
+      
+      __DEV__ && console.log('🎬 [setup] Enabling video...');
+      const videoEnableResult = engine.enableVideo();
+      __DEV__ && console.log('🎬 [setup] enableVideo result:', videoEnableResult);
+      
+      __DEV__ && console.log('🎬 [setup] Starting camera preview...');
+      const previewResult = engine.startPreview();
+      __DEV__ && console.log('🎬 [setup] startPreview result:', previewResult);
+      
+      __DEV__ && console.log('🎬 [setup] Is front camera:', isFrontCamera);
 
-      await engine.joinChannel(hostToken, channel, 1, {
-        clientRoleType: ClientRoleType.ClientRoleBroadcaster,
-        publishCameraTrack: true,
-        publishMicrophoneTrack: true,
-      });
+      __DEV__ && console.log('🎬 [setup] Joining Agora channel...');
+      __DEV__ && console.log('🎬 [setup] Channel:', channel);
+      __DEV__ && console.log('🎬 [setup] UID: 1');
+      __DEV__ && console.log('🎬 [setup] Token length:', hostToken?.length);
+      
+      try {
+        const joinResult = await engine.joinChannel(hostToken, channel, 1, {
+          clientRoleType: ClientRoleType.ClientRoleBroadcaster,
+          publishCameraTrack: true,
+          publishMicrophoneTrack: true,
+        });
+        __DEV__ && console.log('🎬 [setup] joinChannel result:', joinResult);
+      } catch (joinError) {
+        __DEV__ && console.error('❌ [setup] joinChannel FAILED:', joinError);
+        throw joinError;
+      }
 
+      __DEV__ && console.log('✅ [setup] ========== SETUP COMPLETE ==========');
       setIsLive(true);
       isLiveRef.current = true;
       __DEV__ && console.log('🔥 Engine exists:', engineRef.current !== null);
@@ -332,12 +440,17 @@ export default function LiveStreamScreen({ navigation, route }) {
       subscribeToQuestions(stream.id);
 
     } catch (e) {
+      __DEV__ && console.error('❌ [setup] ========== SETUP FAILED ==========');
+      __DEV__ && console.error('❌ [setup] Error:', e.message);
+      __DEV__ && console.error('❌ [setup] Error stack:', e.stack);
+      
       if (engineRef.current) {
-        try { engineRef.current.release(); } catch (_) {}
+        try { engineRef.current.release(); } catch (releaseError) {
+          __DEV__ && console.error('❌ [setup] Engine release error:', releaseError);
+        }
         engineRef.current = null;
       }
-      __DEV__ && console.error('Setup error:', e);
-      Alert.alert('Error', 'Failed to start live stream.');
+      Alert.alert('Error', 'Failed to start live stream: ' + e.message);
       setIsStarting(false);
       navigation.goBack();
     }
@@ -352,7 +465,10 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function cleanup() {
+    __DEV__ && console.log('🧹 [cleanup] Cleaning up resources...');
+    
     if (snapshotTimeoutRef.current) {
+      __DEV__ && console.log('🧹 [cleanup] Clearing snapshot timeout');
       clearTimeout(snapshotTimeoutRef.current);
       snapshotTimeoutRef.current = null;
     }
@@ -369,10 +485,25 @@ export default function LiveStreamScreen({ navigation, route }) {
       questionsChannelRef.current = null;
     }
     if (engineRef.current) {
-      engineRef.current.leaveChannel();
-      engineRef.current.release();
+      __DEV__ && console.log('🧹 [cleanup] Leaving Agora channel...');
+      try {
+        engineRef.current.leaveChannel();
+        __DEV__ && console.log('✅ [cleanup] Left channel');
+      } catch (e) {
+        __DEV__ && console.error('❌ [cleanup] Leave channel error:', e);
+      }
+      
+      __DEV__ && console.log('🧹 [cleanup] Releasing Agora engine...');
+      try {
+        engineRef.current.release();
+        __DEV__ && console.log('✅ [cleanup] Engine released');
+      } catch (e) {
+        __DEV__ && console.error('❌ [cleanup] Release engine error:', e);
+      }
       engineRef.current = null;
     }
+    
+    __DEV__ && console.log('✅ [cleanup] Cleanup complete');
   }
 
   function subscribeToChat(sid) {
@@ -442,6 +573,43 @@ export default function LiveStreamScreen({ navigation, route }) {
     navigation.goBack();
   }
 
+  const handleStartStreaming = () => {
+    setIsStarting(true);
+    setup();
+  };
+
+  const handleToggleViewerList = () => {
+    setShowViewerList(!showViewerList);
+  };
+
+  const handleCloseViewerList = () => {
+    setShowViewerList(false);
+  };
+
+  const handleViewerListModeRecent = () => {
+    setViewerListMode('recent');
+  };
+
+  const handleViewerListModeEngaged = () => {
+    setViewerListMode('engaged');
+  };
+
+  const handleTabChat = () => {
+    setActiveTab('chat');
+  };
+
+  const handleTabQuestions = () => {
+    setActiveTab('questions');
+  };
+
+  const handleSelectQuestion = (question) => {
+    selectQuestion(question);
+  };
+
+  const handleCloseEndModal = () => {
+    setShowEndModal(false);
+  };
+
   if (!isLive) {
     return (
       <View style={styles.loadingContainer}>
@@ -470,10 +638,7 @@ export default function LiveStreamScreen({ navigation, route }) {
               />
             </View>
 
-            <AnimatedButton style={styles.goLiveBtn} onPress={() => {
-              setIsStarting(true);
-              setup();
-            }}>
+            <AnimatedButton style={styles.goLiveBtn} onPress={handleStartStreaming}>
               <Text style={styles.goLiveBtnText}>Start Streaming</Text>
             </AnimatedButton>
           </View>
@@ -482,6 +647,9 @@ export default function LiveStreamScreen({ navigation, route }) {
     );
   }
 
+  __DEV__ && console.log('🎨 [render] Rendering live stream UI - isLive:', isLive);
+  __DEV__ && console.log('🎨 [render] Engine exists:', !!engineRef.current);
+  
   return (
     <View style={styles.container}>
       <RtcSurfaceView
@@ -496,7 +664,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         </View>
         <AnimatedButton
           style={styles.viewerBadge}
-          onPress={() => setShowViewerList(!showViewerList)}
+          onPress={handleToggleViewerList}
         >
           <Text style={styles.viewerText}>👁️ {viewerCount}</Text>
         </AnimatedButton>
@@ -514,7 +682,7 @@ export default function LiveStreamScreen({ navigation, route }) {
                 }
                 ({showEngagedTab && viewerListMode === 'engaged' ? engagedViewers.length : viewerCount})
               </Text>
-              <AnimatedButton onPress={() => setShowViewerList(false)}>
+              <AnimatedButton onPress={handleCloseViewerList}>
                 <Text style={styles.closeListText}>✕</Text>
               </AnimatedButton>
             </View>
@@ -524,7 +692,7 @@ export default function LiveStreamScreen({ navigation, route }) {
               <View style={styles.viewerListTabs}>
                 <AnimatedButton
                   style={[styles.viewerListTab, viewerListMode === 'recent' && styles.viewerListTabActive]}
-                  onPress={() => setViewerListMode('recent')}
+                  onPress={handleViewerListModeRecent}
                 >
                   <Text style={[styles.viewerListTabText, viewerListMode === 'recent' && styles.viewerListTabTextActive]}>
                     Recent
@@ -532,7 +700,7 @@ export default function LiveStreamScreen({ navigation, route }) {
                 </AnimatedButton>
                 <AnimatedButton
                   style={[styles.viewerListTab, viewerListMode === 'engaged' && styles.viewerListTabActive]}
-                  onPress={() => setViewerListMode('engaged')}
+                  onPress={handleViewerListModeEngaged}
                 >
                   <Text style={[styles.viewerListTabText, viewerListMode === 'engaged' && styles.viewerListTabTextActive]}>
                     Engaged
@@ -591,10 +759,10 @@ export default function LiveStreamScreen({ navigation, route }) {
 
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
         <View style={styles.tabs}>
-          <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={() => setActiveTab('chat')}>
+          <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={handleTabChat}>
             <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>💬 Chat</Text>
           </AnimatedButton>
-          <AnimatedButton style={[styles.tab, activeTab === 'questions' && styles.tabActive]} onPress={() => setActiveTab('questions')}>
+          <AnimatedButton style={[styles.tab, activeTab === 'questions' && styles.tabActive]} onPress={handleTabQuestions}>
             <Text style={[styles.tabText, activeTab === 'questions' && styles.tabTextActive]}>
               ❓ Questions {questions.length > 0 ? `(${questions.length})` : ''}
             </Text>
@@ -638,7 +806,7 @@ export default function LiveStreamScreen({ navigation, route }) {
               </View>
             }
             renderItem={({ item }) => (
-              <AnimatedButton style={[styles.questionItem, item.is_selected && styles.questionItemSelected]} onPress={() => selectQuestion(item)}>
+              <AnimatedButton style={[styles.questionItem, item.is_selected && styles.questionItemSelected]} onPress={() => handleSelectQuestion(item)}>
                 <Text style={styles.questionUsername}>@{item.username}</Text>
                 <Text style={styles.questionText}>{item.question}</Text>
                 {item.is_selected && <Text style={styles.questionSelectedBadge}>📌 On screen</Text>}
@@ -666,7 +834,7 @@ export default function LiveStreamScreen({ navigation, route }) {
             <View style={styles.glassModalButtons}>
               <AnimatedButton
                 style={styles.glassModalCancel}
-                onPress={() => setShowEndModal(false)}
+                onPress={handleCloseEndModal}
               >
                 <Text style={styles.glassModalCancelText}>Cancel</Text>
               </AnimatedButton>

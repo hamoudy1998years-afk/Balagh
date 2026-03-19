@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 
 const NotificationItem = React.memo(function NotificationItem({ item, onDelete, onMarkRead, navigation }) {
   const translateX    = useRef(new Animated.Value(0)).current;
@@ -73,9 +74,9 @@ const NotificationItem = React.memo(function NotificationItem({ item, onDelete, 
   const handlePress = () => {
     if (!item.is_read) onMarkRead(item.id);
     if (item.type === 'follow') {
-      navigation.navigate('Profile', { userId: item.actor?.id });
+      navigation.navigate(ROUTES.PROFILE, { userId: item.actor?.id });
     } else if (item.video_id) {
-      navigation.navigate('VideoDetail', { video: { id: item.video_id } });
+      navigation.navigate(ROUTES.VIDEO_DETAIL, { video: { id: item.video_id } });
     }
   };
 
@@ -148,13 +149,21 @@ export default function NotificationsScreen({ navigation }) {
   const flatListRef = useRef(null);
 
   const handleDelete = useCallback(async (id) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-    await supabase.from('notifications').delete().eq('id', id);
+    try {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      await supabase.from('notifications').delete().eq('id', id);
+    } catch (e) {
+      __DEV__ && console.error('[NotificationsScreen] handleDelete error:', e);
+    }
   }, []);
 
   const handleMarkRead = useCallback(async (id) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    try {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+    } catch (e) {
+      __DEV__ && console.error('[NotificationsScreen] handleMarkRead error:', e);
+    }
   }, []);
 
   const renderNotificationItem = useCallback(({ item }) => (

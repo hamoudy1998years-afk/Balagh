@@ -20,6 +20,7 @@ import CommentList from '../components/comments/CommentList';
 import CommentInput from '../components/comments/CommentInput';
 import ReplyInput from '../components/comments/ReplyInput';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 
 function CustomBackdrop({ onClose }) {
@@ -177,7 +178,7 @@ export default function CommentsModal({
     setActiveMenuId(null);
     if (navigation && userId) {
       closeModal();
-      setTimeout(() => navigation.navigate('UserProfile', { profileUserId: userId }), 300);
+      setTimeout(() => navigation.navigate(ROUTES.USER_PROFILE, { profileUserId: userId }), 300);
     }
   }, [navigation, closeModal]);
 

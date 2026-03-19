@@ -27,6 +27,8 @@ import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
+import { getCredentialKey } from '../constants/storage';
 import { s, ms } from '../utils/responsive';
 import ModernDialog from './ModernDialog';
 
@@ -92,8 +94,12 @@ export default function LoginScreen({ navigation }) {
   }, []);
 
   const refreshAccountsList = async () => {
-    const accounts = await getSavedAccounts();
-    setSavedAccounts(accounts);
+    try {
+      const accounts = await getSavedAccounts();
+      setSavedAccounts(accounts);
+    } catch (e) {
+      __DEV__ && console.error('[LoginScreen] refreshAccountsList error:', e);
+    }
   };
 
   const closeDropdown = () => {
@@ -129,7 +135,7 @@ export default function LoginScreen({ navigation }) {
         if (available && hasCreds) {
           try {
             await loginWithBiometrics(account.email);
-            navigation.navigate('Main');
+            navigation.navigate(ROUTES.MAIN);
             return;
           } catch (e) {
             if (e.message === 'BIOMETRIC_CANCELLED') {
@@ -147,7 +153,7 @@ export default function LoginScreen({ navigation }) {
       // GOOGLE ACCOUNTS - NEW FLOW
       if (account.provider === 'google') {
         const hasPin = await hasQuickPin(account.email);
-        const credKey = 'bushrann_creds_' + account.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const credKey = getCredentialKey(account.email);
         const savedRaw = await SecureStore.getItemAsync(credKey);
         
         // NO PIN YET - Ask to create PIN
@@ -213,7 +219,7 @@ export default function LoginScreen({ navigation }) {
             }
             setLoading(false);
             await new Promise(resolve => setTimeout(resolve, 100));
-            navigation.navigate('Main');
+            navigation.navigate(ROUTES.MAIN);
             return;
           }
         }
@@ -232,6 +238,25 @@ export default function LoginScreen({ navigation }) {
       setLoading(false);
     }
   };
+
+const handleNavigateMain = useCallback(() => {
+  navigation.navigate(ROUTES.MAIN);
+}, [navigation]);
+
+const handleNavigateSignup = useCallback(() => {
+  navigation.navigate(ROUTES.SIGNUP);
+}, [navigation]);
+
+const handleClosePinModal = useCallback(() => {
+  setPinModalVisible(false);
+  setEnteredPin('');
+  setNewPin('');
+  setConfirmPin('');
+  setPinError('');
+  setPinStep('create');
+  setVisiblePin('');
+  setVisibleConfirmPin('');
+}, []);
 
   const resolveEmail = async (raw) => {
     let email = raw.trim();
@@ -322,29 +347,47 @@ export default function LoginScreen({ navigation }) {
               text: 'Not now',
               style: 'cancel',
               onPress: async () => {
-                await saveAccount(identifier.trim(), email, 'email');
-                await refreshAccountsList();
-                navigation.navigate('Main');
+                try {
+                  await saveAccount(identifier.trim(), email, 'email');
+                  await refreshAccountsList();
+                  navigation.navigate(ROUTES.MAIN);
+                } catch (e) {
+                  __DEV__ && console.error('[LoginScreen] Not now error:', e);
+                  navigation.navigate(ROUTES.MAIN);
+                }
               },
             },
             {
               text: 'Enable',
               onPress: async () => {
-                await saveCredentials(identifier.trim(), email, password);
-                await refreshAccountsList();
-                navigation.navigate('Main');
+                try {
+                  await saveCredentials(identifier.trim(), email, password);
+                  await refreshAccountsList();
+                  navigation.navigate(ROUTES.MAIN);
+                } catch (e) {
+                  __DEV__ && console.error('[LoginScreen] Enable biometrics error:', e);
+                  navigation.navigate(ROUTES.MAIN);
+                }
               },
             },
           ]
         });
       } else {
-        await refreshAccountsList();
-        navigation.navigate('Main');
+        try {
+          await refreshAccountsList();
+        } catch (e) {
+          __DEV__ && console.error('[LoginScreen] refreshAccountsList error:', e);
+        }
+        navigation.navigate(ROUTES.MAIN);
       }
     } else {
-      await saveAccount(identifier.trim(), email, 'email');
-      await refreshAccountsList();
-      navigation.navigate('Main');
+      try {
+        await saveAccount(identifier.trim(), email, 'email');
+        await refreshAccountsList();
+      } catch (e) {
+        __DEV__ && console.error('[LoginScreen] saveAccount error:', e);
+      }
+      navigation.navigate(ROUTES.MAIN);
     }
   }
 
@@ -375,120 +418,139 @@ export default function LoginScreen({ navigation }) {
     const result = await WebBrowser.openAuthSessionAsync(data?.url, redirectUrl);
 
     if (result.type === 'success') {
-      const { url } = result;
+      try {
+        const { url } = result;
 
-      const hashPart = url.includes('#') ? url.split('#')[1] : null;
-      const queryPart = url.includes('?') ? url.split('?')[1]?.split('#')[0] : null;
-      const paramStr = hashPart || queryPart || '';
-      const params = new URLSearchParams(paramStr);
+        const hashPart = url.includes('#') ? url.split('#')[1] : null;
+        const queryPart = url.includes('?') ? url.split('?')[1]?.split('#')[0] : null;
+        const paramStr = hashPart || queryPart || '';
+        const params = new URLSearchParams(paramStr);
 
-      const access_token = params.get('access_token');
-      const refresh_token = params.get('refresh_token');
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
 
-      if (!access_token) {
+        if (!access_token) {
+          setGoogleLoading(false);
+          silentReAuth.current = false;
+          setDialog({
+            visible: true,
+            title: 'Google Login Failed',
+            message: 'Could not retrieve session. Please try again.',
+            type: 'error',
+            buttons: [{ text: 'OK' }]
+          });
+          return;
+        }
+
+        await supabase.auth.setSession({ access_token, refresh_token });
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userEmail = sessionData?.session?.user?.email;
+        const userMeta = sessionData?.session?.user?.user_metadata;
+
+        if (userEmail) {
+          try {
+            const credKey = getCredentialKey(userEmail);
+            const existingCredRaw = await SecureStore.getItemAsync(credKey);
+            const existingCred = existingCredRaw ? JSON.parse(existingCredRaw) : null;
+
+            // Only set appPassword on first Google login — calling updateUser every time
+            // invalidates the OAuth session and signs the user out.
+            if (!existingCred?.appPassword) {
+              const appPassword = Array(32).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');
+
+              await SecureStore.setItemAsync(credKey, JSON.stringify({
+                type: 'google',
+                email: userEmail,
+                appPassword,
+                hasPin: false,
+              }));
+
+              // Set password in Supabase so signInWithPassword works later
+              await supabase.auth.updateUser({ password: appPassword });
+
+              // updateUser invalidates the current OAuth session — restore it
+              await supabase.auth.setSession({ access_token, refresh_token });
+            }
+            
+            const displayName = userMeta?.full_name || userMeta?.name || userEmail;
+            await saveGoogleCredentials(displayName, userEmail, refresh_token);
+            await refreshAccountsList();
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', user.id)
+                .single();
+
+              const userWithProfile = {
+                ...user,
+                ...profile,
+                full_name: profile?.full_name || displayName,
+              };
+
+              await userCache.clear();
+              await userCache.set(userWithProfile);
+              await refreshUser();
+            }
+
+            // Check if PIN already exists
+            const hasPin = await hasQuickPin(userEmail);
+            
+            if (!hasPin) {
+              // First time - suggest creating PIN
+              setTimeout(() => {
+                setGoogleLoading(false);
+                setDialog({
+                  visible: true,
+                  title: '⚡ Enable Instant Login?',
+                  message: 'Create a 4-digit PIN to skip Google sign-in next time. Just tap your account and use Face ID or fingerprint.',
+                  type: 'info',
+                  buttons: [
+                    {
+                      text: 'Set Up Now',
+                      onPress: () => {
+                        setSelectedAccount({ email: userEmail, provider: 'google' });
+                        setPinModalVisible(true);
+                        setIsCreatingPin(true);
+                        setPinStep('create');
+                        setNewPin('');
+                        setConfirmPin('');
+                      }
+                    },
+                    {
+                      text: 'Later',
+                      style: 'cancel',
+                      onPress: () => navigation.navigate(ROUTES.MAIN),
+                    }
+                  ]
+                });
+              }, 500);
+              return; // Don't navigate yet, wait for dialog
+            }
+          } catch (e) {
+            __DEV__ && console.error('[LoginScreen] Google login post-processing error:', e);
+            // Continue to Main even if post-processing fails
+          }
+        }
+      } catch (e) {
+        __DEV__ && console.error('[LoginScreen] Google login error:', e);
         setGoogleLoading(false);
         silentReAuth.current = false;
         setDialog({
           visible: true,
-          title: 'Google Login Failed',
-          message: 'Could not retrieve session. Please try again.',
+          title: 'Google Login Error',
+          message: 'An unexpected error occurred. Please try again.',
           type: 'error',
           buttons: [{ text: 'OK' }]
         });
         return;
       }
 
-      await supabase.auth.setSession({ access_token, refresh_token });
-
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userEmail = sessionData?.session?.user?.email;
-      const userMeta = sessionData?.session?.user?.user_metadata;
-
-      if (userEmail) {
-        const credKey = 'bushrann_creds_' + userEmail.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        const existingCredRaw = await SecureStore.getItemAsync(credKey);
-        const existingCred = existingCredRaw ? JSON.parse(existingCredRaw) : null;
-
-        // Only set appPassword on first Google login — calling updateUser every time
-        // invalidates the OAuth session and signs the user out.
-        if (!existingCred?.appPassword) {
-          const appPassword = Array(32).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');
-
-          await SecureStore.setItemAsync(credKey, JSON.stringify({
-            type: 'google',
-            email: userEmail,
-            appPassword,
-            hasPin: false,
-          }));
-
-          // Set password in Supabase so signInWithPassword works later
-          await supabase.auth.updateUser({ password: appPassword });
-
-          // updateUser invalidates the current OAuth session — restore it
-          await supabase.auth.setSession({ access_token, refresh_token });
-        }
-        
-        const displayName = userMeta?.full_name || userMeta?.name || userEmail;
-        await saveGoogleCredentials(displayName, userEmail, refresh_token);
-        await refreshAccountsList();
-
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', user.id)
-            .single();
-
-          const userWithProfile = {
-            ...user,
-            ...profile,
-            full_name: profile?.full_name || displayName,
-          };
-
-          await userCache.clear();
-          await userCache.set(userWithProfile);
-          await refreshUser();
-        }
-
-        // Check if PIN already exists
-        const hasPin = await hasQuickPin(userEmail);
-        
-        if (!hasPin) {
-          // First time - suggest creating PIN
-          setTimeout(() => {
-            setGoogleLoading(false);
-            setDialog({
-              visible: true,
-              title: '⚡ Enable Instant Login?',
-              message: 'Create a 4-digit PIN to skip Google sign-in next time. Just tap your account and use Face ID or fingerprint.',
-              type: 'info',
-              buttons: [
-                {
-                  text: 'Set Up Now',
-                  onPress: () => {
-                    setSelectedAccount({ email: userEmail, provider: 'google' });
-                    setPinModalVisible(true);
-                    setIsCreatingPin(true);
-                    setPinStep('create');
-                    setNewPin('');
-                    setConfirmPin('');
-                  }
-                },
-                {
-                  text: 'Later',
-                  style: 'cancel',
-                  onPress: () => navigation.navigate('Main'),
-                }
-              ]
-            });
-          }, 500);
-          return; // Don't navigate yet, wait for dialog
-        }
-      }
-
       setGoogleLoading(false);
-      navigation.navigate('Main');
+      navigation.navigate(ROUTES.MAIN);
     } else {
       setGoogleLoading(false);
     }
@@ -578,24 +640,29 @@ export default function LoginScreen({ navigation }) {
           }
 
           // Save PIN
-          const saved = await saveQuickPin(selectedAccount.email, newPin);
-          if (saved) {
-            // Mark hasPin = true in credentials
-            const credKey = 'bushrann_creds_' + selectedAccount.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            const savedRaw = await SecureStore.getItemAsync(credKey);
-            if (savedRaw) {
-              const creds = JSON.parse(savedRaw);
-              creds.hasPin = true;
-              await SecureStore.setItemAsync(credKey, JSON.stringify(creds));
+          try {
+            const saved = await saveQuickPin(selectedAccount.email, newPin);
+            if (saved) {
+              // Mark hasPin = true in credentials
+              const credKey = getCredentialKey(selectedAccount.email);
+              const savedRaw = await SecureStore.getItemAsync(credKey);
+              if (savedRaw) {
+                const creds = JSON.parse(savedRaw);
+                creds.hasPin = true;
+                await SecureStore.setItemAsync(credKey, JSON.stringify(creds));
+              }
+              
+              setPinModalVisible(false);
+              setNewPin('');
+              setConfirmPin('');
+              setPinStep('create');
+              navigation.navigate(ROUTES.MAIN);
+            } else {
+              setPinError('Failed to save PIN');
             }
-            
-            setPinModalVisible(false);
-            setNewPin('');
-            setConfirmPin('');
-            setPinStep('create');
-            navigation.navigate('Main');
-          } else {
-            setPinError('Failed to save PIN');
+          } catch (e) {
+            __DEV__ && console.error('[LoginScreen] Save PIN error:', e);
+            setPinError('Failed to save PIN. Please try again.');
           }
         } else {
           if (confirmPin.length < 4) {
@@ -625,7 +692,7 @@ export default function LoginScreen({ navigation }) {
           await validateQuickPin(selectedAccount.email, enteredPin);
           __DEV__ && console.log('[PIN] PIN valid - creating session...');
 
-          const credKey = 'bushrann_creds_' + selectedAccount.email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          const credKey = getCredentialKey(selectedAccount.email);
           const savedRaw = await SecureStore.getItemAsync(credKey);
           
           if (!savedRaw) {
@@ -660,7 +727,7 @@ export default function LoginScreen({ navigation }) {
           setPinModalVisible(false);
           setEnteredPin('');
           setPinError('');
-          navigation.navigate('Main');
+          navigation.navigate(ROUTES.MAIN);
           
         } catch (e) {
           __DEV__ && console.log('[PIN] Invalid PIN:', e.message);
@@ -742,7 +809,7 @@ export default function LoginScreen({ navigation }) {
             scrollEnabled={!showDropdown}
             nestedScrollEnabled={true}
           >
-            <AnimatedButton onPress={() => navigation.navigate('Main')} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+            <AnimatedButton onPress={handleNavigateMain} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
               <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
             </AnimatedButton>
             <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
@@ -876,7 +943,7 @@ export default function LoginScreen({ navigation }) {
               <Text style={[styles.link, { color: COLORS.gold }]}>Forgot Password?</Text>
             </AnimatedButton>
 
-            <AnimatedButton onPress={() => navigation.navigate('Signup')}>
+            <AnimatedButton onPress={handleNavigateSignup}>
               <Text style={styles.link}>
                 Don't have an account?{' '}
                 <Text style={styles.linkBold}>Sign up</Text>
@@ -888,16 +955,7 @@ export default function LoginScreen({ navigation }) {
               transparent={true}
               statusBarTranslucent={true}
               visible={pinModalVisible}
-              onRequestClose={() => {
-                setPinModalVisible(false);
-                setEnteredPin('');
-                setNewPin('');
-                setConfirmPin('');
-                setPinError('');
-                setPinStep('create');
-                setVisiblePin('');
-                setVisibleConfirmPin('');
-              }}
+              onRequestClose={handleClosePinModal}
             >
               <View style={styles.modalOverlay}>
                 <View style={styles.modalContent}>
@@ -975,16 +1033,7 @@ export default function LoginScreen({ navigation }) {
 
                   <TouchableOpacity
                     style={styles.cancelButton}
-                    onPress={() => {
-                      setPinModalVisible(false);
-                      setEnteredPin('');
-                      setNewPin('');
-                      setConfirmPin('');
-                      setPinError('');
-                      setPinStep('create');
-                      setVisiblePin('');
-                      setVisibleConfirmPin('');
-                    }}
+                    onPress={handleClosePinModal}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>

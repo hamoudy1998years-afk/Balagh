@@ -4,7 +4,7 @@ import {
   StatusBar, RefreshControl, Animated, Pressable,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import React, { useReducer, useEffect as useEffectHook, useCallback, useRef } from 'react';
+import React, { useReducer, useEffect as useEffectHook, useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,8 +16,12 @@ import { useDownload } from '../context/DownloadContext';
 import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 
-const downloadedVideoIds = new Set();
+const useDownloadedVideos = () => {
+  const downloadedRef = useRef(new Set());
+  return downloadedRef.current;
+};
 
 // ─── Reducers ───────────────────────────────────────────────────────────────
 
@@ -162,10 +166,10 @@ export default function ProfileScreen({ route, navigation }) {
   useEffectHook(() => {
     if (!navigation) return;
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) navigation.replace('Login');
+      if (!session) navigation.replace(ROUTES.LOGIN);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session) navigation.replace('Login');
+      if (!session) navigation.replace(ROUTES.LOGIN);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -203,87 +207,95 @@ export default function ProfileScreen({ route, navigation }) {
 
   const flatListRef = useRef(null);
   const hasLoaded = useRef(false);
+  const downloadedVideoIds = useDownloadedVideos();
+
+  // Track last user to prevent duplicate resets
+  const lastUserIdRef = useRef(null);
 
   useFocusEffect(
     useCallback(() => {
+      // Scroll to top on focus
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-    }, [])
-  );
-
-  // Re-run when screen is focused (globalUser already loaded by then)
-  useFocusEffect(
-    useCallback(() => {
-      __DEV__ && console.log('[ProfileScreen] useFocusEffect - globalUser:', globalUser?.id, 'hasLoaded:', hasLoaded.current);
-      if (globalUser && !hasLoaded.current) {
+      
+      // Check if we need to load a different profile
+      const currentId = targetUserId ?? globalUser?.id ?? cachedUser?.id;
+      const activeUser = globalUser || cachedUser;
+      
+      if (currentId && currentId !== lastUserIdRef.current) {
+        __DEV__ && console.log('[ProfileScreen] User changed - loading profile for:', currentId);
+        lastUserIdRef.current = currentId;
+        hasLoaded.current = false;
+        init(currentId);
+      } else if (activeUser && !hasLoaded.current) {
+        __DEV__ && console.log('[ProfileScreen] Loading profile for:', currentId);
         hasLoaded.current = true;
-        init();
+        init(currentId);
       }
-    }, [globalUser])
+    }, [targetUserId, globalUser?.id, cachedUser?.id])
   );
 
-  // Re-run when globalUser loads after the screen is already focused
+  // Reset lastUserIdRef on unmount to allow fresh load next time
   useEffectHook(() => {
-    __DEV__ && console.log('[ProfileScreen] useEffect[globalUser] - globalUser:', globalUser?.id, 'hasLoaded:', hasLoaded.current);
-    if (globalUser && !hasLoaded.current) {
-      hasLoaded.current = true;
-      init();
-    }
-  }, [globalUser]);
+    return () => {
+      lastUserIdRef.current = null;
+    };
+  }, []);
 
-  useEffectHook(() => {
-    __DEV__ && console.log('[ProfileScreen] reset hasLoaded - targetUserId:', targetUserId, 'globalUser.id:', globalUser?.id);
-    hasLoaded.current = false;
-  }, [targetUserId, globalUser?.id]);
-
-  async function init() {
-    __DEV__ && console.log('[ProfileScreen] init() called - globalUser:', globalUser?.id, 'targetUserId:', targetUserId);
+  async function init(viewingId) {
+    const user = globalUser || cachedUser;
+    __DEV__ && console.log('[ProfileScreen] init() called - user:', user?.id, 'viewingId:', viewingId, 'isOffline:', isOffline);
     dispatchProfile({ type: 'RESET' });
     dispatchVideo({ type: 'RESET' });
 
-    if (globalUser) {
-      const viewingId = targetUserId ?? globalUser.id;
-      const ownProfile = viewingId === globalUser.id;
+    if (user && viewingId) {
+      const ownProfile = viewingId === user.id;
       __DEV__ && console.log('[ProfileScreen] loading profile for userId:', viewingId, 'isOwnProfile:', ownProfile);
-      dispatchProfile({ type: 'SET_USER', currentUser: globalUser, isOwnProfile: ownProfile });
+      dispatchProfile({ type: 'SET_USER', currentUser: user, isOwnProfile: ownProfile });
       dispatchUI({ type: 'SET_LOADING', loading: false });
+
+      // If offline, skip network requests and show cached data only
+      if (isOffline) {
+        __DEV__ && console.log('[ProfileScreen] Offline mode - showing cached data only');
+        // Try to load from cache if available, but don't fail
+        try {
+          const cachedProfile = await userCache.get();
+          if (cachedProfile) {
+            dispatchProfile({ type: 'SET_PROFILE', profile: cachedProfile });
+          }
+        } catch (e) {
+          __DEV__ && console.log('[ProfileScreen] No cached profile data');
+        }
+        return;
+      }
 
       Promise.all([
         loadProfile(viewingId),
         loadVideos(viewingId, ownProfile),
-      ]).catch(e => __DEV__ && console.error('Profile load error:', e));
+      ]).catch(e => {
+        __DEV__ && console.error('Profile load error (offline?):', e);
+        // Don't fail completely - user data is already shown
+      });
 
       if (!ownProfile) {
         supabase.from('follows')
           .select('id')
-          .eq('follower_id', globalUser.id)
+          .eq('follower_id', user.id)
           .eq('following_id', viewingId)
           .maybeSingle()
-          .then(({ data }) => dispatchProfile({ type: 'SET_FOLLOWING', following: !!data }));
+          .then(({ data }) => dispatchProfile({ type: 'SET_FOLLOWING', following: !!data }))
+          .catch(() => {/* offline - ignore */});
 
         supabase.from('blocks')
           .select('id')
-          .eq('blocker_id', globalUser.id)
+          .eq('blocker_id', user.id)
           .eq('blocked_id', viewingId)
           .maybeSingle()
-          .then(({ data }) => dispatchProfile({ type: 'SET_BLOCKED', blocked: !!data }));
+          .then(({ data }) => dispatchProfile({ type: 'SET_BLOCKED', blocked: !!data }))
+          .catch(() => {/* offline - ignore */});
       } else {
-        loadLikedVideos(globalUser.id);
+        loadLikedVideos(user.id).catch(() => {/* offline - ignore */});
       }
       return;
-    }
-
-    if (!userLoading) {
-      const cachedUser = await userCache.get();
-      if (cachedUser) {
-        const viewingId = targetUserId ?? cachedUser.id;
-        const ownProfile = viewingId === cachedUser.id;
-        dispatchProfile({ type: 'SET_USER', currentUser: cachedUser, isOwnProfile: ownProfile });
-        dispatchUI({ type: 'SET_LOADING', loading: false });
-        Promise.all([
-          loadProfile(viewingId),
-          loadVideos(viewingId, ownProfile),
-        ]).catch(e => __DEV__ && console.error('Profile load error:', e));
-      }
     }
   }
 
@@ -383,29 +395,47 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   async function handleChangeAvatar() {
-    dispatchUI({ type: 'SET_AVATAR_MODAL', open: false });
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 1,
-    });
-    if (result.canceled) return;
-    const uri = result.assets[0].uri;
-    navigation.navigate('AvatarCrop', { imageUri: uri });
+    try {
+      dispatchUI({ type: 'SET_AVATAR_MODAL', open: false });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      });
+      if (result.canceled) return;
+      const uri = result.assets[0].uri;
+      navigation.navigate(ROUTES.AVATAR_CROP, { imageUri: uri });
+    } catch (e) {
+      __DEV__ && console.error('[ProfileScreen] handleChangeAvatar error:', e);
+      Alert.alert('Error', 'Could not open image picker. Please try again.');
+    }
   }
 
   async function handlePinVideo(video) {
     if (!isOwnProfile) return;
-    const pinnedCount = publicVideos.filter(v => v.is_pinned).length;
-    if (video.is_pinned) {
-      Alert.alert('Unpin Video', 'Remove this video from pinned?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Unpin', onPress: async () => { await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); if (currentUser?.id) loadVideos(currentUser.id, true); } },
-      ]);
-    } else {
-      if (pinnedCount >= 3) { Alert.alert('Limit Reached', 'You can only pin up to 3 videos.'); return; }
-      await supabase.from('videos').update({ is_pinned: true, pin_order: pinnedCount + 1 }).eq('id', video.id);
-      if (currentUser?.id) loadVideos(currentUser.id, true);
+    try {
+      const pinnedCount = publicVideos.filter(v => v.is_pinned).length;
+      if (video.is_pinned) {
+        Alert.alert('Unpin Video', 'Remove this video from pinned?', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Unpin', onPress: async () => { 
+            try {
+              await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); 
+              if (currentUser?.id) loadVideos(currentUser.id, true); 
+            } catch (e) {
+              __DEV__ && console.error('[ProfileScreen] Unpin video error:', e);
+              Alert.alert('Error', 'Could not unpin video. Please try again.');
+            }
+          } },
+        ]);
+      } else {
+        if (pinnedCount >= 3) { Alert.alert('Limit Reached', 'You can only pin up to 3 videos.'); return; }
+        await supabase.from('videos').update({ is_pinned: true, pin_order: pinnedCount + 1 }).eq('id', video.id);
+        if (currentUser?.id) loadVideos(currentUser.id, true);
+      }
+    } catch (e) {
+      __DEV__ && console.error('[ProfileScreen] handlePinVideo error:', e);
+      Alert.alert('Error', 'Could not pin video. Please try again.');
     }
   }
 
@@ -413,9 +443,14 @@ export default function ProfileScreen({ route, navigation }) {
     Alert.alert('Delete Video', 'Are you sure? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
-        await supabase.from('videos').delete().eq('id', video.id);
-        dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
-        Alert.alert('Deleted', 'Video has been deleted.');
+        try {
+          await supabase.from('videos').delete().eq('id', video.id);
+          dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
+          Alert.alert('Deleted', 'Video has been deleted.');
+        } catch (e) {
+          __DEV__ && console.error('[ProfileScreen] handleDeleteVideo error:', e);
+          Alert.alert('Error', 'Could not delete video. Please try again.');
+        }
       }},
     ]);
   }
@@ -464,18 +499,114 @@ export default function ProfileScreen({ route, navigation }) {
     });
   }, [showVideoOptionsSheet, isOwnProfile]);
 
+  const handleOpenVideo = useCallback((videos, index) => {
+    openVideo(videos, index);
+  }, [openVideo]);
+
+  const handleAvatarPress = useCallback(() => {
+    if (isOwnProfile) {
+      dispatchUI({ type: 'SET_AVATAR_MODAL', open: true });
+    } else if (profile?.avatar_url) {
+      dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: true });
+    }
+  }, [isOwnProfile, profile?.avatar_url]);
+
+  const handleNavigateEditProfile = useCallback(() => {
+    navigation.navigate(ROUTES.EDIT_PROFILE);
+  }, [navigation]);
+
+  const handleNavigateFollowers = useCallback(() => {
+    navigation.navigate(ROUTES.FOLLOW_LIST, { userId: targetUserId ?? currentUser?.id, type: 'followers', username: profile?.username });
+  }, [navigation, targetUserId, currentUser?.id, profile?.username]);
+
+  const handleNavigateFollowing = useCallback(() => {
+    navigation.navigate(ROUTES.FOLLOW_LIST, { userId: targetUserId ?? currentUser?.id, type: 'following', username: profile?.username });
+  }, [navigation, targetUserId, currentUser?.id, profile?.username]);
+
+  const handleNavigateApplyScholar = useCallback(() => {
+    navigation.navigate(ROUTES.APPLY_SCHOLAR);
+  }, [navigation]);
+
+  const handleTabVideos = useCallback(() => {
+    dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'videos' });
+  }, []);
+
+  const handleTabPrivate = useCallback(() => {
+    dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'private' });
+  }, []);
+
+  const handleTabLiked = useCallback(() => {
+    dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'liked' });
+  }, []);
+
+  const handleNavigateSettings = useCallback(() => {
+    navigation.navigate(ROUTES.SETTINGS);
+  }, [navigation]);
+
+  const handleCloseAvatarModal = useCallback(() => {
+    dispatchUI({ type: 'SET_AVATAR_MODAL', open: false });
+  }, []);
+
+  const handleViewEnlargedAvatar = useCallback(() => {
+    dispatchUI({ type: 'SET_AVATAR_MODAL', open: false });
+    dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: true });
+  }, []);
+
+  const handleCloseEnlargedAvatar = useCallback(() => {
+    dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: false });
+  }, []);
+
   const onRefresh = useCallback(async () => {
     dispatchUI({ type: 'SET_REFRESHING', refreshing: true });
     try {
-      await init();
+      // Don't reset hasLoaded to avoid clearing existing data on refresh
+      // Just reload profile and videos in the background
+      const user = globalUser || cachedUser;
+      if (user && !isOffline) {
+        const viewingId = targetUserId ?? user.id;
+        const ownProfile = viewingId === user.id;
+        
+        try {
+          await Promise.all([
+            loadProfile(viewingId),
+            loadVideos(viewingId, ownProfile),
+          ]);
+          __DEV__ && console.log('[ProfileScreen] Refresh successful');
+        } catch (e) {
+          __DEV__ && console.log('[ProfileScreen] Refresh failed (offline?), keeping existing data');
+          // Don't clear data on refresh failure - keep showing cached data
+        }
+        
+        if (!ownProfile) {
+          supabase.from('follows')
+            .select('id')
+            .eq('follower_id', user.id)
+            .eq('following_id', viewingId)
+            .maybeSingle()
+            .then(({ data }) => dispatchProfile({ type: 'SET_FOLLOWING', following: !!data }))
+            .catch(() => {/* offline - ignore */});
+
+          supabase.from('blocks')
+            .select('id')
+            .eq('blocker_id', user.id)
+            .eq('blocked_id', viewingId)
+            .maybeSingle()
+            .then(({ data }) => dispatchProfile({ type: 'SET_BLOCKED', blocked: !!data }))
+            .catch(() => {/* offline - ignore */});
+        } else {
+          loadLikedVideos(user.id).catch(() => {/* offline - ignore */});
+        }
+      } else if (isOffline) {
+        __DEV__ && console.log('[ProfileScreen] Offline - skipping refresh');
+      }
     } finally {
       dispatchUI({ type: 'SET_REFRESHING', refreshing: false });
     }
-  }, []);
-  const openVideo = useCallback((videos, index) => navigation.navigate('ProfileVideos', { videos, startIndex: index }), [navigation]);
+  }, [globalUser, cachedUser, targetUserId, isOffline]);
+  const openVideo = useCallback((videos, index) => navigation.navigate(ROUTES.PROFILE_VIDEOS, { videos, startIndex: index }), [navigation]);
 
   const renderItem = useCallback(({ item, index }) => (
-    <VideoGridItem item={item} onPress={() => openVideo(activeVideos, index)} onLongPress={handleLongPress} />
+    <VideoGridItem item={item} onPress={handleOpenVideo} onLongPress={handleLongPress} />
   ), [activeVideos, openVideo, handleLongPress]);
 
   const renderHeader = useCallback(() => (
@@ -485,7 +616,7 @@ export default function ProfileScreen({ route, navigation }) {
           uri={profile?.avatar_url}
           username={profile?.username}
           size={90}
-          onPress={() => { if (isOwnProfile) dispatchUI({ type: 'SET_AVATAR_MODAL', open: true }); else if (profile?.avatar_url) dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: true }); }}
+          onPress={handleAvatarPress}
         />
         {isScholar && <View style={styles.scholarBadge}><Text style={styles.scholarBadgeText}>✓ Scholar</Text></View>}
       </View>
@@ -543,7 +674,7 @@ export default function ProfileScreen({ route, navigation }) {
           {profile?.bio ? (
             <Text style={styles.bioText}>{profile.bio}</Text>
           ) : isOwnProfile ? (
-            <AnimatedButton onPress={() => navigation.navigate('EditProfile')}>
+            <AnimatedButton onPress={handleNavigateEditProfile}>
               <Text style={styles.addBioText}>+ Add bio</Text>
             </AnimatedButton>
           ) : null}
@@ -556,12 +687,12 @@ export default function ProfileScreen({ route, navigation }) {
           <Text style={styles.statLabel}>Videos</Text>
         </View>
         <View style={styles.statDivider} />
-        <AnimatedButton style={styles.statItem} onPress={() => navigation.navigate('FollowList', { userId: targetUserId ?? currentUser?.id, type: 'followers', username: profile?.username })}>
+        <AnimatedButton style={styles.statItem} onPress={handleNavigateFollowers}>
           <Text style={styles.statNum}>{formatCount(followersCount)}</Text>
           <Text style={styles.statLabel}>Followers</Text>
         </AnimatedButton>
         <View style={styles.statDivider} />
-        <AnimatedButton style={styles.statItem} onPress={() => navigation.navigate('FollowList', { userId: targetUserId ?? currentUser?.id, type: 'following', username: profile?.username })}>
+        <AnimatedButton style={styles.statItem} onPress={handleNavigateFollowing}>
           <Text style={styles.statNum}>{formatCount(followingCount)}</Text>
           <Text style={styles.statLabel}>Following</Text>
         </AnimatedButton>
@@ -575,7 +706,7 @@ export default function ProfileScreen({ route, navigation }) {
       {isOwnProfile ? (
         !isScholar && (
           <View style={styles.actionButtons}>
-            <AnimatedButton style={styles.scholarApplyBtn} onPress={() => navigation.navigate('ApplyScholar')}>
+            <AnimatedButton style={styles.scholarApplyBtn} onPress={handleNavigateApplyScholar}>
               <Text style={styles.scholarApplyBtnText}>🎓 Apply as Scholar</Text>
             </AnimatedButton>
           </View>
@@ -596,15 +727,15 @@ export default function ProfileScreen({ route, navigation }) {
       )}
 
       <View style={styles.tabs}>
-        <AnimatedButton style={[styles.tab, activeTab === 'videos' && styles.activeTab]} onPress={() => dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'videos' })}>
+        <AnimatedButton style={[styles.tab, activeTab === 'videos' && styles.activeTab]} onPress={handleTabVideos}>
           <Text style={[styles.tabText, activeTab === 'videos' && styles.activeTabText]}>🎥</Text>
         </AnimatedButton>
         {isOwnProfile && (
-          <AnimatedButton style={[styles.tab, activeTab === 'private' && styles.activeTab]} onPress={() => dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'private' })}>
+          <AnimatedButton style={[styles.tab, activeTab === 'private' && styles.activeTab]} onPress={handleTabPrivate}>
             <Text style={[styles.tabText, activeTab === 'private' && styles.activeTabText]}>🔒</Text>
           </AnimatedButton>
         )}
-        <AnimatedButton style={[styles.tab, activeTab === 'liked' && styles.activeTab]} onPress={() => dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'liked' })}>
+        <AnimatedButton style={[styles.tab, activeTab === 'liked' && styles.activeTab]} onPress={handleTabLiked}>
           <Text style={[styles.tabText, activeTab === 'liked' && styles.activeTabText]}>❤️</Text>
         </AnimatedButton>
       </View>
@@ -613,13 +744,38 @@ export default function ProfileScreen({ route, navigation }) {
 
   const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
 
+  // Check for cached user when globalUser is null (offline scenario)
+  const [cachedUser, setCachedUser] = useState(null);
+  const [isOffline, setIsOffline] = useState(false);
+  
   useEffectHook(() => {
-    if (!userLoading && !globalUser) {
-      navigation.replace('Login');
+    async function checkCachedUser() {
+      if (!userLoading && !globalUser) {
+        const cached = await userCache.get();
+        if (cached) {
+          setCachedUser(cached);
+          setIsOffline(true);
+          __DEV__ && console.log('[ProfileScreen] Using cached user (offline mode):', cached.id);
+        } else {
+          // No cached user, redirect to login
+          navigation.replace(ROUTES.LOGIN);
+        }
+      }
     }
+    checkCachedUser();
   }, [userLoading, globalUser]);
 
-  if (userLoading || !globalUser) return null;
+  // Show loading only on initial load when we have no data at all
+  if (userLoading && !globalUser && !cachedUser) return (
+    <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      <ActivityIndicator color={COLORS.gold} size="large" />
+    </View>
+  );
+  
+  // Use globalUser or cachedUser (for offline)
+  const activeUser = globalUser || cachedUser;
+  if (!activeUser) return null;
 
   return (
     <View style={styles.container}>
@@ -627,13 +783,21 @@ export default function ProfileScreen({ route, navigation }) {
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         {!isOwnProfile && (
-          <AnimatedButton onPress={() => navigation.goBack()} style={styles.topBarBtn}>
+          <AnimatedButton onPress={navigation.goBack} style={styles.topBarBtn}>
             <Text style={styles.topBarBtnText}>←</Text>
           </AnimatedButton>
         )}
+        
+        {/* Offline indicator */}
+        {isOffline && (
+          <View style={styles.offlineIndicator}>
+            <Text style={styles.offlineText}>📴 Offline</Text>
+          </View>
+        )}
+        
         <View style={{ flex: 1 }} />
         {isOwnProfile && (
-          <AnimatedButton onPress={() => navigation.navigate('Settings')} style={styles.topBarBtn}>
+          <AnimatedButton onPress={handleNavigateSettings} style={styles.topBarBtn}>
             <Text style={styles.topBarBtnText}>☰</Text>
           </AnimatedButton>
         )}
@@ -661,11 +825,11 @@ export default function ProfileScreen({ route, navigation }) {
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
 
       <Modal visible={avatarModal} transparent animationType="slide" onRequestClose={() => dispatchUI({ type: 'SET_AVATAR_MODAL', open: false })} statusBarTranslucent>
-        <Pressable style={styles.modalBackdrop} onPress={() => dispatchUI({ type: 'SET_AVATAR_MODAL', open: false })} />
+        <Pressable style={styles.modalBackdrop} onPress={handleCloseAvatarModal} />
         <View style={styles.modalSheet}>
           <Text style={styles.modalTitle}>Profile Photo</Text>
           {profile?.avatar_url && (
-            <AnimatedButton style={styles.modalOption} onPress={() => { dispatchUI({ type: 'SET_AVATAR_MODAL', open: false }); dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: true }); }}>
+            <AnimatedButton style={styles.modalOption} onPress={handleViewEnlargedAvatar}>
               <Text style={styles.modalOptionText}>👁️ View Photo</Text>
             </AnimatedButton>
           )}
@@ -679,7 +843,7 @@ export default function ProfileScreen({ route, navigation }) {
       </Modal>
 
       <Modal visible={enlargeAvatar} transparent animationType="fade" onRequestClose={() => dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: false })} statusBarTranslucent>
-        <Pressable style={styles.enlargeBackdrop} onPress={() => dispatchUI({ type: 'SET_ENLARGE_AVATAR', open: false })}>
+        <Pressable style={styles.enlargeBackdrop} onPress={handleCloseEnlargedAvatar}>
           <View style={[styles.enlargeCloseBtn, { top: insets.top + 12 }]}>
             <Text style={styles.enlargeCloseBtnText}>✕</Text>
           </View>
@@ -765,4 +929,16 @@ const styles = StyleSheet.create({
   dlPercent: { color: COLORS.goldDark, fontSize: 22, fontWeight: '800' },
   blockBtn: { backgroundColor: '#f3f4f6', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   blockBtnText: { color: '#ef4444', fontSize: 14, fontWeight: '700' },
+  offlineIndicator: { 
+    backgroundColor: 'rgba(0,0,0,0.7)', 
+    borderRadius: 12, 
+    paddingHorizontal: 10, 
+    paddingVertical: 4,
+    marginLeft: 8,
+  },
+  offlineText: { 
+    color: '#fff', 
+    fontSize: 12, 
+    fontWeight: '600' 
+  },
 });

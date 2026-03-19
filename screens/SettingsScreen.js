@@ -8,6 +8,9 @@ import { supabase } from '../lib/supabase';
 import { userCache } from '../utils/userCache';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
+import { EDGE_FUNCTIONS } from '../constants/api';
+import { ERROR_TITLES, ERROR_MESSAGES } from '../constants/errors';
 import { clearFeedCache } from './HomeScreen';
 import { useUser } from '../context/UserContext';
 
@@ -269,6 +272,90 @@ export default function SettingsScreen({ navigation }) {
     setUser(null);
   }
 
+  const handleCloseLogoutModal = React.useCallback(() => {
+    setShowLogoutModal(false);
+  }, []);
+
+  const handleNavigateEditProfile = React.useCallback(() => {
+    setScreen(null);
+    navigation.navigate(ROUTES.EDIT_PROFILE);
+  }, [navigation]);
+
+  const handleChangeEmailAlert = React.useCallback(() => {
+    Alert.alert('Email', 'To change your email, please contact support.');
+  }, []);
+
+  const handleCancelEditPhone = React.useCallback(() => {
+    setPhoneInput(phone);
+    setEditingPhone(false);
+  }, [phone]);
+
+  const handleStartEditPhone = React.useCallback(() => {
+    setEditingPhone(true);
+  }, []);
+
+  const handleSwitchAccountAlert = React.useCallback(() => {
+    Alert.alert('Switch Account', 'Multiple account support coming soon!');
+  }, []);
+
+  const handleAddAccountAlert = React.useCallback(() => {
+    Alert.alert('Add Account', 'Multiple account support coming soon!');
+  }, []);
+
+  const handleCommentPermChange = React.useCallback((value) => {
+    setCommentPerm(value);
+    savePrivacy('comment_permission', value);
+  }, []);
+
+  const handleNavigateBlocked = React.useCallback(() => {
+    setScreen('blocked');
+    loadBlockedUsers();
+  }, []);
+
+  const handleNavigatePrivacy = React.useCallback(() => {
+    setScreen('privacy');
+  }, []);
+
+  const handleUnblockUser = React.useCallback((userId, username) => {
+    unblockUser(userId, username);
+  }, []);
+
+  const handleNavigateFaq = React.useCallback(() => {
+    setScreen('faq');
+  }, []);
+
+  const handleNavigateContact = React.useCallback(() => {
+    setScreen('contact');
+  }, []);
+
+  const handleNavigateTerms = React.useCallback(() => {
+    setScreen('terms');
+  }, []);
+
+  const handleNavigatePrivacyPolicy = React.useCallback(() => {
+    setScreen('privacypolicy');
+  }, []);
+
+  const handleNavigateAccount = React.useCallback(() => {
+    setScreen('account');
+  }, []);
+
+  const handleNavigateNotifications = React.useCallback(() => {
+    setScreen('notifications');
+  }, []);
+
+  const handleNavigateAppearance = React.useCallback(() => {
+    setScreen('appearance');
+  }, []);
+
+  const handleNavigateHelp = React.useCallback(() => {
+    setScreen('help');
+  }, []);
+
+  const handleNavigateEditProfileFromProfile = React.useCallback(() => {
+    navigation.navigate(ROUTES.EDIT_PROFILE);
+  }, [navigation]);
+
   async function handleDeleteAccount() {
     Alert.alert('Delete Account', 'This will permanently delete your account, videos, comments, and all data. This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
@@ -276,7 +363,7 @@ export default function SettingsScreen({ navigation }) {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (!session) throw new Error('No active session');
-          const response = await fetch('https://waurtjtnyinncbdhfydu.supabase.co/functions/v1/delete-user', {
+          const response = await fetch(EDGE_FUNCTIONS.DELETE_USER, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
           });
@@ -285,7 +372,7 @@ export default function SettingsScreen({ navigation }) {
           await userCache.clear();
           await supabase.auth.signOut();
         } catch (error) {
-          Alert.alert('Error', error.message || 'Something went wrong. Please try again.');
+          Alert.alert(ERROR_TITLES.ERROR, error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG);
         }
       }},
     ]);
@@ -311,7 +398,7 @@ export default function SettingsScreen({ navigation }) {
           <Text style={styles.modalTitle}>Log Out</Text>
           <Text style={styles.modalMessage}>Are you sure you want to log out?</Text>
           <View style={styles.modalActions}>
-            <AnimatedButton label="Cancel"  outline onPress={() => setShowLogoutModal(false)} />
+            <AnimatedButton label="Cancel"  outline onPress={handleCloseLogoutModal} />
             <AnimatedButton label="Log Out" danger  onPress={confirmLogout} />
           </View>
         </View>
@@ -323,9 +410,9 @@ export default function SettingsScreen({ navigation }) {
     <SubScreen title="Account" onBack={() => setScreen(null)} insets={insets}>
       <GroupLabel text="PROFILE" />
       <Card>
-        <Row icon="✏️" label="Edit Profile" sublabel="Name, bio, photo" onPress={() => { setScreen(null); navigation.navigate('EditProfile'); }} />
+        <Row icon="✏️" label="Edit Profile" sublabel="Name, bio, photo" onPress={handleNavigateEditProfile} />
         <Row icon="🔑" label="Change Password" sublabel="Send a reset link to your email" onPress={handleResetPassword} />
-        <Row icon="📧" label="Email Address" sublabel={currentUser?.email ?? 'Not set'} onPress={() => Alert.alert('Email', 'To change your email, please contact support.')} last />
+        <Row icon="📧" label="Email Address" sublabel={currentUser?.email ?? 'Not set'} onPress={handleChangeEmailAlert} last />
       </Card>
       <GroupLabel text="PHONE NUMBER" />
       <Card>
@@ -338,7 +425,7 @@ export default function SettingsScreen({ navigation }) {
                 keyboardType="phone-pad" autoFocus
               />
               <View style={styles.phoneActions}>
-                <TouchableOpacity style={styles.phoneCancelBtn} onPress={() => { setPhoneInput(phone); setEditingPhone(false); }}>
+                <TouchableOpacity style={styles.phoneCancelBtn} onPress={handleCancelEditPhone}>
                   <Text style={styles.phoneCancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.phoneSaveBtn} onPress={savePhone} disabled={savingPhone}>
@@ -348,13 +435,13 @@ export default function SettingsScreen({ navigation }) {
             </View>
           </KeyboardAvoidingView>
         ) : (
-          <Row icon="📱" label="Phone Number" sublabel={phone || 'Tap to add a phone number'} onPress={() => setEditingPhone(true)} last />
+          <Row icon="📱" label="Phone Number" sublabel={phone || 'Tap to add a phone number'} onPress={handleStartEditPhone} last />
         )}
       </Card>
       <GroupLabel text="LINKED ACCOUNTS" />
       <Card>
-        <Row icon="🔄" label="Switch Account" sublabel="Manage multiple accounts" onPress={() => Alert.alert('Switch Account', 'Multiple account support coming soon!')} />
-        <Row icon="➕" label="Add Account" sublabel="Log in to another account" onPress={() => Alert.alert('Add Account', 'Multiple account support coming soon!')} last />
+        <Row icon="🔄" label="Switch Account" sublabel="Manage multiple accounts" onPress={handleSwitchAccountAlert} />
+        <Row icon="➕" label="Add Account" sublabel="Log in to another account" onPress={handleAddAccountAlert} last />
       </Card>
       <GroupLabel text="DANGER ZONE" />
       <Card>
@@ -376,7 +463,7 @@ export default function SettingsScreen({ navigation }) {
           { value: 'none',      icon: '🚫', label: 'No one',         sub: 'Disable all comments' },
         ].map((opt, i, arr) => (
           <React.Fragment key={opt.value}>
-            <TouchableOpacity style={styles.row} onPress={() => { setCommentPerm(opt.value); savePrivacy('comment_permission', opt.value); }}>
+            <TouchableOpacity style={styles.row} onPress={() => handleCommentPermChange(opt.value)}>
               <View style={[styles.rowIcon, { backgroundColor: ACCENT_DIM }]}><Text style={{ fontSize: 17 }}>{opt.icon}</Text></View>
               <View style={styles.rowBody}>
                 <Text style={styles.rowLabel}>{opt.label}</Text>
@@ -400,7 +487,7 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="SAFETY" />
       <Card>
         <Row icon="🚫" label="Blocked Users" sublabel="Manage accounts you've blocked"
-          onPress={() => { setScreen('blocked'); loadBlockedUsers(); }} last />
+          onPress={handleNavigateBlocked} last />
       </Card>
     </SubScreen>
   );
@@ -408,7 +495,7 @@ export default function SettingsScreen({ navigation }) {
   if (screen === 'blocked') return (
     <View style={[styles.subContainer, { paddingTop: insets.top }]}>
       <View style={styles.subHeader}>
-        <TouchableOpacity onPress={() => setScreen('privacy')} style={styles.subBack}>
+        <TouchableOpacity onPress={handleNavigatePrivacy} style={styles.subBack}>
           <Text style={styles.subBackIcon}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.subTitle}>Blocked Users</Text>
@@ -437,7 +524,7 @@ export default function SettingsScreen({ navigation }) {
                 <Text style={styles.blockedName}>{item.full_name || item.username}</Text>
                 <Text style={styles.blockedHandle}>@{item.username}</Text>
               </View>
-              <TouchableOpacity style={styles.unblockBtn} onPress={() => unblockUser(item.id, item.username)}>
+              <TouchableOpacity style={styles.unblockBtn} onPress={() => handleUnblockUser(item.id, item.username)}>
                 <Text style={styles.unblockText}>Unblock</Text>
               </TouchableOpacity>
             </View>
@@ -484,13 +571,13 @@ export default function SettingsScreen({ navigation }) {
     <SubScreen title="Help & Support" onBack={() => setScreen(null)} insets={insets}>
       <GroupLabel text="SUPPORT" />
       <Card>
-        <Row icon="❓" label="FAQ" sublabel="Frequently asked questions" onPress={() => setScreen('faq')} />
-        <Row icon="📩" label="Contact Us" sublabel="Report a problem or send feedback" onPress={() => setScreen('contact')} last />
+        <Row icon="❓" label="FAQ" sublabel="Frequently asked questions" onPress={handleNavigateFaq} />
+        <Row icon="📩" label="Contact Us" sublabel="Report a problem or send feedback" onPress={handleNavigateContact} last />
       </Card>
       <GroupLabel text="LEGAL" />
       <Card>
-        <Row icon="📄" label="Terms of Service" onPress={() => setScreen('terms')} />
-        <Row icon="🔏" label="Privacy Policy" onPress={() => setScreen('privacypolicy')} sublabel="https://sites.google.com/view/bushrann" last />
+        <Row icon="📄" label="Terms of Service" onPress={handleNavigateTerms} />
+        <Row icon="🔏" label="Privacy Policy" onPress={handleNavigatePrivacyPolicy} sublabel="https://sites.google.com/view/bushrann" last />
       </Card>
       <GroupLabel text="APP INFO" />
       <Card>
@@ -503,7 +590,7 @@ export default function SettingsScreen({ navigation }) {
   if (screen === 'faq') return (
     <View style={[styles.subContainer, { paddingTop: insets.top }]}>
       <View style={styles.subHeader}>
-        <TouchableOpacity onPress={() => setScreen('help')} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
+        <TouchableOpacity onPress={handleNavigateHelp} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
         <Text style={styles.subTitle}>FAQ</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -529,7 +616,7 @@ export default function SettingsScreen({ navigation }) {
   if (screen === 'contact') return (
     <View style={[styles.subContainer, { paddingTop: insets.top }]}>
       <View style={styles.subHeader}>
-        <TouchableOpacity onPress={() => setScreen('help')} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
+        <TouchableOpacity onPress={handleNavigateHelp} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
         <Text style={styles.subTitle}>Contact Us</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -551,7 +638,7 @@ export default function SettingsScreen({ navigation }) {
   if (screen === 'terms') return (
     <View style={[styles.subContainer, { paddingTop: insets.top }]}>
       <View style={styles.subHeader}>
-        <TouchableOpacity onPress={() => setScreen('help')} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
+        <TouchableOpacity onPress={handleNavigateHelp} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
         <Text style={styles.subTitle}>Terms of Service</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -590,7 +677,7 @@ export default function SettingsScreen({ navigation }) {
   if (screen === 'privacypolicy') return (
     <View style={[styles.subContainer, { paddingTop: insets.top }]}>
       <View style={styles.subHeader}>
-        <TouchableOpacity onPress={() => setScreen('help')} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
+        <TouchableOpacity onPress={handleNavigateHelp} style={styles.subBack}><Text style={styles.subBackIcon}>‹</Text></TouchableOpacity>
         <Text style={styles.subTitle}>Privacy Policy</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -635,7 +722,7 @@ export default function SettingsScreen({ navigation }) {
       {logoutModal}
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity onPress={navigation.goBack} style={styles.backBtn}>
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
@@ -657,17 +744,17 @@ export default function SettingsScreen({ navigation }) {
             <Text style={styles.profileName}>{profile?.full_name || profile?.username || 'Your Name'}</Text>
             <Text style={styles.profileHandle}>@{profile?.username || 'yourhandle'}</Text>
           </View>
-          <TouchableOpacity style={styles.profileEditBtn} onPress={() => navigation.navigate('EditProfile')}>
+          <TouchableOpacity style={styles.profileEditBtn} onPress={handleNavigateEditProfileFromProfile}>
             <Text style={styles.profileEditText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
         <GroupLabel text="PREFERENCES" />
         <Card>
-          <CategoryButton icon="👤" label="Account"          sublabel="Profile, password, phone number"      onPress={() => setScreen('account')} />
+          <CategoryButton icon="👤" label="Account"          sublabel="Profile, password, phone number"      onPress={handleNavigateAccount} />
           <CategoryButton icon="🔒" label="Privacy & Safety" sublabel="Comments, blocked users, like count"  onPress={() => setScreen('privacy')} />
-          <CategoryButton icon="🔔" label="Notifications"    sublabel="Likes, comments, followers, messages" onPress={() => setScreen('notifications')} />
-          <CategoryButton icon="🎨" label="Appearance"       sublabel="Dark mode & theme"                    onPress={() => setScreen('appearance')} />
-          <CategoryButton icon="💬" label="Help & Support"   sublabel="FAQ, contact us, terms, about"        onPress={() => setScreen('help')} last />
+          <CategoryButton icon="🔔" label="Notifications"    sublabel="Likes, comments, followers, messages" onPress={handleNavigateNotifications} />
+          <CategoryButton icon="🎨" label="Appearance"       sublabel="Dark mode & theme"                    onPress={handleNavigateAppearance} />
+          <CategoryButton icon="💬" label="Help & Support"   sublabel="FAQ, contact us, terms, about"        onPress={handleNavigateHelp} last />
         </Card>
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Text style={styles.logoutIcon}>🚪</Text>

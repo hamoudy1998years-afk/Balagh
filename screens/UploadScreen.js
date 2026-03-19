@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { userCache } from '../utils/userCache';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { Linking } from 'react-native';
 import ModernDialog from './ModernDialog';
 import { decode } from 'base64-arraybuffer';
@@ -104,6 +105,17 @@ export default function UploadScreen({ navigation }) {
       quality: 1,
     });
     if (!result.canceled) {
+      // Check file size (100MB max)
+      if (result.assets[0].fileSize > 100 * 1024 * 1024) {
+        setDialog({
+          visible: true,
+          title: 'File too large',
+          message: 'Maximum file size is 100MB. Please select a shorter video.',
+          type: 'warning',
+          buttons: [{ text: 'OK' }]
+        });
+        return;
+      }
       setVideo(result.assets[0]);
       // NEW: Generate thumbnail immediately after selection
       await generateThumbnailPreview(result.assets[0].uri);
@@ -302,7 +314,7 @@ export default function UploadScreen({ navigation }) {
     setShowLiveSetup(false);
     setLiveTitle('');
     setMaxQuestions('5');
-    navigation.navigate('LiveStream', { title: liveTitle.trim(), maxQuestions: max });
+    navigation.navigate(ROUTES.LIVE_STREAM, { title: liveTitle.trim(), maxQuestions: max });
   }, [liveTitle, maxQuestions, navigation]);
 
   if (showLiveSetup) {

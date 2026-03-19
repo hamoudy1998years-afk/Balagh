@@ -2,15 +2,14 @@ import * as Crypto from 'expo-crypto';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { supabase } from '../lib/supabase';
+import { STORAGE_KEYS, STORAGE_PREFIXES, getCredentialKey } from '../constants/storage';
 
-const ACCOUNTS_LIST_KEY = 'bushrann_saved_accounts';
-const CREDS_PREFIX = 'bushrann_creds_';
-const CREDS_VERSION_KEY = 'bushrann_creds_version';
+const ACCOUNTS_LIST_KEY = STORAGE_KEYS.SAVED_ACCOUNTS;
+const CREDS_VERSION_KEY = STORAGE_PREFIXES.CREDS + 'version';
 const CURRENT_VERSION = '2';
 const PIN_KEY_SUFFIX = '_pin';
 
-const makeCredKey = (email) =>
-  CREDS_PREFIX + email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+const makeCredKey = (email) => getCredentialKey(email);
 
 export function useBiometricAuth() {
 

@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 
 // ─── Single user row ──────────────────────────────────────────────────────────
@@ -143,12 +144,16 @@ export default function FollowListScreen({ route, navigation }) {
     setRefreshing(false);
   }, [currentUserId]);
 
+  const handleNavigateUserProfile = useCallback((profileUserId) => {
+    navigation.navigate(ROUTES.USER_PROFILE, { profileUserId });
+  }, [navigation]);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
 
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity onPress={navigation.goBack} style={styles.backBtn}>
           <Text style={styles.backBtnText}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
@@ -172,7 +177,7 @@ export default function FollowListScreen({ route, navigation }) {
               item={item}
               currentUserId={currentUserId}
               isViewingOwnList={userId === currentUserId}
-              onPress={() => navigation.navigate('UserProfile', { profileUserId: item.id })}
+              onPress={() => handleNavigateUserProfile(item.id)}
             />
           )}
           ItemSeparatorComponent={() => <View style={styles.separator} />}

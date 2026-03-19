@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -60,7 +61,7 @@ export default function ResetPasswordScreen({ navigation }) {
       return;
     }
     Alert.alert('Success! ✅', 'Your password has been reset.', [
-      { text: 'Login', onPress: () => navigation.navigate('Login') }
+      { text: 'Login', onPress: () => navigation.navigate(ROUTES.LOGIN) }
     ]);
   }
 

@@ -1,11 +1,21 @@
 const express = require('express');
 const { RtcTokenBuilder, RtcRole } = require('agora-access-token');
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const app = express();
 app.use(express.json());
 
-const APP_ID = '3be4f80ee12e40708afe7ced6308ef9d';
-const APP_CERTIFICATE = '6bbe7d0c6578421c9089b99c7eb5ac3c';
+const APP_ID = process.env.AGORA_APP_ID;
+const APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
+
+if (!APP_ID || !APP_CERTIFICATE) {
+  console.error('❌ Missing required environment variables:');
+  console.error('   AGORA_APP_ID and AGORA_APP_CERTIFICATE must be set');
+  console.error('   Create a .env file with these variables or export them');
+  process.exit(1);
+}
 
 app.post('/get-token', (req, res) => {
   const { channelName, uid, role } = req.body;
@@ -26,5 +36,7 @@ app.post('/get-token', (req, res) => {
 });
 
 app.listen(3000, () => {
-  console.log('Token server running on port 3000');
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Token server running on port 3000');
+  }
 });

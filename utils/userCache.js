@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { STORAGE_KEYS } from '../constants/storage';
 
-const USER_CACHE_KEY = 'bushrann_cached_user';
+const USER_CACHE_KEY = STORAGE_KEYS.USER_CACHE;
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 export const userCache = {

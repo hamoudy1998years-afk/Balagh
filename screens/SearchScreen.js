@@ -5,6 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 
 const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
@@ -42,7 +43,7 @@ function ProfileCard({ profile, isFollowing, onFollowToggle, onPress, currentUse
       {profile.id !== currentUserId && (
         <AnimatedButton
           style={[styles.profileFollowBtn, isFollowing && styles.profileFollowingBtn]}
-          onPress={() => onFollowToggle(profile)}
+          onPress={onFollowToggle}
         >
           <Text style={[styles.profileFollowBtnText, isFollowing && styles.profileFollowingBtnText]}>
             {isFollowing ? 'Following' : 'Follow'}
@@ -166,7 +167,7 @@ export default function SearchScreen({ navigation }) {
 
   const handleFollowToggle = useCallback(async (profile) => {
     if (!currentUserId) {
-      navigation.navigate('Login');
+      navigation.navigate(ROUTES.LOGIN);
       return;
     }
     const isFollowing = followingIds.has(profile.id);
@@ -212,6 +213,24 @@ export default function SearchScreen({ navigation }) {
 
   const hasResults = profileResults.length > 0 || videoResults.length > 0;
 
+  const handleClearSearch = useCallback(() => {
+    setQuery('');
+    setProfileResults([]);
+    setVideoResults([]);
+  }, []);
+
+  const handleCategoryPress = useCallback((item) => {
+    handleCategory(item);
+  }, [handleCategory]);
+
+  const handleNavigateUserProfile = useCallback((profileUserId) => {
+    navigation.navigate(ROUTES.USER_PROFILE, { profileUserId });
+  }, [navigation]);
+
+  const handleNavigateVideoDetail = useCallback((videoId) => {
+    navigation.navigate(ROUTES.VIDEO_DETAIL, { videoId });
+  }, [navigation]);
+
   return (
     <View style={styles.container}>
       {/* Fixed header — never affected by content below */}
@@ -228,7 +247,7 @@ export default function SearchScreen({ navigation }) {
             onChangeText={handleSearch}
           />
           {query.length > 0 && (
-            <AnimatedButton onPress={() => { setQuery(''); setProfileResults([]); setVideoResults([]); }}>
+            <AnimatedButton onPress={handleClearSearch}>
               <Text style={styles.clearBtn}>✕</Text>
             </AnimatedButton>
           )}
@@ -244,7 +263,7 @@ export default function SearchScreen({ navigation }) {
           renderItem={({ item }) => (
             <AnimatedButton
               style={[styles.categoryChip, selectedCategory === item && styles.categoryChipActive]}
-              onPress={() => handleCategory(item)}
+              onPress={() => handleCategoryPress(item)}
             >
               <Text style={[styles.categoryChipText, selectedCategory === item && styles.categoryChipTextActive]}>{item}</Text>
             </AnimatedButton>
@@ -279,7 +298,7 @@ export default function SearchScreen({ navigation }) {
                   profile={profile}
                   isFollowing={followingIds.has(profile.id)}
                   onFollowToggle={handleFollowToggle}
-                  onPress={() => navigation.navigate('UserProfile', { profileUserId: profile.id })}
+                  onPress={() => handleNavigateUserProfile(profile.id)}
                   currentUserId={currentUserId}
                 />
               ))}
@@ -293,7 +312,7 @@ export default function SearchScreen({ navigation }) {
                 {videoResults.map(item => (
                   <AnimatedButton
                     key={item.id}
-                    onPress={() => navigation.navigate('VideoDetail', { videoId: item.id })}
+                    onPress={() => handleNavigateVideoDetail(item.id)}
                     style={[styles.gridItem, { width: ITEM_SIZE, height: ITEM_SIZE * 1.3 }]}
                   >
                     <Image

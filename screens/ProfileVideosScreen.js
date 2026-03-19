@@ -30,7 +30,7 @@ export default function ProfileVideosScreen({ route, navigation }) {
   return (
     <View style={[styles.container, { height, width }]}>
       <StatusBar hidden />
-      <AnimatedButton style={styles.backBtn} onPress={() => navigation.goBack()}>
+      <AnimatedButton style={styles.backBtn} onPress={navigation.goBack}>
         <Text style={styles.backText}>✕</Text>
       </AnimatedButton>
       <FlatList

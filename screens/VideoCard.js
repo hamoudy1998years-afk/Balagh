@@ -14,6 +14,7 @@ import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import AnimatedButton from './AnimatedButton';
 import ModernDialog from './ModernDialog';
+import { ROUTES } from '../constants/routes';
 
 const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress }) {
   if (!visible) return null;
@@ -101,7 +102,7 @@ function VideoCard({
         type: 'info',
         buttons: [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Login', onPress: () => navigation.navigate('Login') },
+          { text: 'Login', onPress: () => navigation.navigate(ROUTES.LOGIN) },
         ]
       });
       return false;
@@ -320,6 +321,20 @@ function VideoCard({
     await Share.share({ message: `Watch "${item.caption}" on Balagh! ☪️` });
   }, [item]);
 
+  const handleNavigateUserProfile = useCallback(() => {
+    navigation.navigate(ROUTES.USER_PROFILE, { profileUserId: item.user_id });
+  }, [navigation, item.user_id]);
+
+  const handleOpenComments = useCallback(() => {
+    if (requireAuth()) {
+      setShowComments(true);
+    }
+  }, [requireAuth]);
+
+  const handleOpenReportSheet = useCallback(() => {
+    setShowReportSheet(true);
+  }, []);
+
   const avatarLetter = username[0]?.toUpperCase() ?? '?';
   const hashtags = item.caption?.match(/#\w+/g) ?? [];
   const captionText = item.caption?.replace(/#\w+/g, '').trim() ?? '';
@@ -369,7 +384,7 @@ function VideoCard({
       )}
 
       <View style={[styles.overlay, { bottom: insets.bottom + s(80) }]}>
-        <AnimatedButton onPress={() => navigation.navigate('UserProfile', { profileUserId: item.user_id })}>
+        <AnimatedButton onPress={handleNavigateUserProfile}>
           <Text style={styles.username}>@{username}</Text>
         </AnimatedButton>
         {captionText ? <Text style={styles.caption}>{captionText}</Text> : null}
@@ -382,7 +397,7 @@ function VideoCard({
 
       <View style={[styles.actions, { bottom: insets.bottom + s(100) }]}>
         <View style={styles.creatorContainer}>
-          <AnimatedButton onPress={() => navigation.navigate('UserProfile', { profileUserId: item.user_id })}>
+          <AnimatedButton onPress={handleNavigateUserProfile}>
             <View style={[styles.creatorAvatar, followed && styles.creatorAvatarFollowed]}>
               {avatarUrl
                 ? <Image source={{ uri: avatarUrl, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }} style={{ width: s(48), height: s(48), borderRadius: s(24) }} />
@@ -404,7 +419,7 @@ function VideoCard({
           <Text style={styles.actionIcon}>{liked ? '❤️' : '🤍'}</Text>
           <Text style={styles.actionCount}>{likeCount}</Text>
         </AnimatedButton>
-        <AnimatedButton onPress={() => { if (requireAuth()) setShowComments(true); }} style={styles.actionBtn}>
+        <AnimatedButton onPress={handleOpenComments} style={styles.actionBtn}>
           <Text style={styles.actionIcon}>💬</Text>
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>
@@ -413,7 +428,7 @@ function VideoCard({
           <Text style={styles.actionCount}>Share</Text>
         </AnimatedButton>
         {currentUserId && currentUserId !== item.user_id && (
-          <AnimatedButton onPress={() => setShowReportSheet(true)} style={styles.actionBtn}>
+          <AnimatedButton onPress={handleOpenReportSheet} style={styles.actionBtn}>
             <Text style={styles.actionIcon}>🚩</Text>
             <Text style={styles.actionCount}>Report</Text>
           </AnimatedButton>
