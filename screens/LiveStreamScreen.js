@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList, Alert,
   Keyboard, Platform, ActivityIndicator, BackHandler,
@@ -14,6 +14,7 @@ import {
 } from 'react-native-agora';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
+import NetInfo from '@react-native-community/netinfo';
 import { useViewerCount } from '../hooks/useViewerCount';
 import { useRecentViewers } from '../hooks/useRecentViewers';
 import { useEngagedViewers } from '../hooks/useEngagedViewers';
@@ -65,8 +66,7 @@ async function getAgoraToken(channelName, uid, role) {
     __DEV__ && console.log('✅ [getAgoraToken] Response channel:', data.channelName);
     return data.token;
   } catch (error) {
-    __DEV__ && console.error('❌ [getAgoraToken] Error:', error.message);
-    __DEV__ && console.error('❌ [getAgoraToken] Error stack:', error.stack);
+    __DEV__ && console.log('[getAgoraToken] Network error:', error.message);
     return null;
   }
 }
@@ -92,7 +92,7 @@ async function uploadThumbnail(filePath, streamId) {
       });
 
     if (error) {
-      __DEV__ && console.error('❌ Upload error:', JSON.stringify(error, null, 2));
+      __DEV__ && console.log('📤 Upload error (offline?):', error.message);
       return null;
     }
 
@@ -111,7 +111,8 @@ async function uploadThumbnail(filePath, streamId) {
 
     return publicUrl;
   } catch (error) {
-    __DEV__ && console.error('❌ Upload failed:', error);
+    __DEV__ && console.log('📤 Thumbnail upload failed (offline?):', error.message);
+    // Continue without thumbnail - stream still works
     return null;
   }
 }
@@ -137,6 +138,16 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [isStarting, setIsStarting] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  
+  // Network failover state
+  const [connectionStatus, setConnectionStatus] = useState('connected'); // 'connected' | 'reconnecting' | 'failed'
+  const lastNetworkType = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const backgroundTimeRef = useRef(null);
+  const isReconnectingRef = useRef(false);
+  const reconnectAttemptRef = useRef(0);
+  const isMountedRef = useRef(true);
+  const MAX_RETRIES = 5;
 
   const engineRef = useRef(null);
   const flatListRef = useRef(null);
@@ -156,14 +167,56 @@ export default function LiveStreamScreen({ navigation, route }) {
   const { enabled: showEngagedTab } = useFeatureFlag('engaged_viewers_tab');
 
   useEffect(() => {
+      isMountedRef.current = true;
       __DEV__ && console.log('📹 [LiveStreamScreen] Component MOUNTED');
       __DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID valid:', !!AGORA_APP_ID && AGORA_APP_ID.length === 32);
       
       // REMOVED: setup() - now called manually when pressing "Start Streaming"
+      
+      // Network monitoring for failover
+      const netInfoSubscription = NetInfo.addEventListener(state => {
+        const currentType = state.type;
+        const wasOffline = !lastNetworkType.current || lastNetworkType.current === 'none';
+        const isOffline = !state.isConnected || state.type === 'none';
+        
+        // Auto-retry when internet returns
+        if (state.isInternetReachable && connectionStatus === 'offline') {
+          console.log('[NetInfo] Back online, retrying...');
+          reconnectAttemptRef.current = 0;
+          handleNetworkReconnect();
+        }
+        
+        // Network type changed (e.g., wifi -> cellular, or connection lost)
+        if (currentType !== lastNetworkType.current && isLiveRef.current) {
+          __DEV__ && console.log('🌐 [Network] Type changed:', lastNetworkType.current, '->', currentType);
+          
+          if (isOffline || (!wasOffline && isOffline)) {
+            __DEV__ && console.log('🌐 [Network] Connection lost, triggering reconnect...');
+            if (!isReconnectingRef.current) {
+              handleNetworkReconnect();
+            }
+          }
+        }
+        
+        lastNetworkType.current = currentType;
+      });
+      
       appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
         if (nextAppState === 'background' || nextAppState === 'inactive') {
-          __DEV__ && console.log('App went to background, ending stream...');
-          forceEndStream();
+          __DEV__ && console.log('App went to background, tracking time...');
+          backgroundTimeRef.current = Date.now();
+        } else if (nextAppState === 'active' && backgroundTimeRef.current) {
+          const timeInBackground = Date.now() - backgroundTimeRef.current;
+          __DEV__ && console.log('App returned from background after', timeInBackground, 'ms');
+          
+          // If was in background >30s and is live, force reconnect
+          if (timeInBackground > 30000 && isLiveRef.current) {
+            __DEV__ && console.log('🌐 [Network] Background timeout, forcing reconnect...');
+            if (!isReconnectingRef.current) {
+              handleNetworkReconnect();
+            }
+          }
+          backgroundTimeRef.current = null;
         }
       });
 
@@ -183,8 +236,16 @@ export default function LiveStreamScreen({ navigation, route }) {
       });
 
       return () => {
+        isMountedRef.current = false;
+        console.log('[DEBUG] Component unmounting, isMounted=false');
         if (appStateSubscription.current) {
           appStateSubscription.current.remove();
+        }
+        if (netInfoSubscription) {
+          netInfoSubscription();
+        }
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
         }
         keyboardDidShow.remove();
         keyboardDidHide.remove();
@@ -225,6 +286,157 @@ export default function LiveStreamScreen({ navigation, route }) {
     }
     return true;
   }
+
+  // Network failover: handle reconnection with exponential backoff
+  const handleNetworkReconnect = useCallback(async (isFromError = false) => {
+    console.log(`[DEBUG] handleReconnect called. isReconnectingRef=${isReconnectingRef.current}, attemptRef=${reconnectAttemptRef.current}`);
+    
+    // Guard: Don't proceed if component unmounted
+    if (!isMountedRef.current) {
+      console.log(`[DEBUG] Component unmounted, returning`);
+      return;
+    }
+    
+    if (!isLiveRef.current || !engineRef.current) {
+      console.log(`[DEBUG] Early return - isLive=${isLiveRef.current}, engine=${engineRef.current ? 'exists' : 'NULL'}`);
+      return;
+    }
+    
+    // Check internet first
+    const netInfo = await NetInfo.fetch();
+    if (!netInfo.isInternetReachable) {
+      console.log('[Network] No internet, showing offline UI');
+      setConnectionStatus('offline');
+      return; // Don't attempt reconnect without internet
+    }
+    
+    // Prevent parallel reconnection attempts
+    if (isReconnectingRef.current) {
+      console.log(`[DEBUG] isReconnectingRef is true, skipping`);
+      __DEV__ && console.log('🌐 [Network] Already reconnecting, skipping...');
+      return;
+    }
+    
+    console.log(`[DEBUG] isReconnectingRef is false, proceeding`);
+    
+    // Check max retries BEFORE attempting
+    console.log(`[DEBUG] Max attempts check: ${reconnectAttemptRef.current} >= ${MAX_RETRIES} ?`);
+    if (reconnectAttemptRef.current >= MAX_RETRIES) {
+      __DEV__ && console.log('🌐 [Network] Max retries reached');
+      setConnectionStatus('failed');
+      return;
+    }
+    
+    console.log(`[DEBUG] About to increment attempt. Current: ${reconnectAttemptRef.current}`);
+    isReconnectingRef.current = true;
+    reconnectAttemptRef.current += 1;
+    const attempt = reconnectAttemptRef.current;
+    console.log(`[DEBUG] Attempt incremented to: ${reconnectAttemptRef.current}`);
+    
+    __DEV__ && console.log('🌐 [Network] Reconnect attempt', attempt, '/', MAX_RETRIES);
+    setConnectionStatus('reconnecting');
+    
+    try {
+      // Leave current channel
+      console.log(`[DEBUG] Engine before leave: ${engineRef.current ? 'exists' : 'NULL'}`);
+      await engineRef.current?.leaveChannel();
+      console.log(`[DEBUG] Left channel successfully`);
+      __DEV__ && console.log('🌐 [Network] Left channel for reconnect');
+      
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s (max 30s)
+      // Add 5s penalty if rate limited (429 error)
+      const baseDelay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+      const rateLimitPenalty = isFromError ? 5000 : 0;
+      const delay = baseDelay + rateLimitPenalty;
+      console.log(`[DEBUG] Calculated delay: ${delay}ms (attempt: ${attempt})`);
+      __DEV__ && console.log('🌐 [Network] Retrying in', delay, 'ms');
+      
+      await new Promise(r => setTimeout(r, delay));
+      
+      // Guard after delay: Check if still mounted and live
+      if (!isMountedRef.current || !isLiveRef.current) {
+        console.log(`[DEBUG] Not mounted or not live anymore, returning. isMounted=${isMountedRef.current}, isLive=${isLiveRef.current}`);
+        return;
+      }
+      
+      // Guard before token fetch
+      if (!isMountedRef.current) {
+        console.log(`[DEBUG] Component unmounted before token fetch`);
+        return;
+      }
+      
+      // Fetch new token and rejoin
+      const channel = currentChannelRef.current;
+      console.log(`[DEBUG] About to fetch token...`);
+      
+      let hostToken;
+      try {
+        hostToken = await getAgoraToken(channel, 1, 'host');
+      } catch (error) {
+        if (error.message.includes('Network request failed') || error.message.includes('Network Error')) {
+          console.log('[Network] Token fetch failed - offline');
+          setConnectionStatus('offline');
+          return;
+        }
+        throw error; // Re-throw other errors
+      }
+      
+      // Guard after token fetch
+      if (!isMountedRef.current || !engineRef.current) {
+        console.log(`[DEBUG] Component unmounted or engine null after token fetch`);
+        throw new Error('Component unmounted or engine null');
+      }
+      
+      if (!hostToken) {
+        console.log('[Network] Failed to get token for reconnect');
+        isReconnectingRef.current = false;
+        // Schedule next attempt if still mounted
+        if (isMountedRef.current) {
+          setTimeout(() => handleNetworkReconnect(true), 1000);
+        }
+        return;
+      }
+      
+      console.log(`[DEBUG] Engine before join: ${engineRef.current ? 'exists' : 'NULL'}`);
+      if (!engineRef.current) {
+        console.error(`[DEBUG] Engine is NULL! Cannot join.`);
+      }
+      
+      await engineRef.current.joinChannel(hostToken, channel, 1, {
+        clientRoleType: ClientRoleType.ClientRoleBroadcaster,
+        publishCameraTrack: true,
+        publishMicrophoneTrack: true,
+      });
+      
+      // SUCCESS - DO NOT reset counter here, only on initial setup or manual retry
+      __DEV__ && console.log('✅ [Network] Reconnect successful');
+      setConnectionStatus('connected');
+    } catch (error) {
+      console.error(`[DEBUG] Catch block triggered. Error: ${error.message}`);
+      console.log(`[DEBUG] In catch - attemptRef still: ${reconnectAttemptRef.current}`);
+      // Use console.log for network errors, not console.error
+      if (error.message.includes('Network') || error.message.includes('network') || error.message.includes('offline')) {
+        console.log('🌐 [Network] Reconnect failed due to network:', error.message);
+        setConnectionStatus('offline');
+      } else {
+        console.log('🌐 [Network] Reconnect failed:', error.message);
+      }
+      // Don't reset counter here - keep it for next attempt
+      const isRateLimited = error?.response?.status === 429 || error?.message?.includes('429');
+      if (!isMountedRef.current) {
+        console.log(`[DEBUG] Not mounted, not scheduling retry`);
+        return;
+      }
+      if (attempt < MAX_RETRIES) {
+        setTimeout(() => handleNetworkReconnect(isRateLimited), 1000);
+      } else {
+        setConnectionStatus('failed');
+      }
+    } finally {
+      console.log(`[DEBUG] Finally block. isReconnectingRef set to false`);
+      isReconnectingRef.current = false;
+    }
+  }, []);
 
   function switchCamera() {
     __DEV__ && console.log('🎥 [switchCamera] Switching camera...');
@@ -366,7 +578,7 @@ export default function LiveStreamScreen({ navigation, route }) {
           if (errCode === 0 && filePath) {
             uploadThumbnail(filePath, currentStreamIdRef.current);
           } else {
-            __DEV__ && console.error('❌ Snapshot failed with error code:', errCode);
+            __DEV__ && console.log('📸 Snapshot failed (offline?):', errCode);
           }
         },
 
@@ -385,6 +597,35 @@ export default function LiveStreamScreen({ navigation, route }) {
         },
         onConnectionStateChanged: (connection, state, reason) => {
           __DEV__ && console.log('🔗 [Agora] Connection state:', state, 'Reason:', reason);
+          
+          // Agora states: 1=Disconnected, 2=Connecting, 3=Connected, 4=Reconnecting, 5=Failed
+          if (state === 1 || state === 5) {
+            // Disconnected (1) or Failed (5) - trigger reconnection
+            __DEV__ && console.log('🔗 [Agora] Connection lost, will reconnect...');
+            console.log(`[DEBUG] Connection state changed (${state}). Triggering reconnect...`);
+            if (!isMountedRef.current || !engineRef.current) {
+              console.log(`[DEBUG] Not mounted or no engine, skipping reconnect trigger`);
+              return;
+            }
+            if (!isReconnectingRef.current) {
+              handleNetworkReconnect();
+            }
+          } else if (state === 3) {
+            // State 3 is CONNECTED - this is success
+            __DEV__ && console.log('✅ [Agora] Connection established (state 3)');
+            setConnectionStatus('connected');
+            reconnectAttemptRef.current = 0; // Reset counter on confirmed connection
+          }
+        },
+        onConnectionLost: () => {
+          __DEV__ && console.log('🔗 [Agora] Connection lost - will attempt reconnect');
+          if (!isMountedRef.current || !engineRef.current) {
+            console.log(`[DEBUG] Not mounted or no engine, skipping connection lost handler`);
+            return;
+          }
+          if (!isReconnectingRef.current) {
+            handleNetworkReconnect();
+          }
         }
       });
 
@@ -422,6 +663,8 @@ export default function LiveStreamScreen({ navigation, route }) {
       }
 
       __DEV__ && console.log('✅ [setup] ========== SETUP COMPLETE ==========');
+      console.log(`[DEBUG] Setup complete - resetting attemptRef to 0`);
+      reconnectAttemptRef.current = 0;
       setIsLive(true);
       isLiveRef.current = true;
       __DEV__ && console.log('🔥 Engine exists:', engineRef.current !== null);
@@ -466,6 +709,8 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   async function cleanup() {
     __DEV__ && console.log('🧹 [cleanup] Cleaning up resources...');
+    isMountedRef.current = false;
+    console.log('[DEBUG] Cleanup started, isMounted=false');
     
     if (snapshotTimeoutRef.current) {
       __DEV__ && console.log('🧹 [cleanup] Clearing snapshot timeout');
@@ -500,6 +745,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       } catch (e) {
         __DEV__ && console.error('❌ [cleanup] Release engine error:', e);
       }
+      console.log(`[DEBUG] Cleanup called. Setting engine to null.`);
       engineRef.current = null;
     }
     
@@ -656,6 +902,52 @@ export default function LiveStreamScreen({ navigation, route }) {
         style={StyleSheet.absoluteFill}
         canvas={{ uid: 0, sourceType: VideoSourceType.VideoSourceCamera }}
       />
+
+      {/* Network Reconnection Overlay */}
+      {connectionStatus !== 'connected' && (
+        <View style={styles.reconnectOverlay}>
+          {connectionStatus === 'reconnecting' ? (
+            <>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={styles.reconnectText}>Reconnecting...</Text>
+              <Text style={styles.reconnectSubtext}>Attempt {reconnectAttemptRef.current}/{MAX_RETRIES}</Text>
+            </>
+          ) : connectionStatus === 'offline' ? (
+            <>
+              <Text style={styles.reconnectIcon}>📡</Text>
+              <Text style={styles.reconnectText}>No internet connection</Text>
+              <AnimatedButton 
+                style={styles.reconnectBtn}
+                onPress={() => {
+                  // Check internet again
+                  NetInfo.fetch().then(state => {
+                    if (state.isInternetReachable) {
+                      reconnectAttemptRef.current = 0;
+                      handleNetworkReconnect();
+                    }
+                  });
+                }}
+              >
+                <Text style={styles.reconnectBtnText}>Retry</Text>
+              </AnimatedButton>
+            </>
+          ) : (
+            <>
+              <Text style={styles.reconnectIcon}>⚠️</Text>
+              <Text style={styles.reconnectText}>Connection lost</Text>
+              <AnimatedButton 
+                style={styles.reconnectBtn}
+                onPress={() => {
+                  reconnectAttemptRef.current = 0;
+                  handleNetworkReconnect();
+                }}
+              >
+                <Text style={styles.reconnectBtnText}>Tap to retry</Text>
+              </AnimatedButton>
+            </>
+          )}
+        </View>
+      )}
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.liveBadge}>
@@ -1052,4 +1344,11 @@ const styles = StyleSheet.create({
   glassModalCancelText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
   glassModalEnd: { flex: 1, backgroundColor: '#ef4444', borderRadius: 14, padding: 14, alignItems: 'center' },
   glassModalEndText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  // Network reconnection overlay styles
+  reconnectOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', zIndex: 100 },
+  reconnectText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16 },
+  reconnectSubtext: { color: 'rgba(255,255,255,0.6)', fontSize: 14, marginTop: 8 },
+  reconnectIcon: { fontSize: 48 },
+  reconnectBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12, marginTop: 20 },
+  reconnectBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
