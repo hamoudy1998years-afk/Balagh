@@ -6,6 +6,7 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import React, { useReducer, useEffect as useEffectHook, useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import NetInfo from '@react-native-community/netinfo';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -86,6 +87,7 @@ const initialUIState = {
   enlargeAvatar: false,
   isDownloading: false,
   downloadProgress: 0,
+  toast: null,
 };
 
 function uiReducer(state, action) {
@@ -96,6 +98,7 @@ function uiReducer(state, action) {
     case 'SET_ENLARGE_AVATAR': return { ...state, enlargeAvatar: action.open };
     case 'SET_DOWNLOADING': return { ...state, isDownloading: action.isDownloading, downloadProgress: action.progress ?? state.downloadProgress };
     case 'SET_DOWNLOAD_PROGRESS': return { ...state, downloadProgress: action.progress };
+    case 'SET_TOAST': return { ...state, toast: action.toast };
     default: return state;
   }
 }
@@ -183,7 +186,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData } = profileState;
   const { publicVideos, privateVideos, likedVideos, totalLikes, activeTab } = videoState;
-  const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress } = uiState;
+  const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress, toast } = uiState;
 
   useEffectHook(() => {
     const unsubscribe = navigation.addListener('focus', async () => {
@@ -214,8 +217,22 @@ export default function ProfileScreen({ route, navigation }) {
 
   useFocusEffect(
     useCallback(() => {
+      // Don't fetch here - rely on listener which is more reliable
+      // The listener continuously monitors connection state
+      
+      // Subscribe to network changes
+      const unsubscribe = NetInfo.addEventListener(state => {
+        __DEV__ && console.log('[DEBUG] NetInfo listener - isConnected:', state.isConnected, 'isInternetReachable:', state.isInternetReachable);
+        const offline = !state.isConnected || state.isInternetReachable === false;
+        __DEV__ && console.log('[DEBUG] NetInfo change - offline:', offline);
+        setIsOffline(offline);
+      });
+      
       // Scroll to top on focus
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      
+      // DEBUG: Log focus state
+      __DEV__ && console.log('[DEBUG] Profile focus - current isOffline:', isOffline);
       
       // Check if we need to load a different profile
       const currentId = targetUserId ?? globalUser?.id ?? cachedUser?.id;
@@ -231,6 +248,10 @@ export default function ProfileScreen({ route, navigation }) {
         hasLoaded.current = true;
         init(currentId);
       }
+      
+      return () => {
+        unsubscribe();
+      };
     }, [targetUserId, globalUser?.id, cachedUser?.id])
   );
 
@@ -244,8 +265,12 @@ export default function ProfileScreen({ route, navigation }) {
   async function init(viewingId) {
     const user = globalUser || cachedUser;
     __DEV__ && console.log('[ProfileScreen] init() called - user:', user?.id, 'viewingId:', viewingId, 'isOffline:', isOffline);
-    dispatchProfile({ type: 'RESET' });
+    __DEV__ && console.log('[DEBUG] init() called - isOffline:', isOffline);
+    
+    // Only reset video state - preserve profile during loading to avoid blank screen
     dispatchVideo({ type: 'RESET' });
+    // Note: We don't dispatch RESET for profile here to avoid blank screen
+    // Profile will be updated when data loads, or preserved if offline
 
     if (user && viewingId) {
       const ownProfile = viewingId === user.id;
@@ -259,6 +284,7 @@ export default function ProfileScreen({ route, navigation }) {
         // Try to load from cache if available, but don't fail
         try {
           const cachedProfile = await userCache.get();
+          __DEV__ && console.log('[DEBUG] Cached profile:', cachedProfile ? 'YES' : 'NO', 'Keys:', cachedProfile ? Object.keys(cachedProfile) : 'none');
           if (cachedProfile) {
             dispatchProfile({ type: 'SET_PROFILE', profile: cachedProfile });
           }
@@ -271,9 +297,27 @@ export default function ProfileScreen({ route, navigation }) {
       Promise.all([
         loadProfile(viewingId),
         loadVideos(viewingId, ownProfile),
-      ]).catch(e => {
+      ]).catch(async (e) => {
         __DEV__ && console.error('Profile load error (offline?):', e);
-        // Don't fail completely - user data is already shown
+        __DEV__ && console.log('[DEBUG] Error in init - error:', e.message);
+        
+        // If API fails, try to use cached data
+        try {
+          const cachedProfile = await userCache.get();
+          __DEV__ && console.log('[DEBUG] Error handler - cached profile:', cachedProfile ? 'YES' : 'NO');
+          if (cachedProfile) {
+            // Keep showing cached data, show offline toast
+            dispatchProfile({ type: 'SET_PROFILE', profile: cachedProfile });
+            dispatchUI({ type: 'SET_TOAST', toast: { message: 'Offline mode - showing cached data', type: 'offline' } });
+            setTimeout(() => dispatchUI({ type: 'SET_TOAST', toast: null }), 2000);
+          } else {
+            // No cached data - show error state
+            dispatchUI({ type: 'SET_TOAST', toast: { message: 'Failed to load profile. Please check your connection.', type: 'error' } });
+            setTimeout(() => dispatchUI({ type: 'SET_TOAST', toast: null }), 3000);
+          }
+        } catch (cacheError) {
+          __DEV__ && console.error('Error reading cache:', cacheError);
+        }
       });
 
       if (!ownProfile) {
@@ -557,12 +601,24 @@ export default function ProfileScreen({ route, navigation }) {
   }, []);
 
   const onRefresh = useCallback(async () => {
+    // Check current connection directly, not stale state
+    const netInfo = await NetInfo.fetch();
+    const currentlyOffline = !netInfo.isConnected || netInfo.isInternetReachable === false;
+    __DEV__ && console.log('[DEBUG] onRefresh - NetInfo offline:', currentlyOffline, 'state isOffline:', isOffline);
+    
+    if (currentlyOffline) {
+      dispatchUI({ type: 'SET_TOAST', toast: { message: 'No connection - showing cached data', type: 'offline' } });
+      setTimeout(() => dispatchUI({ type: 'SET_TOAST', toast: null }), 2000);
+      setIsOffline(true); // Sync state
+      return;
+    }
+    
     dispatchUI({ type: 'SET_REFRESHING', refreshing: true });
     try {
       // Don't reset hasLoaded to avoid clearing existing data on refresh
       // Just reload profile and videos in the background
       const user = globalUser || cachedUser;
-      if (user && !isOffline) {
+      if (user) {
         const viewingId = targetUserId ?? user.id;
         const ownProfile = viewingId === user.id;
         
@@ -596,8 +652,6 @@ export default function ProfileScreen({ route, navigation }) {
         } else {
           loadLikedVideos(user.id).catch(() => {/* offline - ignore */});
         }
-      } else if (isOffline) {
-        __DEV__ && console.log('[ProfileScreen] Offline - skipping refresh');
       }
     } finally {
       dispatchUI({ type: 'SET_REFRESHING', refreshing: false });
@@ -788,10 +842,21 @@ export default function ProfileScreen({ route, navigation }) {
           </AnimatedButton>
         )}
         
-        {/* Offline indicator */}
+        {/* Offline indicator - only shows when offline */}
         {isOffline && (
           <View style={styles.offlineIndicator}>
             <Text style={styles.offlineText}>📴 Offline</Text>
+          </View>
+        )}
+        
+        {/* Toast notification */}
+        {toast && (
+          <View style={[
+            styles.toastContainer, 
+            toast.type === 'offline' && styles.toastOffline,
+            toast.type === 'error' && styles.toastError
+          ]}>
+            <Text style={styles.toastText}>{toast.message}</Text>
           </View>
         )}
         
@@ -940,5 +1005,28 @@ const styles = StyleSheet.create({
     color: '#fff', 
     fontSize: 12, 
     fontWeight: '600' 
+  },
+  toastContainer: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  toastOffline: {
+    backgroundColor: 'rgba(245, 166, 35, 0.9)', // Orange for offline
+  },
+  toastError: {
+    backgroundColor: 'rgba(255, 68, 88, 0.9)', // Red for error
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

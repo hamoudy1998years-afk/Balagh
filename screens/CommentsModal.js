@@ -108,6 +108,17 @@ export default function CommentsModal({
     };
   }, []);
 
+  // ─── Scroll-based pagination ─────────────────────────────────────────────
+  const handleScroll = useCallback((event) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const paddingToBottom = 50;
+    const isNearBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+    
+    if (isNearBottom && hasMore && !loadingMore) {
+      loadMore();
+    }
+  }, [hasMore, loadingMore, loadMore]);
+
   // ─── Close ────────────────────────────────────────────────────────────────
   const closeModal = useCallback(() => {
     setActiveMenuId(null);
@@ -222,6 +233,8 @@ export default function CommentsModal({
               showsVerticalScrollIndicator={false}
               bounces={false}
               overScrollMode="never"
+              onScroll={handleScroll}
+              scrollEventThrottle={400}
             >
               <CommentList
                 comments={comments}

@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
+import NetInfo from '@react-native-community/netinfo';
 
 const NotificationItem = React.memo(function NotificationItem({ item, onDelete, onMarkRead, navigation }) {
   const translateX    = useRef(new Animated.Value(0)).current;
@@ -144,6 +145,7 @@ export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
+  const [isOffline,     setIsOffline]     = useState(false);
   const { user: authUser } = useUser();
   const currentUserId = authUser?.id ?? null;
   const flatListRef = useRef(null);
@@ -178,7 +180,22 @@ export default function NotificationsScreen({ navigation }) {
 
   useEffect(() => {
     if (!currentUserId) return;
-    loadNotifications();
+    
+    // Check network status
+    NetInfo.fetch().then(state => {
+      const offline = !state.isConnected;
+      setIsOffline(offline);
+      if (!offline) {
+        loadNotifications();
+      } else {
+        setLoading(false); // Don't show loading spinner when offline
+      }
+    });
+    
+    // Subscribe to network changes
+    const unsubscribeNetInfo = NetInfo.addEventListener(state => {
+      setIsOffline(!state.isConnected);
+    });
 
     const channel = supabase
       .channel(`notifications_realtime_${currentUserId}`)
@@ -197,10 +214,20 @@ export default function NotificationsScreen({ navigation }) {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { 
+      supabase.removeChannel(channel);
+      unsubscribeNetInfo();
+    };
   }, [currentUserId]);
 
   const loadNotifications = useCallback(async () => {
+    // Skip API call if offline
+    if (isOffline) {
+      __DEV__ && console.log('[NotificationsScreen] Offline - skipping load');
+      setLoading(false);
+      return;
+    }
+    
     try {
       const { data, error } = await supabase
         .from('notifications')
@@ -212,16 +239,22 @@ export default function NotificationsScreen({ navigation }) {
       setNotifications(data ?? []);
     } catch (e) {
       __DEV__ && console.error('Error loading notifications:', e);
+      // Don't show error Alert - just keep existing data or show empty
     } finally {
       setLoading(false);
     }
-  }, [currentUserId]);
+  }, [currentUserId, isOffline]);
 
   const onRefresh = useCallback(async () => {
+    if (isOffline) {
+      // Show offline message instead of trying to refresh
+      Alert.alert('No Connection', 'You are offline. Connect to the internet to refresh notifications.');
+      return;
+    }
     setRefreshing(true);
     await loadNotifications();
     setRefreshing(false);
-  }, [loadNotifications]);
+  }, [loadNotifications, isOffline]);
 
   const handleMarkAllRead = useCallback(async () => {
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
@@ -253,6 +286,14 @@ export default function NotificationsScreen({ navigation }) {
   return (
     <View style={styles.fullScreen}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      
+      {/* Offline banner */}
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>📴 Offline mode</Text>
+        </View>
+      )}
+      
       <View style={[styles.container, { paddingTop: insets.top }]}>
 
         <View style={styles.header}>
@@ -336,4 +377,6 @@ const styles = StyleSheet.create({
   emptyText:         { fontSize: 17, fontWeight: '700', color: '#111111' },
   emptySubtext:      { fontSize: 14, color: '#888888', textAlign: 'center', paddingHorizontal: 40, lineHeight: 20 },
   loadingText:       { fontSize: 14, color: '#888888' },
+  offlineBanner:     { backgroundColor: '#F5A623', paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center' },
+  offlineBannerText: { color: '#ffffff', fontSize: 13, fontWeight: '600' },
 });

@@ -36,7 +36,7 @@
         "backgroundColor": "#1e4fa3"
       },
       "package": "com.bushrann.app",
-      "googleServicesFile": "./android/app/google-services.json",
+      "googleServicesFile": "./google-services.json",
       "facebookAppId": "${EXPO_PUBLIC_FACEBOOK_APP_ID}",
       "permissions": [
         "android.permission.USE_BIOMETRIC",
