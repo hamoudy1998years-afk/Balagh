@@ -16,6 +16,22 @@ function rateLimit(req, res, next) {
   const now = Date.now();
   const windowMs = 60 * 1000; // 1 minute window
   const maxRequests = 10; // 10 requests per minute
+  const entryTTL = 15 * 60 * 1000; // 15 minutes TTL for stale entries
+
+  // Simple garbage collection: clean up stale entries every 100 requests
+  if (rateLimits.size > 100 && rateLimits.size % 100 === 0) {
+    for (const [key, value] of rateLimits.entries()) {
+      if (now - value.resetTime > entryTTL) {
+        rateLimits.delete(key);
+      }
+    }
+  }
+
+  // Check for existing stale entry and delete it
+  const existingEntry = rateLimits.get(ip);
+  if (existingEntry && now - existingEntry.resetTime > entryTTL) {
+    rateLimits.delete(ip);
+  }
 
   const userLimit = rateLimits.get(ip) || { count: 0, resetTime: now + windowMs };
 
@@ -57,7 +73,9 @@ app.get('/token', rateLimit, (req, res) => {
   }
 
   if (!process.env.AGORA_APP_ID || !process.env.AGORA_APP_CERTIFICATE) {
-    console.error('Missing AGORA_APP_ID or AGORA_APP_CERTIFICATE env vars');
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Missing AGORA_APP_ID or AGORA_APP_CERTIFICATE env vars');
+    }
     return res.status(500).json({ error: 'Server misconfiguration' });
   }
 
@@ -72,7 +90,9 @@ app.get('/token', rateLimit, (req, res) => {
     );
     res.json({ token, uid, channelName });
   } catch (e) {
-    console.error('Token generation failed:', e.message);
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Token generation failed:', e.message);
+    }
     res.status(500).json({ error: 'Failed to generate token' });
   }
 });
@@ -85,8 +105,10 @@ app.get('/health', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('========================================');
-  console.log('🚀 Server running on port', PORT);
-  console.log('📹 Token endpoint: /token');
-  console.log('========================================');
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('========================================');
+    console.log('🚀 Server running on port', PORT);
+    console.log('📹 Token endpoint: /token');
+    console.log('========================================');
+  }
 });
