@@ -3,7 +3,6 @@ import {
   View, Text, StyleSheet, TextInput, FlatList, Alert,
   Keyboard, Platform, ActivityIndicator, BackHandler,
   Dimensions, PermissionsAndroid, AppState, Image, Switch,
-  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -1090,25 +1089,6 @@ export default function LiveStreamScreen({ navigation, route }) {
         }}>
           <Text style={styles.endBtnText}>End</Text>
         </AnimatedButton>
-        <TouchableOpacity 
-          onPress={() => { 
-            console.log('[TEST] Triggering Sentry test error');
-            throw new Error('Test Sentry error from live stream'); 
-          }}
-          style={{
-            position: 'absolute',
-            bottom: 120,
-            right: 20,
-            backgroundColor: 'red',
-            paddingHorizontal: 15,
-            paddingVertical: 10,
-            borderRadius: 8,
-            zIndex: 999,
-            elevation: 5
-          }}
-        >
-          <Text style={{color: 'white', fontWeight: 'bold', fontSize: 12}}>TEST CRASH</Text>
-        </TouchableOpacity>
 
         {showViewerList && (
           <View style={styles.viewerListPanel}>
