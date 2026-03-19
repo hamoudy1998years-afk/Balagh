@@ -35,7 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import ErrorBoundary from './components/ErrorBoundary';
-
+import * as Sentry from '@sentry/react-native';
 
 // ADD THIS IMPORT
 import { UserProvider } from './context/UserContext';
@@ -45,6 +45,15 @@ import { DownloadProvider } from './context/DownloadContext';
 import GlobalVideoOptionsSheet from './components/GlobalVideoOptionsSheet';
 
 WebBrowser.maybeCompleteAuthSession();
+
+// Sentry initialization
+Sentry.init({
+  dsn: 'https://e204442193cbb2af057e44b9613b630a@o4511072669335552.ingest.us.sentry.io/4511072675954688',
+  enableInExpoDevelopment: true,
+  debug: __DEV__,
+  tracesSampleRate: 1.0,
+  attachScreenshot: true,
+});
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -220,7 +229,7 @@ const linking = {
   },
 };
 
-export default function App() {
+function App() {
   const [session, setSession] = useState(undefined);
   const [isOffline, setIsOffline] = useState(false);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
@@ -395,6 +404,9 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
+// Wrap App with Sentry
+export default Sentry.wrap(App);
 
 const styles = StyleSheet.create({
   offlineBanner: {
