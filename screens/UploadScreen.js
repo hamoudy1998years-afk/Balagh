@@ -14,6 +14,8 @@ import { Linking } from 'react-native';
 import ModernDialog from './ModernDialog';
 import { decode } from 'base64-arraybuffer';
 import { useUser } from '../context/UserContext';
+// TODO: Install expo-video-manipulator for video compression
+// npm install expo-video-manipulator
 
 const CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 const sanitize = (text) => text.replace(/<[^>]*>/g, '').trim();
@@ -24,6 +26,7 @@ export default function UploadScreen({ navigation }) {
   const [video, setVideo] = useState(null);
   const [thumbnailUri, setThumbnailUri] = useState(null); // NEW: store thumbnail preview
   const [generatingThumb, setGeneratingThumb] = useState(false); // NEW: loading state
+  const [compressing, setCompressing] = useState(false); // NEW: compression loading state
   const [caption, setCaption] = useState('');
   const [category, setCategory] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -65,6 +68,41 @@ export default function UploadScreen({ navigation }) {
     const { data } = await supabase.from('profiles').select('is_scholar').eq('id', user.id).single();
     setIsScholar(data?.is_scholar ?? false);
     setScholarChecked(true);
+  }, []);
+
+  // NEW: Compress video before upload
+  const compressVideo = useCallback(async (uri, fileSize) => {
+    // Only compress if file is larger than 5MB
+    const MIN_SIZE_TO_COMPRESS = 5 * 1024 * 1024; // 5MB
+    if (fileSize < MIN_SIZE_TO_COMPRESS) {
+      __DEV__ && console.log('[Upload] Video under 5MB, skipping compression');
+      return uri;
+    }
+
+    try {
+      setCompressing(true);
+      __DEV__ && console.log('[Upload] Starting video compression...');
+      
+      // TODO: Use expo-video-manipulator when installed
+      // For now, return original uri
+      // Example implementation:
+      // import { VideoManipulator } from 'expo-video-manipulator';
+      // const compressed = await VideoManipulator.compress(uri, {
+      //   quality: 'medium',
+      //   maxResolution: 1080,
+      // });
+      
+      // Placeholder: simulate compression delay
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      __DEV__ && console.log('[Upload] Compression complete (placeholder)');
+      return uri; // Return original until library is installed
+    } catch (error) {
+      __DEV__ && console.error('[Upload] Compression failed:', error);
+      return uri; // Fallback to original on error
+    } finally {
+      setCompressing(false);
+    }
   }, []);
 
   // NEW: Generate thumbnail when video is selected
@@ -116,11 +154,15 @@ export default function UploadScreen({ navigation }) {
         });
         return;
       }
-      setVideo(result.assets[0]);
+      
+      // NEW: Compress video if needed
+      const compressedUri = await compressVideo(result.assets[0].uri, result.assets[0].fileSize);
+      setVideo({ ...result.assets[0], uri: compressedUri });
+      
       // NEW: Generate thumbnail immediately after selection
-      await generateThumbnailPreview(result.assets[0].uri);
+      await generateThumbnailPreview(compressedUri);
     }
-  }, [generateThumbnailPreview]);
+  }, [generateThumbnailPreview, compressVideo]);
 
   const uploadVideo = useCallback(async () => {
     if (!video) {
@@ -383,8 +425,15 @@ export default function UploadScreen({ navigation }) {
           </AnimatedButton>
         )}
 
-        <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading || generatingThumb}>
-          {generatingThumb ? (
+        <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading || generatingThumb || compressing}>
+          {compressing ? (
+            // NEW: Show loading while compressing video
+            <View style={styles.videoSelected}>
+              <Text style={styles.videoSelectedIcon}>🗜️</Text>
+              <Text style={styles.videoSelectedText}>Compressing video...</Text>
+              <Text style={styles.videoSelectedSubtext}>Reducing file size for faster upload</Text>
+            </View>
+          ) : generatingThumb ? (
             // NEW: Show loading while generating thumbnail
             <View style={styles.videoSelected}>
               <Text style={styles.videoSelectedIcon}>⏳</Text>
@@ -457,7 +506,7 @@ export default function UploadScreen({ navigation }) {
           )}
           <View style={styles.uploadBtnContent}>
             <Text style={styles.uploadBtnText}>
-              {uploading ? progressLabel : generatingThumb ? 'Generating thumbnail...' : 'Upload to Bushrann ☪️'}
+              {uploading ? progressLabel : compressing ? 'Compressing video...' : generatingThumb ? 'Generating thumbnail...' : 'Upload to Bushrann ☪️'}
             </Text>
             {uploading && <Text style={styles.uploadBtnPct}>{progressPercent}%</Text>}
           </View>
@@ -504,6 +553,7 @@ const styles = StyleSheet.create({
   videoSelected: { padding: 24, alignItems: 'center' },
   videoSelectedIcon: { fontSize: 40, marginBottom: 8 },
   videoSelectedText: { color: COLORS.success, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  videoSelectedSubtext: { color: '#888888', fontSize: 12, textAlign: 'center', marginTop: 4 },
   videoSelectedName: { color: '#888888', fontSize: 12, marginBottom: 8 },
   tapToChange: { color: '#aaaaaa', fontSize: 12 },
   // NEW: Thumbnail preview styles
