@@ -21,6 +21,7 @@ import { useEngagedViewers } from '../hooks/useEngagedViewers';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import RNFS from 'react-native-fs';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 
 const { width, height } = Dimensions.get('window');
@@ -36,6 +37,8 @@ __DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID length:', AGORA_APP
 __DEV__ && console.log('📹 [LiveStreamScreen] THUMBNAIL_SERVER_URL exists:', !!THUMBNAIL_SERVER_URL);
 
 async function getAgoraToken(channelName, uid, role) {
+  console.log('[FUNC] getAgoraToken() STARTED for role:', role);
+  console.log('[DEBUG-TOKEN] Fetching token... internet:', 'checking...');
   __DEV__ && console.log('🚀 [getAgoraToken] Fetching token...');
   __DEV__ && console.log('🚀 [getAgoraToken] Channel:', channelName);
   __DEV__ && console.log('🚀 [getAgoraToken] UID:', uid);
@@ -66,6 +69,7 @@ async function getAgoraToken(channelName, uid, role) {
     __DEV__ && console.log('✅ [getAgoraToken] Response channel:', data.channelName);
     return data.token;
   } catch (error) {
+    console.log('[DEBUG-TOKEN] Token fetch FAILED:', error.message);
     __DEV__ && console.log('[getAgoraToken] Network error:', error.message);
     return null;
   }
@@ -168,6 +172,7 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   useEffect(() => {
       isMountedRef.current = true;
+      console.log('[LIFECYCLE] Component MOUNTED');
       __DEV__ && console.log('📹 [LiveStreamScreen] Component MOUNTED');
       __DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID valid:', !!AGORA_APP_ID && AGORA_APP_ID.length === 32);
       
@@ -175,16 +180,30 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       // Network monitoring for failover
       const netInfoSubscription = NetInfo.addEventListener(state => {
+        console.log('[NETINFO] State changed! type:', state.type, 'isConnected:', state.isConnected, 'isInternetReachable:', state.isInternetReachable);
+        console.log('[DEBUG-NET] NetInfo changed! isInternetReachable:', state.isInternetReachable, 'current connectionStatus:', connectionStatus);
+        console.log('[DEBUG-OFFLINE] NetInfo listener fired! isInternetReachable:', state.isInternetReachable);
+        
+        // Fix offline detection
+        if (!state.isInternetReachable) {
+          console.log('[NETINFO] Setting OFFLINE');
+          console.log('[DEBUG-OFFLINE] Internet LOST - setting status to offline');
+          setConnectionStatus('offline');
+        } else if (state.isInternetReachable && connectionStatus === 'offline') {
+          // Internet back
+          console.log('[NETINFO] Auto-retry triggered! Internet back');
+          console.log('[DEBUG-OFFLINE] INTERNET IS BACK! isInternetReachable=true, current status:', connectionStatus);
+          console.log('[DEBUG-NET] Auto-retry conditions MET! Attempting reconnect...');
+          console.log('[DEBUG-NET] Resetting attemptRef from:', reconnectAttemptRef.current, 'to 0');
+          console.log('[NetInfo] Back online, retrying...');
+          reconnectAttemptRef.current = 0;
+          setConnectionStatus('connected');
+          handleNetworkReconnect();
+        }
+        
         const currentType = state.type;
         const wasOffline = !lastNetworkType.current || lastNetworkType.current === 'none';
         const isOffline = !state.isConnected || state.type === 'none';
-        
-        // Auto-retry when internet returns
-        if (state.isInternetReachable && connectionStatus === 'offline') {
-          console.log('[NetInfo] Back online, retrying...');
-          reconnectAttemptRef.current = 0;
-          handleNetworkReconnect();
-        }
         
         // Network type changed (e.g., wifi -> cellular, or connection lost)
         if (currentType !== lastNetworkType.current && isLiveRef.current) {
@@ -227,14 +246,6 @@ export default function LiveStreamScreen({ navigation, route }) {
         setKeyboardHeight(0);
       });
 
-      const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-        if (isLiveRef.current) {
-          setShowEndModal(true);
-          return true; // blocks the default back action
-        }
-        return false;
-      });
-
       return () => {
         isMountedRef.current = false;
         console.log('[DEBUG] Component unmounting, isMounted=false');
@@ -249,12 +260,62 @@ export default function LiveStreamScreen({ navigation, route }) {
         }
         keyboardDidShow.remove();
         keyboardDidHide.remove();
-        backHandler.remove();
+        console.log('[LIFECYCLE] Component UNMOUNTING');
         cleanup();
       };
     }, []);
 
+  // Log when connectionStatus changes
+  useEffect(() => {
+    console.log('[STATE] connectionStatus changed to:', connectionStatus);
+    console.log('[DEBUG-OFFLINE] connectionStatus CHANGED to:', connectionStatus);
+  }, [connectionStatus]);
+
+  // Log when isLive changes
+  useEffect(() => {
+    console.log('[STATE] isLive changed to:', isLive);
+  }, [isLive]);
+
+  // Simple stuck-state recovery
+  useEffect(() => {
+    if (isLive && !engineRef.current) {
+      console.log('[RECOVER] Resetting stuck state');
+      setIsLive(false);
+      setConnectionStatus('disconnected');
+    }
+  }, [isLive]);
+
+  // BackHandler with Alert confirmation
+  useEffect(() => {
+    const backAction = () => {
+      if (!isLive) {
+        navigation.goBack();
+        return true;
+      }
+      Alert.alert(
+        'End Live Stream?',
+        'Going back will end your live stream.',
+        [
+          { text: 'Cancel', onPress: () => null, style: 'cancel' },
+          { 
+            text: 'End Stream', 
+            onPress: () => {
+              cleanup();
+              setIsLive(false);
+              navigation.goBack();
+            },
+            style: 'destructive'
+          }
+        ]
+      );
+      return true;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [isLive]);
+
   async function requestPermissions() {
+    console.log('[PERM] Requesting permissions...');
     __DEV__ && console.log('🔐 [requestPermissions] Checking permissions...');
     
     if (Platform.OS === 'android') {
@@ -266,6 +327,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       const cameraGranted = results[PermissionsAndroid.PERMISSIONS.CAMERA] === PermissionsAndroid.RESULTS.GRANTED;
       const audioGranted = results[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED;
+      console.log('[PERM] Camera:', cameraGranted, 'Audio:', audioGranted);
       
       __DEV__ && console.log('🔐 [requestPermissions] Camera granted:', cameraGranted);
       __DEV__ && console.log('🔐 [requestPermissions] Audio granted:', audioGranted);
@@ -289,11 +351,12 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   // Network failover: handle reconnection with exponential backoff
   const handleNetworkReconnect = useCallback(async (isFromError = false) => {
-    console.log(`[DEBUG] handleReconnect called. isReconnectingRef=${isReconnectingRef.current}, attemptRef=${reconnectAttemptRef.current}`);
+    console.log('[FUNC] handleReconnect() STARTED. Attempt:', reconnectAttemptRef.current, 'Status:', connectionStatus);
+    console.log('[DEBUG-RECONNECT] handleReconnect called. attemptRef:', reconnectAttemptRef.current, 'isReconnecting:', isReconnectingRef.current, 'isMounted:', isMountedRef.current);
     
     // Guard: Don't proceed if component unmounted
     if (!isMountedRef.current) {
-      console.log(`[DEBUG] Component unmounted, returning`);
+      console.log('[DEBUG-RECONNECT] Early return - isMounted:', isMountedRef.current);
       return;
     }
     
@@ -303,10 +366,14 @@ export default function LiveStreamScreen({ navigation, route }) {
     }
     
     // Check internet first
+    console.log('[DEBUG-OFFLINE] handleReconnect START. Checking internet...');
     const netInfo = await NetInfo.fetch();
+    console.log('[DEBUG-OFFLINE] NetInfo result:', netInfo.isInternetReachable, netInfo.type);
     if (!netInfo.isInternetReachable) {
+      console.log('[DEBUG-OFFLINE] NO INTERNET detected. Setting status to offline and returning early.');
       console.log('[Network] No internet, showing offline UI');
       setConnectionStatus('offline');
+      console.log('[DEBUG-OFFLINE] Setting connectionStatus to: offline');
       return; // Don't attempt reconnect without internet
     }
     
@@ -412,8 +479,8 @@ export default function LiveStreamScreen({ navigation, route }) {
       __DEV__ && console.log('✅ [Network] Reconnect successful');
       setConnectionStatus('connected');
     } catch (error) {
-      console.error(`[DEBUG] Catch block triggered. Error: ${error.message}`);
-      console.log(`[DEBUG] In catch - attemptRef still: ${reconnectAttemptRef.current}`);
+      console.log('[DEBUG-RECONNECT] handleReconnect FAILED:', error.message);
+      console.log('[DEBUG-RECONNECT] attemptRef is now:', reconnectAttemptRef.current);
       // Use console.log for network errors, not console.error
       if (error.message.includes('Network') || error.message.includes('network') || error.message.includes('offline')) {
         console.log('🌐 [Network] Reconnect failed due to network:', error.message);
@@ -439,6 +506,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }, []);
 
   function switchCamera() {
+    console.log('[BTN] Flip Camera pressed');
     __DEV__ && console.log('🎥 [switchCamera] Switching camera...');
     __DEV__ && console.log('🎥 [switchCamera] Engine exists:', !!engineRef.current);
     
@@ -456,6 +524,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function setup() {
+    console.log('[FUNC] setup() STARTED');
     __DEV__ && console.log('🎬 [setup] ========== SETUP STARTED ==========');
     __DEV__ && console.log('🎬 [setup] currentUser exists:', !!currentUser);
     
@@ -504,7 +573,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         __DEV__ && console.log('❌ [setup] No host token, aborting');
         Alert.alert('Error', 'Could not get streaming token. Please try again.');
         setIsStarting(false); // 🔧 FIXED: Reset button state
-        navigation.goBack();
+        navigation.navigate(ROUTES.HOME);
         return;
       }
 
@@ -526,7 +595,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       if (streamError) {
         Alert.alert('Error', 'Could not start stream.');
         setIsStarting(false); // 🔧 FIXED: Reset button state
-        navigation.goBack();
+        navigation.navigate(ROUTES.HOME);
         return;
       }
 
@@ -554,6 +623,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       engine.registerEventHandler({
         onJoinChannelSuccess: (connection, elapsed) => {
+          console.log('[AGORA] Joined channel! uid:', connection.localUid);
           __DEV__ && console.log('✅ [Agora] Joined channel:', connection.channelId);
           __DEV__ && console.log('✅ [Agora] Local UID:', connection.localUid);
           __DEV__ && console.log('✅ [Agora] Elapsed time:', elapsed);
@@ -590,24 +660,31 @@ export default function LiveStreamScreen({ navigation, route }) {
           __DEV__ && console.log('📹 [Agora] State meaning:', state === 0 ? 'Stopped' : state === 1 ? 'Capturing' : state === 2 ? 'Encoding' : 'Unknown');
         },
         onUserJoined: (connection, uid, elapsed) => {
+          console.log('[AGORA] User joined:', uid);
           __DEV__ && console.log('👤 [Agora] User joined - UID:', uid);
         },
         onUserOffline: (connection, uid, reason) => {
+          console.log('[AGORA] User left:', uid);
           __DEV__ && console.log('👋 [Agora] User offline - UID:', uid, 'Reason:', reason);
         },
         onConnectionStateChanged: (connection, state, reason) => {
+          console.log('[AGORA] State:', state, 'Reason:', reason);
           __DEV__ && console.log('🔗 [Agora] Connection state:', state, 'Reason:', reason);
+          console.log('[DEBUG-AGORA] Connection state changed! State:', state, 'Reason:', reason);
+          console.log('[DEBUG-AGORA] Current connectionStatus before handling:', connectionStatus);
           
           // Agora states: 1=Disconnected, 2=Connecting, 3=Connected, 4=Reconnecting, 5=Failed
           if (state === 1 || state === 5) {
             // Disconnected (1) or Failed (5) - trigger reconnection
             __DEV__ && console.log('🔗 [Agora] Connection lost, will reconnect...');
-            console.log(`[DEBUG] Connection state changed (${state}). Triggering reconnect...`);
+            console.log('[DEBUG-AGORA] State is DISCONNECTED/FAILED, checking if should reconnect...');
+            console.log('[DEBUG-AGORA] isReconnectingRef:', isReconnectingRef.current);
             if (!isMountedRef.current || !engineRef.current) {
               console.log(`[DEBUG] Not mounted or no engine, skipping reconnect trigger`);
               return;
             }
             if (!isReconnectingRef.current) {
+              console.log('[DEBUG-AGORA] Triggering handleReconnect from connection state change');
               handleNetworkReconnect();
             }
           } else if (state === 3) {
@@ -695,7 +772,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       }
       Alert.alert('Error', 'Failed to start live stream: ' + e.message);
       setIsStarting(false);
-      navigation.goBack();
+      navigation.navigate(ROUTES.HOME);
     }
   }
 
@@ -704,13 +781,17 @@ export default function LiveStreamScreen({ navigation, route }) {
       await supabase.from('live_streams').delete().eq('id', streamId);
     }
     await cleanup();
-    navigation.goBack();
+    navigation.navigate(ROUTES.HOME);
   }
 
   async function cleanup() {
+    console.log('[FUNC] cleanup() STARTED. Reason:', 'unmount');
     __DEV__ && console.log('🧹 [cleanup] Cleaning up resources...');
+    console.log('[DEBUG-CLEANUP] Cleanup started. Setting isLive false, isMounted false');
+    console.log('[DEBUG-OFFLINE] Cleanup running. isLive was:', isLive);
     isMountedRef.current = false;
-    console.log('[DEBUG] Cleanup started, isMounted=false');
+    isLiveRef.current = false;
+    setIsLive(false); // Ensure React state is also updated
     
     if (snapshotTimeoutRef.current) {
       __DEV__ && console.log('🧹 [cleanup] Clearing snapshot timeout');
@@ -782,6 +863,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function sendMessage() {
+    console.log('[BTN] Send pressed. Message:', chatInput);
     if (!chatInput.trim() || !streamId || !currentUser) return;
     const msg = chatInput.replace(/<[^>]*>/g, '').trim();
     setChatInput('');
@@ -796,6 +878,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function markAnswered() {
+    console.log('[BTN] Mark Answered pressed');
     if (!selectedQuestion) return;
     await supabase.from('live_questions').update({ is_answered: true, is_selected: false }).eq('id', selectedQuestion.id);
     setSelectedQuestion(null);
@@ -803,28 +886,33 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function dismissQuestion() {
+    console.log('[BTN] Dismiss Question pressed');
     if (!selectedQuestion) return;
     await supabase.from('live_questions').update({ is_selected: false }).eq('id', selectedQuestion.id);
     setSelectedQuestion(null);
   }
 
   async function endStream() {
+    console.log('[FUNC] endStream() STARTED');
     setShowEndModal(true);
   }
 
   async function confirmEndStream() {
+    console.log('[BTN] Confirm End Stream pressed');
     setShowEndModal(false);
     await supabase.from('live_streams').delete().eq('id', streamId);
     await cleanup();
-    navigation.goBack();
+    navigation.navigate(ROUTES.HOME);
   }
 
   const handleStartStreaming = () => {
+    console.log('[BTN] Start Live pressed');
     setIsStarting(true);
     setup();
   };
 
   const handleToggleViewerList = () => {
+    console.log('[BTN] Viewer List pressed');
     setShowViewerList(!showViewerList);
   };
 
@@ -841,21 +929,30 @@ export default function LiveStreamScreen({ navigation, route }) {
   };
 
   const handleTabChat = () => {
+    console.log('[BTN] Chat pressed');
     setActiveTab('chat');
   };
 
   const handleTabQuestions = () => {
+    console.log('[BTN] Questions pressed');
     setActiveTab('questions');
   };
 
   const handleSelectQuestion = (question) => {
+    console.log('[BTN] Select Question pressed:', question?.id);
     selectQuestion(question);
   };
 
   const handleCloseEndModal = () => {
+    console.log('[BTN] Close End Modal pressed');
     setShowEndModal(false);
   };
 
+  // Safety check for engine
+  const hasEngine = engineRef.current !== null;
+  
+  console.log('[RENDER] Rendering. isLive:', isLive, 'status:', connectionStatus, 'engine:', hasEngine);
+  
   if (!isLive) {
     return (
       <View style={styles.loadingContainer}>
@@ -892,7 +989,29 @@ export default function LiveStreamScreen({ navigation, route }) {
       </View>
     );
   }
+  
+  // isLive is true but engine is null - show loading with cancel option
+  if (isLive && !hasEngine) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color="#ef4444" size="large" />
+        <Text style={styles.loadingText}>Initializing stream...</Text>
+        <AnimatedButton 
+          style={[styles.goLiveBtn, { marginTop: 20, backgroundColor: '#64748b' }]}
+          onPress={() => {
+            console.log('[RECOVER] Cancel pressed - resetting stuck state');
+            setIsLive(false);
+            setConnectionStatus('connected');
+            cleanup();
+          }}
+        >
+          <Text style={styles.goLiveBtnText}>Cancel</Text>
+        </AnimatedButton>
+      </View>
+    );
+  }
 
+  console.log('[RENDER] Showing LIVE UI');
   __DEV__ && console.log('🎨 [render] Rendering live stream UI - isLive:', isLive);
   __DEV__ && console.log('🎨 [render] Engine exists:', !!engineRef.current);
   
@@ -908,17 +1027,21 @@ export default function LiveStreamScreen({ navigation, route }) {
         <View style={styles.reconnectOverlay}>
           {connectionStatus === 'reconnecting' ? (
             <>
+              {console.log('[RENDER] Showing RECONNECTING UI. Attempt:', reconnectAttemptRef.current)}
               <ActivityIndicator size="large" color="#fff" />
               <Text style={styles.reconnectText}>Reconnecting...</Text>
               <Text style={styles.reconnectSubtext}>Attempt {reconnectAttemptRef.current}/{MAX_RETRIES}</Text>
             </>
           ) : connectionStatus === 'offline' ? (
             <>
+              {console.log('[RENDER] Showing OFFLINE UI')}
+              {console.log('[DEBUG-OFFLINE] Rendering offline UI. Current status:', connectionStatus)}
               <Text style={styles.reconnectIcon}>📡</Text>
               <Text style={styles.reconnectText}>No internet connection</Text>
               <AnimatedButton 
                 style={styles.reconnectBtn}
                 onPress={() => {
+                  console.log('[BTN] Retry pressed. Current status:', connectionStatus);
                   // Check internet again
                   NetInfo.fetch().then(state => {
                     if (state.isInternetReachable) {
@@ -960,7 +1083,10 @@ export default function LiveStreamScreen({ navigation, route }) {
         >
           <Text style={styles.viewerText}>👁️ {viewerCount}</Text>
         </AnimatedButton>
-        <AnimatedButton style={styles.endBtn} onPress={endStream}>
+        <AnimatedButton style={styles.endBtn} onPress={() => {
+          console.log('[BTN] End pressed. isLive:', isLive);
+          endStream();
+        }}>
           <Text style={styles.endBtnText}>End</Text>
         </AnimatedButton>
 
@@ -974,7 +1100,10 @@ export default function LiveStreamScreen({ navigation, route }) {
                 }
                 ({showEngagedTab && viewerListMode === 'engaged' ? engagedViewers.length : viewerCount})
               </Text>
-              <AnimatedButton onPress={handleCloseViewerList}>
+              <AnimatedButton onPress={() => {
+                console.log('[BTN] Close Viewer List pressed');
+                handleCloseViewerList();
+              }}>
                 <Text style={styles.closeListText}>✕</Text>
               </AnimatedButton>
             </View>
