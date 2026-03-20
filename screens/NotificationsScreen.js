@@ -146,6 +146,7 @@ export default function NotificationsScreen({ navigation }) {
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
   const [isOffline,     setIsOffline]     = useState(false);
+  const [showOffline,   setShowOffline]   = useState(false);
   const { user: authUser } = useUser();
   const currentUserId = authUser?.id ?? null;
   const flatListRef = useRef(null);
@@ -183,8 +184,9 @@ export default function NotificationsScreen({ navigation }) {
     
     // Check network status
     NetInfo.fetch().then(state => {
-      const offline = !state.isConnected;
+      const offline = !state.isInternetReachable;
       setIsOffline(offline);
+      setShowOffline(offline);
       if (!offline) {
         loadNotifications();
       } else {
@@ -194,7 +196,9 @@ export default function NotificationsScreen({ navigation }) {
     
     // Subscribe to network changes
     const unsubscribeNetInfo = NetInfo.addEventListener(state => {
-      setIsOffline(!state.isConnected);
+      const offline = !state.isInternetReachable;
+      setIsOffline(offline);
+      setShowOffline(offline);
     });
 
     const channel = supabase
@@ -287,10 +291,41 @@ export default function NotificationsScreen({ navigation }) {
     <View style={styles.fullScreen}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       
-      {/* Offline banner */}
-      {isOffline && (
-        <View style={styles.offlineBanner}>
-          <Text style={styles.offlineBannerText}>📴 Offline mode</Text>
+      {/* Offline floating pill */}
+      {showOffline && (
+        <View style={{
+          position: 'absolute',
+          top: 88,
+          alignSelf: 'center',
+          backgroundColor: '#1a1a1a',
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 16,
+          paddingVertical: 8,
+          borderRadius: 20,
+          borderWidth: 1,
+          borderColor: '#ff4757',
+          zIndex: 999,
+          elevation: 5,
+          shadowColor: '#000',
+          shadowOffset: {width: 0, height: 2},
+          shadowOpacity: 0.25,
+          shadowRadius: 3.84,
+        }}>
+          <View style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: '#ff4757',
+            marginRight: 8
+          }} />
+          <Text style={{
+            color: '#fff',
+            fontSize: 13,
+            fontWeight: '600'
+          }}>
+            No internet connection
+          </Text>
         </View>
       )}
       

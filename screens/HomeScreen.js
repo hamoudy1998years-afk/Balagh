@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, TouchableOpacity, useWindowDimensions, AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { FlashList } from '@shopify/flash-list';
 import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { TabView } from 'react-native-tab-view';
@@ -44,6 +45,7 @@ function LiveFeed({ navigation }) {
   const [streams, setStreams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isConnected, setIsConnected] = useState(true);
 
   const intervalRef = useRef(null);
 
@@ -77,16 +79,26 @@ function LiveFeed({ navigation }) {
   }, []);
 
   async function loadStreams() {
-    const tenSecondsAgo = new Date(Date.now() - 10 * 1000).toISOString();
-    const { data } = await supabase
-      .from('live_streams')
-      .select('*, profiles(username, avatar_url)')
-      .eq('is_live', true)
-      .gt('last_ping', tenSecondsAgo)
-      .order('created_at', { ascending: false });
-    setStreams(data ?? []);
-    setLoading(false);
-    setRefreshing(false);
+    if (!isConnected) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    try {
+      const tenSecondsAgo = new Date(Date.now() - 10 * 1000).toISOString();
+      const { data } = await supabase
+        .from('live_streams')
+        .select('*, profiles(username, avatar_url)')
+        .eq('is_live', true)
+        .gt('last_ping', tenSecondsAgo)
+        .order('created_at', { ascending: false });
+      setStreams(data ?? []);
+    } catch (error) {
+      console.log('[Home] loadStreams error:', error.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }
 
   if (loading) {
@@ -471,6 +483,8 @@ export default function HomeScreen({ navigation }) {
     { key: 'foryou', title: 'For You' },
     { key: 'live', title: 'Live' },
   ]);
+  const [isConnected, setIsConnected] = useState(true);
+  const [showOffline, setShowOffline] = useState(false);
 
   const { width: screenWidth } = useWindowDimensions();
   const isFocused = useIsFocused();
@@ -485,6 +499,15 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => { indexRef.current = index; }, [index]);
   useEffect(() => { isFocusedRef.current = isFocused; }, [isFocused]);
+
+  // NetInfo for offline detection
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setShowOffline(!state.isInternetReachable);
+    });
+    NetInfo.fetch().then(state => setShowOffline(!state.isInternetReachable));
+    return () => unsubscribe();
+  }, []);
 
   // PULSE ANIMATION EFFECT - This creates the looping pulse
   useEffect(() => {
@@ -518,35 +541,40 @@ export default function HomeScreen({ navigation }) {
   }, [index, isFocused]);
 
   async function preloadFollowingFeed() {
+    if (!isConnected) return;
     if (isCacheValid('following')) return;
 
     const user = authUser;
     if (!user) return;
 
-    const { data: follows } = await supabase
-      .from('follows')
-      .select('following_id')
-      .eq('follower_id', user.id);
+    try {
+      const { data: follows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', user.id);
 
-    if (!follows || follows.length === 0) {
-      feedCache.following = [];
+      if (!follows || follows.length === 0) {
+        feedCache.following = [];
+        feedCache.ts.following = Date.now();
+        return;
+      }
+
+      const followingIds = follows.map(f => f.following_id);
+
+      const { data } = await supabase
+        .from('videos')
+        .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+        .in('user_id', followingIds)
+        .neq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      feedCache.following = data ?? [];
       feedCache.ts.following = Date.now();
-      return;
+      __DEV__ && console.log('Following feed preloaded:', data?.length || 0, 'videos');
+    } catch (error) {
+      console.log('[Home] preloadFollowingFeed error:', error.message);
     }
-
-    const followingIds = follows.map(f => f.following_id);
-
-    const { data } = await supabase
-      .from('videos')
-      .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
-      .in('user_id', followingIds)
-      .neq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
-
-    feedCache.following = data ?? [];
-    feedCache.ts.following = Date.now();
-    __DEV__ && console.log('Following feed preloaded:', data?.length || 0, 'videos');
   }
 
   useEffect(() => {
@@ -671,6 +699,42 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
+      {showOffline && (
+        <View style={{
+          position: 'absolute',
+          top: 100,
+          alignSelf: 'center',
+          backgroundColor: '#1a1a1a',
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 16,
+          paddingVertical: 8,
+          borderRadius: 20,
+          borderWidth: 1,
+          borderColor: '#ff4757',
+          zIndex: 999,
+          elevation: 5,
+          shadowColor: '#000',
+          shadowOffset: {width: 0, height: 2},
+          shadowOpacity: 0.25,
+          shadowRadius: 3.84,
+        }}>
+          <View style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: '#ff4757',
+            marginRight: 8
+          }} />
+          <Text style={{
+            color: '#fff',
+            fontSize: 13,
+            fontWeight: '600'
+          }}>
+            No internet connection
+          </Text>
+        </View>
+      )}
       <TabView
         navigationState={{ index, routes }}
         renderScene={renderScene}

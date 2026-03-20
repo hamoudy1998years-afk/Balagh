@@ -1,5 +1,4 @@
 import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -231,17 +230,9 @@ const linking = {
 
 function App() {
   const [session, setSession] = useState(undefined);
-  const [isOffline, setIsOffline] = useState(false);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
   const navigationRef = useRef(null);
-
-  useEffect(() => {
-    const unsubscribeNetInfo = NetInfo.addEventListener(state => {
-      setIsOffline(state.isConnected === false);
-    });
-    return () => unsubscribeNetInfo();
-  }, []);
 
   useEffect(() => {
     runMigrationIfNeeded();
@@ -366,11 +357,6 @@ function App() {
     <UserProvider>
       <DownloadProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
-          {isOffline && (
-            <View style={styles.offlineBanner} pointerEvents="none">
-              <Text style={styles.offlineBannerText}>No internet connection</Text>
-            </View>
-          )}
           <SafeAreaProvider>
             <BottomSheetModalProvider>
               <NavigationContainer ref={navigationRef} linking={linking}>
@@ -409,19 +395,4 @@ function App() {
 export default Sentry.wrap(App);
 
 const styles = StyleSheet.create({
-  offlineBanner: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 9999,
-    backgroundColor: '#1f2937',
-    paddingVertical: 6,
-    alignItems: 'center',
-  },
-  offlineBannerText: {
-    color: '#f9fafb',
-    fontSize: 13,
-    fontWeight: '600',
-  },
 });
