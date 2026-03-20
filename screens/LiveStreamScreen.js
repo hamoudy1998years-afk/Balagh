@@ -23,6 +23,7 @@ import RNFS from 'react-native-fs';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
+import { filterMessage } from '../utils/moderation';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
@@ -152,6 +153,9 @@ export default function LiveStreamScreen({ navigation, route }) {
   const reconnectAttemptRef = useRef(0);
   const isMountedRef = useRef(true);
   const MAX_RETRIES = 5;
+
+  // Chat moderation state
+  const [userStrikes, setUserStrikes] = useState({});
 
   const engineRef = useRef(null);
   const flatListRef = useRef(null);
@@ -573,7 +577,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         __DEV__ && console.log('❌ [setup] No host token, aborting');
         Alert.alert('Error', 'Could not get streaming token. Please try again.');
         setIsStarting(false); // 🔧 FIXED: Reset button state
-        navigation.navigate(ROUTES.HOME);
+        navigation.goBack();
         return;
       }
 
@@ -595,7 +599,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       if (streamError) {
         Alert.alert('Error', 'Could not start stream.');
         setIsStarting(false); // 🔧 FIXED: Reset button state
-        navigation.navigate(ROUTES.HOME);
+        navigation.goBack();
         return;
       }
 
@@ -772,7 +776,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       }
       Alert.alert('Error', 'Failed to start live stream: ' + e.message);
       setIsStarting(false);
-      navigation.navigate(ROUTES.HOME);
+      navigation.goBack();
     }
   }
 
@@ -781,7 +785,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       await supabase.from('live_streams').delete().eq('id', streamId);
     }
     await cleanup();
-    navigation.navigate(ROUTES.HOME);
+    navigation.goBack();
   }
 
   async function cleanup() {
@@ -838,7 +842,31 @@ export default function LiveStreamScreen({ navigation, route }) {
       .channel(`live_messages_${sid}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_messages', filter: `stream_id=eq.${sid}` },
         (payload) => {
-          setMessages(prev => [...prev, payload.new]);
+          // Chat moderation check
+          const moderationResult = filterMessage(payload.new.message, payload.new.username);
+          
+          if (!moderationResult.allowed) {
+            console.log('[MODERATION] Blocked message from:', payload.new.username);
+            
+            // Track strikes
+            const userId = payload.new.user_id;
+            const newStrikes = (userStrikes[userId] || 0) + 1;
+            setUserStrikes(prev => ({...prev, [userId]: newStrikes}));
+            
+            if (newStrikes >= 3) {
+              console.log('[MODERATION] Auto-kick user:', userId);
+              // Could add kick logic here
+            }
+            return; // Don't add to chat
+          }
+          
+          // Use filtered text if links were removed
+          const displayMessage = {
+            ...payload.new,
+            message: moderationResult.filteredText
+          };
+          
+          setMessages(prev => [...prev, displayMessage]);
           setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
         })
       .subscribe();
@@ -866,9 +894,17 @@ export default function LiveStreamScreen({ navigation, route }) {
     console.log('[BTN] Send pressed. Message:', chatInput);
     if (!chatInput.trim() || !streamId || !currentUser) return;
     const msg = chatInput.replace(/<[^>]*>/g, '').trim();
+    
+    // Moderation check for host's own messages
+    const moderationResult = filterMessage(msg, username);
+    if (!moderationResult.allowed) {
+      Alert.alert('Message Blocked', 'Your message contains inappropriate content.');
+      return;
+    }
+    
     setChatInput('');
     await supabase.from('live_messages').insert({
-      stream_id: streamId, user_id: currentUser.id, username, message: msg,
+      stream_id: streamId, user_id: currentUser.id, username, message: moderationResult.filteredText,
     });
   }
 
@@ -902,7 +938,7 @@ export default function LiveStreamScreen({ navigation, route }) {
     setShowEndModal(false);
     await supabase.from('live_streams').delete().eq('id', streamId);
     await cleanup();
-    navigation.navigate(ROUTES.HOME);
+    navigation.goBack();
   }
 
   const handleStartStreaming = () => {
