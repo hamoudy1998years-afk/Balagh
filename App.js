@@ -37,6 +37,7 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import AdminScreen from './screens/AdminScreen';
 import AgeGateScreen from './screens/AgeGateScreen';
+import OnboardingScreen from './screens/OnboardingScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import * as Sentry from '@sentry/react-native';
 import { loadBannedWords } from './utils/moderation';
@@ -240,6 +241,7 @@ const linking = {
 function App() {
   const [session, setSession] = useState(undefined);
   const [ageVerified, setAgeVerified] = useState(null); // null = loading, false = show gate, true = show app
+  const [onboardingCompleted, setOnboardingCompleted] = useState(null);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
   const navigationRef = useRef(null);
@@ -255,6 +257,20 @@ function App() {
     }
     checkAge();
   }, []);
+
+  useEffect(() => {
+    async function checkOnboarding() {
+      try {
+        const completed = await AsyncStorage.getItem('onboardingCompleted');
+        setOnboardingCompleted(completed === 'true');
+      } catch (e) {
+        setOnboardingCompleted(false);
+      }
+    }
+    if (ageVerified !== null) {
+      checkOnboarding();
+    }
+  }, [ageVerified]);
 
   useEffect(() => {
     // Handle push notification taps
@@ -404,12 +420,16 @@ function App() {
     }
   }
 
-  if (ageVerified === null) {
+  if (ageVerified === null || onboardingCompleted === null) {
     return (
       <View style={{flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center'}}>
         <ActivityIndicator size="large" color="#FFD700" />
       </View>
     );
+  }
+
+  if (onboardingCompleted === false) {
+    return <OnboardingScreen onComplete={() => setOnboardingCompleted(true)} />;
   }
 
   if (!ageVerified) {
