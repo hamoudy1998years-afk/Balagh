@@ -57,13 +57,13 @@
       "expo-video",
       "expo-secure-store",
       [
-      "expo-notifications",
-      {
-        "icon": "./assets/icon.png",
-        "color": "#F5A623",
-        "sounds": []
-      }
-    ],
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#F5A623",
+          "sounds": []
+        }
+      ],
       [
         "expo-local-authentication",
         {
@@ -86,7 +86,8 @@
         }
       ],
       "expo-web-browser",
-      "react-native-video"
+      "react-native-video",
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {
