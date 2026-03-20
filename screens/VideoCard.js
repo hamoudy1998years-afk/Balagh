@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
 import { useUser } from '../context/UserContext';
+import { videoCache } from '../utils/VideoCache';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
   useWindowDimensions, Animated, Pressable, Image,
@@ -48,6 +49,7 @@ function VideoCard({
   const [isLiking, setIsLiking] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
+  const [videoUri, setVideoUri] = useState(item.video_url);
   const { user: authUser, loading: authLoading } = useUser();
   const currentUserId = authUser?.id ?? null;
   const [paused, setPaused] = useState(false);
@@ -75,6 +77,26 @@ function VideoCard({
   useEffect(() => { 
     setLiked(initialLiked); 
   }, [initialLiked]);
+
+  // Load cached video on mount
+  useEffect(() => {
+    const loadCachedVideo = async () => {
+      // Check if we have this video cached
+      const cachedUri = await videoCache.getCachedVideo(item.video_url);
+      if (cachedUri) {
+        console.log('[VideoCard] Using cached video:', cachedUri);
+        setVideoUri(cachedUri);
+      } else {
+        // Use network URL and start caching in background for next time
+        setVideoUri(item.video_url);
+        // Only cache if video is > 10 seconds watched (optional optimization)
+        // Or cache immediately:
+        videoCache.cacheVideo(item.video_url);
+      }
+    };
+    
+    loadCachedVideo();
+  }, [item.video_url]);
 
   useEffect(() => {
     const channel = supabase
@@ -347,8 +369,7 @@ function VideoCard({
       {/* FAST: No key={item.id}, no poster, simple style */}
       <Video
         ref={player}
-        source={{ uri: item.video_url, useCaching: true }}
-        cache={{ size: 100 }}
+        source={{ uri: videoUri }}
         style={styles.video}
         resizeMode="contain"
         repeat={true}
