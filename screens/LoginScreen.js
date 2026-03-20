@@ -809,9 +809,6 @@ const handleClosePinModal = useCallback(() => {
             scrollEnabled={!showDropdown}
             nestedScrollEnabled={true}
           >
-            <AnimatedButton onPress={handleNavigateMain} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
-              <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
-            </AnimatedButton>
             <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
             <Text style={styles.title}>Bushrann</Text>
             <Text style={styles.subtitle}>Welcome back</Text>
@@ -922,12 +919,6 @@ const handleClosePinModal = useCallback(() => {
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Login</Text>}
             </AnimatedButton>
 
-            <View style={styles.dividerContainer}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
             <AnimatedButton style={styles.googleButton} onPress={handleGoogleLogin} disabled={googleLoading}>
               {googleLoading ? <ActivityIndicator color="#4285F4" /> : (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -938,6 +929,11 @@ const handleClosePinModal = useCallback(() => {
                 </View>
               )}
             </AnimatedButton>
+
+            <TouchableOpacity style={styles.guestButton} onPress={handleNavigateMain} activeOpacity={0.8}>
+              <Text style={styles.guestButtonText}>Continue as Guest</Text>
+              <Text style={styles.guestSubtext}>Browse without account</Text>
+            </TouchableOpacity>
 
             <AnimatedButton onPress={showResetPasswordDialog}>
               <Text style={[styles.link, { color: COLORS.gold }]}>Forgot Password?</Text>
@@ -1154,6 +1150,41 @@ const styles = StyleSheet.create({
   },
   link: { color: COLORS.textGray, fontSize: 14, marginTop: 4 },
   linkBold: { color: COLORS.gold, fontWeight: '700' },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+    width: '100%',
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#374151',
+  },
+  dividerText: {
+    color: '#6b7280',
+    marginHorizontal: 12,
+    fontSize: 14,
+  },
+  guestButton: {
+    width: '100%',
+    padding: 18,
+    backgroundColor: '#6366f1',
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  guestButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  guestSubtext: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    marginTop: 4,
+  },
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center', alignItems: 'center',
