@@ -35,6 +35,7 @@ import { usePushNotifications } from './hooks/usePushNotifications';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import * as Sentry from '@sentry/react-native';
+import { loadBannedWords } from './utils/moderation';
 
 // ADD THIS IMPORT
 import { UserProvider } from './context/UserContext';
@@ -233,6 +234,10 @@ function App() {
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
   const navigationRef = useRef(null);
+
+  useEffect(() => {
+    loadBannedWords();
+  }, []);
 
   useEffect(() => {
     runMigrationIfNeeded();
