@@ -8,7 +8,8 @@ import { useUser } from '../context/UserContext';
 
 export default function VideoDetailScreen({ navigation }) {
   const route = useRoute();
-  const { videoId } = route.params ?? {};
+  const videoId = route.params?.id || route.params?.videoId;
+  console.log('[VideoDetail] Extracted videoId:', videoId);
   const { height } = useWindowDimensions();
   const playerRef = useRef(null);
   const { user: authUser } = useUser();
@@ -16,37 +17,87 @@ export default function VideoDetailScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  // Debug logs at component start
+  console.log('[VideoDetail] Route params:', route.params);
+  console.log('[VideoDetail] Video object from params:', route.params?.video ? 'exists' : 'null');
+
   useEffect(() => {
-    loadVideo();
+    console.log('[VideoDetail] useEffect triggered. videoId:', videoId, 'video state:', video ? 'exists' : 'null');
+    if (videoId && !route.params?.video) {
+      fetchVideoById(videoId);
+    } else if (route.params?.video) {
+      setVideo(route.params.video);
+      setLoading(false);
+    }
   }, [videoId]);
 
-  async function loadVideo() {
-    if (!videoId) { setError(true); setLoading(false); return; }
-    const { data, error } = await supabase
-      .from('videos')
-      .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
-      .eq('id', videoId)
-      .single();
-    if (error || !data) { setError(true); setLoading(false); return; }
+  // Debug log when video state updates
+  useEffect(() => {
+    console.log('[VideoDetail] Video state updated:', video ? 'video loaded' : 'video null');
+  }, [video]);
 
-    const user = authUser;
-    let liked = false;
-    let followed = false;
-
-    if (user) {
-      const [{ data: likeData }, { data: followData }] = await Promise.all([
-        supabase.from('likes').select('id').eq('user_id', user.id).eq('video_id', data.id).maybeSingle(),
-        supabase.from('follows').select('id').eq('follower_id', user.id).eq('following_id', data.user_id).maybeSingle(),
-      ]);
-      liked = !!likeData;
-      followed = !!followData;
+  async function fetchVideoById(id) {
+    try {
+      console.log('[VideoDetail] Starting fetch for ID:', id);
+      setLoading(true);
+      
+      // Fetch video WITHOUT broken foreign key join
+      const { data: videoData, error: videoError } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      
+      if (videoError) {
+        console.error('[VideoDetail] Supabase error:', videoError.message);
+        throw videoError;
+      }
+      
+      if (!videoData) {
+        console.log('[VideoDetail] No video found');
+        setVideo(null);
+        setLoading(false);
+        return;
+      }
+      
+      console.log('[VideoDetail] Video fetched:', videoData.id);
+      
+      // Fetch profile separately (no FK join)
+      let profileData = null;
+      if (videoData.user_id) {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url')
+          .eq('id', videoData.user_id)
+          .single();
+          
+        if (profileError) {
+          console.log('[VideoDetail] Profile fetch error:', profileError.message);
+        } else if (profile) {
+          profileData = profile;
+          console.log('[VideoDetail] Profile fetched:', profile.username);
+        }
+      }
+      
+      // Combine them
+      const combined = {
+        ...videoData,
+        profiles: profileData || { username: 'Unknown' }
+      };
+      
+      console.log('[VideoDetail] Setting video state with profile');
+      setVideo(combined);
+      
+    } catch (error) {
+      console.error('[VideoDetail] Fetch error:', error.message);
+      setVideo(null);
+    } finally {
+      setLoading(false);
     }
-
-    setVideo({ ...data, initialLiked: liked, initialFollowed: followed });
-    setLoading(false);
   }
 
   if (loading) {
+    console.log('[VideoDetail] Rendering loading state');
     return (
       <View style={styles.center}>
         <ActivityIndicator color={COLORS.gold} size="large" />
@@ -54,7 +105,8 @@ export default function VideoDetailScreen({ navigation }) {
     );
   }
 
-  if (error) {
+  if (error || !video) {
+    console.log('[VideoDetail] Rendering not found state');
     return (
       <View style={styles.center}>
         <Text style={{ color: '#fff', fontSize: 16 }}>Video not found.</Text>
@@ -62,6 +114,7 @@ export default function VideoDetailScreen({ navigation }) {
     );
   }
 
+  console.log('[VideoDetail] Rendering video:', video?.id, 'caption:', video?.caption?.substring(0, 30));
   return (
     <View style={styles.container}>
       <TouchableOpacity
