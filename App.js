@@ -26,14 +26,17 @@ import SettingsScreen from './screens/SettingsScreen';
 import AvatarCropScreen from './screens/AvatarCropScreen';
 import VideoDetailScreen from './screens/VideoDetailScreen';
 import { useEffect, useState, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
+import * as Notifications from 'expo-notifications';
 import { COLORS } from './constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import AdminScreen from './screens/AdminScreen';
+import AgeGateScreen from './screens/AgeGateScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import * as Sentry from '@sentry/react-native';
 import { loadBannedWords } from './utils/moderation';
@@ -51,7 +54,7 @@ WebBrowser.maybeCompleteAuthSession();
 Sentry.init({
   dsn: 'https://e204442193cbb2af057e44b9613b630a@o4511072669335552.ingest.us.sentry.io/4511072675954688',
   enableInExpoDevelopment: true,
-  debug: __DEV__,
+  debug: false,
   tracesSampleRate: 1.0,
   attachScreenshot: true,
 });
@@ -222,22 +225,72 @@ function MainTabs({ session }) {
 
 // ADD THIS - tells React Navigation how to handle deep links
 const linking = {
-  prefixes: ['bushrann://'],
+  prefixes: ['bushrann://', 'https://bushrann.app'],
   config: {
     screens: {
       ResetPassword: 'auth/callback',
+      VideoDetail: 'video/:id',
+      UserProfile: 'user/:id',
+      WatchLive: 'live/:streamId',
+      LiveStream: 'go-live',
     },
   },
 };
 
 function App() {
   const [session, setSession] = useState(undefined);
+  const [ageVerified, setAgeVerified] = useState(null); // null = loading, false = show gate, true = show app
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
   const navigationRef = useRef(null);
 
   useEffect(() => {
+    async function checkAge() {
+      try {
+        const verified = await AsyncStorage.getItem('ageVerified');
+        setAgeVerified(verified === 'true');
+      } catch (e) {
+        setAgeVerified(false);
+      }
+    }
+    checkAge();
+  }, []);
+
+  useEffect(() => {
+    // Handle push notification taps
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      
+      if (data?.type === 'video' && data?.videoId) {
+        navigationRef.current?.navigate('VideoDetail', { id: data.videoId });
+      } else if (data?.type === 'live' && data?.streamId) {
+        navigationRef.current?.navigate('WatchLive', { stream: { id: data.streamId } });
+      } else if (data?.type === 'follow' && data?.userId) {
+        navigationRef.current?.navigate('UserProfile', { profileUserId: data.userId });
+      } else if (data?.type === 'message') {
+        navigationRef.current?.navigate('Notifications');
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
     loadBannedWords();
+  }, []);
+
+  // Deep link logging
+  useEffect(() => {
+    const linkingSub = Linking.addEventListener('url', ({ url }) => {
+      console.log('[DEEP LINK] URL received:', url);
+    });
+    
+    // Also log initial URL
+    Linking.getInitialURL().then(url => {
+      if (url) console.log('[DEEP LINK] Initial URL:', url);
+    });
+    
+    return () => linkingSub.remove();
   }, []);
 
   useEffect(() => {
@@ -311,6 +364,7 @@ function App() {
 
   // ADD THIS HELPER FUNCTION
   async function handleDeepLink(url) {
+    console.log('[DEEP LINK] handleDeepLink called with:', url);
     if (!url || !url.startsWith('bushrann://')) return;
     
     // Check if it's a recovery link
@@ -348,6 +402,18 @@ function App() {
         }
       }
     }
+  }
+
+  if (ageVerified === null) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center'}}>
+        <ActivityIndicator size="large" color="#FFD700" />
+      </View>
+    );
+  }
+
+  if (!ageVerified) {
+    return <AgeGateScreen onVerified={() => setAgeVerified(true)} />;
   }
 
   if (session === undefined) {

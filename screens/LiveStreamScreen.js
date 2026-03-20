@@ -31,12 +31,6 @@ const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 // 🔧 FIXED: Removed trailing space
 const THUMBNAIL_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 
-// 🔍 DEBUG: Log environment variables on module load
-__DEV__ && console.log('📹 [LiveStreamScreen] Module loaded');
-__DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID exists:', !!AGORA_APP_ID);
-__DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID length:', AGORA_APP_ID?.length);
-__DEV__ && console.log('📹 [LiveStreamScreen] THUMBNAIL_SERVER_URL exists:', !!THUMBNAIL_SERVER_URL);
-
 async function getAgoraToken(channelName, uid, role) {
   console.log('[FUNC] getAgoraToken() STARTED for role:', role);
   console.log('[DEBUG-TOKEN] Fetching token... internet:', 'checking...');

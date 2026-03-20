@@ -7,15 +7,7 @@ import AnimatedButton from './AnimatedButton';
 export default function ProfileVideosScreen({ route, navigation }) {
   const { height, width } = useWindowDimensions();
   const { videos: videosParam, startIndex } = route.params ?? {};
-  
-  console.log('[ProfileVideosScreen] route.params:', route.params);
-  console.log('[ProfileVideosScreen] videosParam:', route.params?.videos);
-  console.log('[ProfileVideosScreen] videosParam length:', route.params?.videos?.length);
-  console.log('[ProfileVideosScreen] startIndex:', route.params?.startIndex);
-  
   const videos = videosParam || []; // Ensure videos is always an array
-  console.log('[ProfileVideosScreen] videos array length:', videos.length);
-  
   const [activeIndex, setActiveIndex] = useState(startIndex ?? 0);
   const playerPool = useVideoPlayerPool();
 

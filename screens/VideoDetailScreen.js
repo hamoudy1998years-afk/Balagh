@@ -9,7 +9,6 @@ import { useUser } from '../context/UserContext';
 export default function VideoDetailScreen({ navigation }) {
   const route = useRoute();
   const videoId = route.params?.id || route.params?.videoId;
-  console.log('[VideoDetail] Extracted videoId:', videoId);
   const { height } = useWindowDimensions();
   const playerRef = useRef(null);
   const { user: authUser } = useUser();
@@ -17,12 +16,7 @@ export default function VideoDetailScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  // Debug logs at component start
-  console.log('[VideoDetail] Route params:', route.params);
-  console.log('[VideoDetail] Video object from params:', route.params?.video ? 'exists' : 'null');
-
   useEffect(() => {
-    console.log('[VideoDetail] useEffect triggered. videoId:', videoId, 'video state:', video ? 'exists' : 'null');
     if (videoId && !route.params?.video) {
       fetchVideoById(videoId);
     } else if (route.params?.video) {
@@ -31,14 +25,8 @@ export default function VideoDetailScreen({ navigation }) {
     }
   }, [videoId]);
 
-  // Debug log when video state updates
-  useEffect(() => {
-    console.log('[VideoDetail] Video state updated:', video ? 'video loaded' : 'video null');
-  }, [video]);
-
   async function fetchVideoById(id) {
     try {
-      console.log('[VideoDetail] Starting fetch for ID:', id);
       setLoading(true);
       
       // Fetch video WITHOUT broken foreign key join
@@ -54,13 +42,10 @@ export default function VideoDetailScreen({ navigation }) {
       }
       
       if (!videoData) {
-        console.log('[VideoDetail] No video found');
         setVideo(null);
         setLoading(false);
         return;
       }
-      
-      console.log('[VideoDetail] Video fetched:', videoData.id);
       
       // Fetch profile separately (no FK join)
       let profileData = null;
@@ -71,11 +56,8 @@ export default function VideoDetailScreen({ navigation }) {
           .eq('id', videoData.user_id)
           .single();
           
-        if (profileError) {
-          console.log('[VideoDetail] Profile fetch error:', profileError.message);
-        } else if (profile) {
+        if (!profileError && profile) {
           profileData = profile;
-          console.log('[VideoDetail] Profile fetched:', profile.username);
         }
       }
       
@@ -85,7 +67,6 @@ export default function VideoDetailScreen({ navigation }) {
         profiles: profileData || { username: 'Unknown' }
       };
       
-      console.log('[VideoDetail] Setting video state with profile');
       setVideo(combined);
       
     } catch (error) {
@@ -97,7 +78,6 @@ export default function VideoDetailScreen({ navigation }) {
   }
 
   if (loading) {
-    console.log('[VideoDetail] Rendering loading state');
     return (
       <View style={styles.center}>
         <ActivityIndicator color={COLORS.gold} size="large" />
@@ -106,7 +86,6 @@ export default function VideoDetailScreen({ navigation }) {
   }
 
   if (error || !video) {
-    console.log('[VideoDetail] Rendering not found state');
     return (
       <View style={styles.center}>
         <Text style={{ color: '#fff', fontSize: 16 }}>Video not found.</Text>
@@ -114,7 +93,6 @@ export default function VideoDetailScreen({ navigation }) {
     );
   }
 
-  console.log('[VideoDetail] Rendering video:', video?.id, 'caption:', video?.caption?.substring(0, 30));
   return (
     <View style={styles.container}>
       <TouchableOpacity

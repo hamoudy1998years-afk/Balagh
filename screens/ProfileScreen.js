@@ -659,8 +659,6 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }, [globalUser, cachedUser, targetUserId, isOffline]);
   const openVideo = useCallback((videos, index) => {
-    console.log('[ProfileScreen] openVideo called with videos:', videos?.length, 'startIndex:', index);
-    console.log('[ProfileScreen] First video ID:', videos?.[0]?.id);
     navigation.navigate(ROUTES.PROFILE_VIDEOS, { videos, startIndex: index });
   }, [navigation]);
 
@@ -672,7 +670,6 @@ export default function ProfileScreen({ route, navigation }) {
         const videosToPass = activeTab === 'videos' ? publicVideos : 
                             activeTab === 'private' ? privateVideos : 
                             likedVideos;
-        console.log('[ProfileScreen] onPress - activeTab:', activeTab, 'videosToPass.length:', videosToPass?.length);
         openVideo(videosToPass, index);
       }} 
       onLongPress={handleLongPress} 
@@ -821,7 +818,6 @@ export default function ProfileScreen({ route, navigation }) {
   ), [profile, isScholar, scholarData, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation]);
 
   const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
-  console.log('[ProfileScreen] activeVideos count:', activeVideos?.length, 'activeTab:', activeTab);
 
   // Check for cached user when globalUser is null (offline scenario)
   const [cachedUser, setCachedUser] = useState(null);
