@@ -458,6 +458,10 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         maxToRenderPerBatch={2}
         initialNumToRender={1}
         removeClippedSubviews={true}
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 0,
+          autoscrollToTopThreshold: 10
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
