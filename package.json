@@ -24,7 +24,6 @@
     "expo-auth-session": "~55.0.7",
     "expo-camera": "~55.0.9",
     "expo-crypto": "~55.0.9",
-    "expo-dev-client": "~55.0.11",
     "expo-file-system": "~55.0.10",
     "expo-image-manipulator": "~55.0.9",
     "expo-image-picker": "~55.0.11",

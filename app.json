@@ -3,7 +3,8 @@
     "name": "Bushrann",
     "slug": "Balagh",
     "scheme": "bushrann",
-    "version": "1.0.0",
+    "version": "1.1.0",
+    "privacyPolicyUrl": "https://bushrann.app/privacy",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -93,6 +94,7 @@
       "eas": {
         "projectId": "5804d13c-1244-4972-8b7a-083f99fbb885"
       }
-    }
+    },
+    "termsOfServiceUrl": "https://bushrann.app/terms"
   }
 }
