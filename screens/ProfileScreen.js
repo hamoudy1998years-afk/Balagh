@@ -2,6 +2,7 @@ import {
   View, Text, StyleSheet, FlatList,
   Image, Modal, Alert, useWindowDimensions,
   StatusBar, RefreshControl, Animated, Pressable,
+  TouchableOpacity,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import React, { useReducer, useEffect as useEffectHook, useCallback, useRef, useState } from 'react';
@@ -758,13 +759,21 @@ export default function ProfileScreen({ route, navigation }) {
       </View>
 
       {isOwnProfile ? (
-        !isScholar && (
-          <View style={styles.actionButtons}>
-            <AnimatedButton style={styles.scholarApplyBtn} onPress={handleNavigateApplyScholar}>
-              <Text style={styles.scholarApplyBtnText}>🎓 Apply as Scholar</Text>
-            </AnimatedButton>
-          </View>
-        )
+        <>
+          {!isScholar && (
+            <View style={styles.actionButtons}>
+              <AnimatedButton style={styles.scholarApplyBtn} onPress={handleNavigateApplyScholar}>
+                <Text style={styles.scholarApplyBtnText}>🎓 Apply as Scholar</Text>
+              </AnimatedButton>
+            </View>
+          )}
+          <TouchableOpacity 
+            style={styles.adminButton}
+            onPress={() => navigation.navigate('Admin')}
+          >
+            <Text style={styles.adminButtonText}> Admin Panel</Text>
+          </TouchableOpacity>
+        </>
       ) : (
         <View style={styles.actionButtons}>
           <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -1005,6 +1014,18 @@ const styles = StyleSheet.create({
     color: '#fff', 
     fontSize: 12, 
     fontWeight: '600' 
+  },
+  adminButton: {
+    backgroundColor: '#ff4757',
+    padding: 16,
+    borderRadius: 12,
+    margin: 16,
+    alignItems: 'center',
+  },
+  adminButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   toastContainer: {
     position: 'absolute',

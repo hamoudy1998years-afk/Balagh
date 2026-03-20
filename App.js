@@ -33,6 +33,7 @@ import { COLORS } from './constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
+import AdminScreen from './screens/AdminScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import * as Sentry from '@sentry/react-native';
 import { loadBannedWords } from './utils/moderation';
@@ -384,6 +385,7 @@ function App() {
                   <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
                   <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
                   <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+                  <Stack.Screen name="Admin" component={AdminScreen} />
                 </Stack.Navigator>
                 <GlobalVideoOptionsSheet />
               </NavigationContainer>
