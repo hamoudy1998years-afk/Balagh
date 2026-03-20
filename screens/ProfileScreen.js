@@ -459,7 +459,7 @@ export default function ProfileScreen({ route, navigation }) {
   async function handlePinVideo(video) {
     if (!isOwnProfile) return;
     try {
-      const pinnedCount = publicVideos.filter(v => v.is_pinned).length;
+      const pinnedCount = (publicVideos || []).filter(v => v.is_pinned).length;
       if (video.is_pinned) {
         Alert.alert('Unpin Video', 'Remove this video from pinned?', [
           { text: 'Cancel', style: 'cancel' },
@@ -658,11 +658,26 @@ export default function ProfileScreen({ route, navigation }) {
       dispatchUI({ type: 'SET_REFRESHING', refreshing: false });
     }
   }, [globalUser, cachedUser, targetUserId, isOffline]);
-  const openVideo = useCallback((videos, index) => navigation.navigate(ROUTES.PROFILE_VIDEOS, { videos, startIndex: index }), [navigation]);
+  const openVideo = useCallback((videos, index) => {
+    console.log('[ProfileScreen] openVideo called with videos:', videos?.length, 'startIndex:', index);
+    console.log('[ProfileScreen] First video ID:', videos?.[0]?.id);
+    navigation.navigate(ROUTES.PROFILE_VIDEOS, { videos, startIndex: index });
+  }, [navigation]);
 
   const renderItem = useCallback(({ item, index }) => (
-    <VideoGridItem item={item} onPress={handleOpenVideo} onLongPress={handleLongPress} />
-  ), [activeVideos, openVideo, handleLongPress]);
+    <VideoGridItem 
+      item={item} 
+      onPress={() => {
+        // Get fresh videos array at tap time (not stale closure)
+        const videosToPass = activeTab === 'videos' ? publicVideos : 
+                            activeTab === 'private' ? privateVideos : 
+                            likedVideos;
+        console.log('[ProfileScreen] onPress - activeTab:', activeTab, 'videosToPass.length:', videosToPass?.length);
+        openVideo(videosToPass, index);
+      }} 
+      onLongPress={handleLongPress} 
+    />
+  ), [activeTab, publicVideos, privateVideos, likedVideos, openVideo, handleLongPress]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
@@ -738,7 +753,7 @@ export default function ProfileScreen({ route, navigation }) {
 
       <View style={styles.statsRow}>
         <View style={styles.statItem}>
-          <Text style={styles.statNum}>{formatCount(publicVideos.length)}</Text>
+          <Text style={styles.statNum}>{formatCount((publicVideos || []).length)}</Text>
           <Text style={styles.statLabel}>Videos</Text>
         </View>
         <View style={styles.statDivider} />
@@ -806,6 +821,7 @@ export default function ProfileScreen({ route, navigation }) {
   ), [profile, isScholar, scholarData, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation]);
 
   const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
+  console.log('[ProfileScreen] activeVideos count:', activeVideos?.length, 'activeTab:', activeTab);
 
   // Check for cached user when globalUser is null (offline scenario)
   const [cachedUser, setCachedUser] = useState(null);
