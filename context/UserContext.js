@@ -18,7 +18,6 @@ export function UserProvider({ children }) {
     if (cached) {
       setUser(cached);
       setLoading(false);
-      __DEV__ && console.log('[UserContext] Loaded cached user:', cached.id);
     }
 
     try {
@@ -26,7 +25,6 @@ export function UserProvider({ children }) {
       const { data: { user: freshUser }, error } = await supabase.auth.getUser();
       
       if (error) {
-        __DEV__ && console.log('[UserContext] getUser error (offline?):', error.message);
         // Don't clear user - keep cached data when offline
         return;
       }
@@ -40,10 +38,8 @@ export function UserProvider({ children }) {
         const mergedUser = { ...cached, ...freshUser, ...profile };
         setUser(mergedUser);
         await userCache.set(mergedUser);
-        __DEV__ && console.log('[UserContext] Fresh user data loaded:', mergedUser.id);
       }
     } catch (e) {
-      __DEV__ && console.log('[UserContext] Network error (offline?), using cached data:', e.message);
       // Don't clear user - keep cached data when offline
     } finally {
       setLoading(false);

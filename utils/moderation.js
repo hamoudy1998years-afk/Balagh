@@ -20,7 +20,7 @@ export async function loadBannedWords() {
     
     dynamicBannedWords = data?.map(item => item.word.toLowerCase()) || DEFAULT_BANNED_WORDS;
     wordsLoaded = true;
-    console.log('[MODERATION] Loaded', dynamicBannedWords.length, 'banned words');
+    // Banned words loaded silently
   } catch (error) {
     console.error('[MODERATION] Failed to load words:', error);
     dynamicBannedWords = DEFAULT_BANNED_WORDS;
