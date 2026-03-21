@@ -158,7 +158,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [isTabActive, setIsTabActive] = useState(() => tabIndex === 1);
 
   useEffect(() => {
-    // When tab becomes active, set isTabActive to true
     if (activeIndexRef?.current === tabIndex && isFocusedRef?.current) {
       setIsTabActive(true);
     }
@@ -167,7 +166,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   // Preload Following feed when For You loads
   useEffect(() => {
     if (type === 'foryou' && !isCacheValid('following')) {
-      // Silently preload following in background
       loadFollowingInBackground();
     }
   }, [type]);
@@ -218,19 +216,20 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       setIsTabActive(true);
     },
     setActive: (val) => {
-        setIsTabActive(!!val);
-      },
+      setIsTabActive(!!val);
+    },
   }));
 
+  // FIX: Removed playerPool.playCurrent() — VideoCard handles play/pause via isTabActive prop
   useEffect(() => {
     if (videos.length === 0) return;
     if (isRefreshingRef.current) return;
     if (prevIndexRef.current === -1) prevIndexRef.current = 0;
     playerPool.loadVideo('current', videos[0].video_url);
-    if (isTabActive) playerPool.playCurrent();
     setActiveIndex(0);
   }, [videos]);
 
+  // FIX: Removed playerPool.playCurrent() — VideoCard handles play/pause via isTabActive prop
   useEffect(() => {
     if (videos.length === 0) return;
 
@@ -244,7 +243,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     const currentVideo = videos[activeIndex];
     if (currentVideo) {
       playerPool.loadVideo('current', currentVideo.video_url);
-      if (isTabActive) playerPool.playCurrent();
+      // ✅ No playerPool.playCurrent() here — isTabActive prop on VideoCard controls playback
     }
 
     const nextVideo = videos[activeIndex + 1];
@@ -262,13 +261,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     prevIndexRef.current = activeIndex;
   }, [activeIndex, videos]);
 
-  useEffect(() => {
-    if (isTabActive) {
-      try { playerPool.playCurrent(); } catch (e) {}
-    } else {
-      try { playerPool.pauseAll(); } catch (e) {}
-    }
-  }, [isTabActive]);
+  // FIX: Removed entire playerPool play/pause effect — isTabActive prop on VideoCard handles this
+  // The old effect was calling playerPool.pauseAll() which leaked audio across tabs
 
   useEffect(() => {
     if (isCacheValid(type)) {
@@ -398,6 +392,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         isActive={index === activeIndex}
         isVisible={isVisible}
         isTabActive={isTabActive}
+        index={index}
+        currentTab={type}
         initialLiked={myLikes.includes(item.id)}
         initialFollowed={myFollows.includes(item.user_id)}
         onFollowChange={updateMyFollows}
@@ -494,8 +490,7 @@ export default function HomeScreen({ navigation }) {
   const isFocused = useIsFocused();
   const followingRef = useRef(null);
   const foryouRef = useRef(null);
-  
-  // PULSE ANIMATION SETUP - Make sure this is BEFORE any usage
+
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const indexRef = useRef(index);
@@ -513,12 +508,12 @@ export default function HomeScreen({ navigation }) {
     return () => unsubscribe();
   }, []);
 
-  // PULSE ANIMATION EFFECT - This creates the looping pulse
+  // Pulse animation for LIVE dot
   useEffect(() => {
     const pulseAnimation = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.5, // Pulse to 1.5x size (bigger for visibility)
+          toValue: 1.5,
           duration: 800,
           useNativeDriver: true,
         }),
@@ -529,16 +524,11 @@ export default function HomeScreen({ navigation }) {
         }),
       ])
     );
-    
     pulseAnimation.start();
-    
-    return () => {
-      pulseAnimation.stop();
-    };
+    return () => pulseAnimation.stop();
   }, []);
 
   useEffect(() => {
-    // Preload Following feed when For You tab is active
     if (index === 1 && isFocused) {
       preloadFollowingFeed();
     }
@@ -575,16 +565,16 @@ export default function HomeScreen({ navigation }) {
 
       feedCache.following = data ?? [];
       feedCache.ts.following = Date.now();
-      __DEV__ && console.log('Following feed preloaded:', data?.length || 0, 'videos');
     } catch (error) {
       console.log('[Home] preloadFollowingFeed error:', error.message);
     }
   }
 
+  // FIX: When screen focus changes, update both tabs correctly
   useEffect(() => {
     followingRef.current?.setActive(isFocused && index === 0);
     foryouRef.current?.setActive(isFocused && index === 1);
-  }, [isFocused]);
+  }, [isFocused, index]);
 
   useEffect(() => {
     homeRefreshRef.current = () => {
@@ -598,6 +588,7 @@ export default function HomeScreen({ navigation }) {
 
   const handleIndexChange = useCallback((newIndex) => {
     setIndex(newIndex);
+    // FIX: Immediately pause the old tab and activate the new one
     followingRef.current?.setActive(isFocusedRef.current && newIndex === 0);
     foryouRef.current?.setActive(isFocusedRef.current && newIndex === 1);
   }, []);
@@ -699,7 +690,7 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
     );
-  }, [insets.top, index, pulseAnim]); // Added pulseAnim to dependencies
+  }, [insets.top, index, pulseAnim]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
@@ -719,7 +710,7 @@ export default function HomeScreen({ navigation }) {
           zIndex: 999,
           elevation: 5,
           shadowColor: '#000',
-          shadowOffset: {width: 0, height: 2},
+          shadowOffset: { width: 0, height: 2 },
           shadowOpacity: 0.25,
           shadowRadius: 3.84,
         }}>

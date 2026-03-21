@@ -4,10 +4,11 @@ import { supabase } from '../lib/supabase';
 import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
 import { useUser } from '../context/UserContext';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { videoCache } from '../utils/VideoCache';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
-  useWindowDimensions, Animated, Pressable, Image,
+  useWindowDimensions, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
@@ -35,15 +36,16 @@ const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ vi
 
 function VideoCard({
   item, player, isActive, isVisible, isTabActive = true,
+  index,
+  currentTab,
   initialLiked = false, initialFollowed = false,
   onFollowChange, navigation, cardHeight,
   username: usernameProp,
   avatarUrl: avatarUrlProp,
 }) {
-
   const { width } = useWindowDimensions();
   const { showVideoOptionsSheet } = useDownload();
-  
+
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(item.likes_count ?? 0);
   const [isLiking, setIsLiking] = useState(false);
@@ -59,59 +61,80 @@ function VideoCard({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
+  const manualPauseRef = useRef(false);
 
-  // Tracks if user manually paused — prevents re-renders from unpausing
-  const userPausedRef = useRef(false);
+  // ── PLAY/PAUSE LOGIC ──────────────────────────────────────────────────────
+  // NOTE: isVisible passed to VideoCard is always true (HomeScreen returns a plain
+  // View when isVisible=false, so VideoCard never mounts with isVisible=false).
+  // Therefore we watch isActive to know when the user scrolled away/back.
 
-  const [dialog, setDialog] = useState({ 
-    visible: false, 
-    title: '', 
-    message: '', 
-    type: 'info', 
-    buttons: [] 
+  // When user scrolls away from this video — reset manual pause so it auto-plays on return
+  useEffect(() => {
+    if (!isActive) {
+      manualPauseRef.current = false;
+      setPaused(true); // ensure paused while not active
+    } else {
+      // Scrolled back to this video — always auto-play (TikTok behaviour)
+      manualPauseRef.current = false;
+      setPaused(false);
+    }
+  }, [isActive]);
+
+  // When tab switches — pause/resume and restart from beginning
+  useEffect(() => {
+    if (isTabActive) {
+      if (isActive) {
+        // Only the active video restarts and plays
+        manualPauseRef.current = false;
+        setPaused(false);
+        try { if (player?.current) player.current.seek(0); } catch (e) {}
+      } else {
+        // Other visible videos just unpause so they're ready when scrolled to
+        manualPauseRef.current = false;
+        setPaused(false);
+      }
+    } else {
+      // Tab went inactive — pause everything
+      setPaused(true);
+      if (isActive) {
+        try { if (player?.current) player.current.seek(0); } catch (e) {}
+      }
+    }
+  }, [isTabActive]);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const [dialog, setDialog] = useState({
+    visible: false, title: '', message: '', type: 'info', buttons: []
   });
 
   const username = usernameProp ?? 'user';
   const avatarUrl = avatarUrlProp ?? null;
 
-  useEffect(() => { 
-    setLiked(initialLiked); 
-  }, [initialLiked]);
+  useEffect(() => { setLiked(initialLiked); }, [initialLiked]);
+  useEffect(() => { setFollowed(initialFollowed); }, [item.user_id]);
 
-  // Load cached video on mount
   useEffect(() => {
     const loadCachedVideo = async () => {
-      // Check if we have this video cached
       const cachedUri = await videoCache.getCachedVideo(item.video_url);
       if (cachedUri) {
-        console.log('[VideoCard] Using cached video:', cachedUri);
         setVideoUri(cachedUri);
       } else {
-        // Use network URL and start caching in background for next time
         setVideoUri(item.video_url);
-        // Only cache if video is > 10 seconds watched (optional optimization)
-        // Or cache immediately:
         videoCache.cacheVideo(item.video_url);
       }
     };
-    
     loadCachedVideo();
   }, [item.video_url]);
 
   useEffect(() => {
     const channel = supabase
       .channel(`video-${item.id}`)
-      .on('postgres_changes', 
+      .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'videos', filter: `id=eq.${item.id}` },
-        (payload) => {
-          setLikeCount(payload.new.likes_count);
-        }
+        (payload) => { setLikeCount(payload.new.likes_count); }
       )
       .subscribe();
-      
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => supabase.removeChannel(channel);
   }, [item.id]);
 
   const requireAuth = useCallback(() => {
@@ -134,13 +157,11 @@ function VideoCard({
 
   const lastTap = useRef(null);
   const tapTimer = useRef(null);
-  const hasPlayed = useRef(false);
   const insets = useSafeAreaInsets();
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      setPaused(true);
-      userPausedRef.current = false;
       if (tapTimer.current) clearTimeout(tapTimer.current);
       if (player?.current) {
         try { player.current.seek(0); } catch (e) {}
@@ -148,55 +169,19 @@ function VideoCard({
     };
   }, [player]);
 
-  useEffect(() => {
-    if (isActive) {
-      if (!userPausedRef.current) setPaused(false);
-      if (!hasPlayed.current) {
-        hasPlayed.current = true;
-        supabase.from('videos')
-          .update({ views_count: (item.views_count ?? 0) + 1 })
-          .eq('id', item.id)
-          .then(() => {});
-      }
-    }
-  }, [isActive]);
-
-  useEffect(() => {
-    if (isTabActive && isActive) {
-      if (!userPausedRef.current) setPaused(false);
-    }
-  }, [isTabActive]);
-
-  // FAST: Only update when video creator changes, not on every prop update
-  useEffect(() => { 
-    setFollowed(initialFollowed); 
-  }, [item.user_id]);
-
-
   const handleLike = useCallback(async () => {
     if (!requireAuth() || isLiking) return;
-    
     setIsLiking(true);
-    
     const newLiked = !liked;
     const countChange = newLiked ? 1 : -1;
-    
     setLiked(newLiked);
     setLikeCount(prev => prev + countChange);
-    
     try {
       if (newLiked) {
-        const { error } = await supabase
-          .from('likes')
-          .insert({ user_id: currentUserId, video_id: item.id });
-          
+        const { error } = await supabase.from('likes').insert({ user_id: currentUserId, video_id: item.id });
         if (error) throw error;
       } else {
-        const { error } = await supabase
-          .from('likes')
-          .delete()
-          .match({ user_id: currentUserId, video_id: item.id });
-          
+        const { error } = await supabase.from('likes').delete().match({ user_id: currentUserId, video_id: item.id });
         if (error) throw error;
       }
     } catch (error) {
@@ -225,6 +210,7 @@ function VideoCard({
   const handleTap = useCallback(() => {
     const now = Date.now();
     if (lastTap.current && now - lastTap.current < 300) {
+      // Double tap — like
       clearTimeout(tapTimer.current);
       lastTap.current = null;
       handleLike();
@@ -236,7 +222,7 @@ function VideoCard({
       tapTimer.current = setTimeout(() => {
         setPaused(prev => {
           const newPaused = !prev;
-          userPausedRef.current = newPaused;
+          manualPauseRef.current = newPaused;
           setShowPauseIcon(true);
           setTimeout(() => setShowPauseIcon(false), 600);
           return newPaused;
@@ -248,95 +234,49 @@ function VideoCard({
 
   const handleLongPress = useCallback(() => {
     if (!showVideoOptionsSheet) return;
-    showVideoOptionsSheet(
-      item,
-      false,
-      hasDownloaded,
-      {
-        onDownload: handleDownloadVideo,
-        onPin: null,
-        onDelete: null,
-      }
-    );
+    showVideoOptionsSheet(item, false, hasDownloaded, {
+      onDownload: handleDownloadVideo,
+      onPin: null,
+      onDelete: null,
+    });
   }, [showVideoOptionsSheet, item, hasDownloaded]);
 
   const handleDownloadVideo = useCallback(async () => {
     if (hasDownloaded) return;
-
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        setDialog({
-          visible: true,
-          title: 'Permission Denied',
-          message: 'Please allow access to your media library.',
-          type: 'warning',
-          buttons: [{ text: 'OK' }]
-        });
+        setDialog({ visible: true, title: 'Permission Denied', message: 'Please allow access to your media library.', type: 'warning', buttons: [{ text: 'OK' }] });
         return;
       }
-
       setIsDownloading(true);
       setDownloadProgress(0);
-
       const fileUri = FileSystem.documentDirectory + `balagh_${item.id}.mp4`;
-
       const downloadResumable = FileSystem.createDownloadResumable(
-        item.video_url,
-        fileUri,
-        {},
+        item.video_url, fileUri, {},
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          if (totalBytesExpectedToWrite > 0) {
-            setDownloadProgress(totalBytesWritten / totalBytesExpectedToWrite);
-          }
+          if (totalBytesExpectedToWrite > 0) setDownloadProgress(totalBytesWritten / totalBytesExpectedToWrite);
         }
       );
-
       const result = await downloadResumable.downloadAsync();
       if (!result?.uri) throw new Error('Download failed');
-
       await MediaLibrary.saveToLibraryAsync(result.uri);
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
-
       setIsDownloading(false);
       setHasDownloaded(true);
-
-      setDialog({
-        visible: true,
-        title: 'Downloaded ✅',
-        message: 'Video saved to your gallery!',
-        type: 'success',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'Downloaded ✅', message: 'Video saved to your gallery!', type: 'success', buttons: [{ text: 'OK' }] });
     } catch (e) {
       setIsDownloading(false);
-      setDialog({
-        visible: true,
-        title: 'Error',
-        message: 'Could not download the video. Please try again.',
-        type: 'error',
-        buttons: [{ text: 'OK' }]
-      });
+      setDialog({ visible: true, title: 'Error', message: 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
       __DEV__ && console.error('Download error:', e);
     }
-  }, [item]);
+  }, [item, hasDownloaded]);
 
   const handleReport = useCallback(async (reason) => {
     if (!currentUserId) return;
-    await supabase.from('reports').insert({
-      reporter_id: currentUserId,
-      reported_user_id: item.user_id,
-      video_id: item.id,
-      reason,
-    });
+    await supabase.from('reports').insert({ reporter_id: currentUserId, reported_user_id: item.user_id, video_id: item.id, reason });
     setShowReportSheet(false);
-    setDialog({
-      visible: true,
-      title: 'Report Submitted ✅',
-      message: 'Thanks for reporting. We will review this video.',
-      type: 'success',
-      buttons: [{ text: 'OK' }]
-    });
+    setDialog({ visible: true, title: 'Report Submitted ✅', message: 'Thanks for reporting. We will review this video.', type: 'success', buttons: [{ text: 'OK' }] });
   }, [currentUserId, item]);
 
   const handleShare = useCallback(async () => {
@@ -348,25 +288,17 @@ function VideoCard({
   }, [navigation, item.user_id]);
 
   const handleOpenComments = useCallback(() => {
-    if (requireAuth()) {
-      setShowComments(true);
-    }
+    if (requireAuth()) setShowComments(true);
   }, [requireAuth]);
 
-  const handleOpenReportSheet = useCallback(() => {
-    setShowReportSheet(true);
-  }, []);
+  const handleOpenReportSheet = useCallback(() => setShowReportSheet(true), []);
 
   const avatarLetter = username[0]?.toUpperCase() ?? '?';
   const hashtags = item.caption?.match(/#\w+/g) ?? [];
   const captionText = item.caption?.replace(/#\w+/g, '').trim() ?? '';
 
-  // FAST: No playerReady state, no early return black screen
-  // Video shows immediately
-
   return (
     <View style={[styles.card, { height: cardHeight }]}>
-      {/* FAST: No key={item.id}, no poster, simple style */}
       <Video
         ref={player}
         source={{ uri: videoUri }}
@@ -428,11 +360,9 @@ function VideoCard({
           </AnimatedButton>
           <AnimatedButton onPress={handleFollow}>
             {currentUserId && currentUserId !== item.user_id && (
-              !followed ? (
-                <View style={styles.followBadge}><Text style={styles.followBadgeText}>+</Text></View>
-              ) : (
-                <View style={[styles.followBadge, styles.followedBadge]}><Text style={styles.followBadgeText}>✓</Text></View>
-              )
+              !followed
+                ? <View style={styles.followBadge}><Text style={styles.followBadgeText}>+</Text></View>
+                : <View style={[styles.followBadge, styles.followedBadge]}><Text style={styles.followBadgeText}>✓</Text></View>
             )}
           </AnimatedButton>
         </View>
@@ -470,7 +400,13 @@ function VideoCard({
         onDismiss={() => setShowReportSheet(false)}
       />
 
-      <CommentsModal visible={showComments} onClose={() => setShowComments(false)} videoId={item.id} navigation={navigation} isCreator={currentUserId === item.user_id} />
+      <CommentsModal
+        visible={showComments}
+        onClose={() => setShowComments(false)}
+        videoId={item.id}
+        navigation={navigation}
+        isCreator={currentUserId === item.user_id}
+      />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
 
@@ -489,109 +425,34 @@ function VideoCard({
 const styles = StyleSheet.create({
   card: { width: '100%', backgroundColor: '#000' },
   video: { width: '100%', height: '100%', position: 'absolute' },
-  tapAreaFull: { 
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    bottom: 0, 
-    zIndex: 1 
-  },
-  heartOverlay: { 
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    bottom: 0, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    zIndex: 2, 
-    pointerEvents: 'none' 
-  },
+  tapAreaFull: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
+  heartOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' },
   heartIcon: { fontSize: ms(80), opacity: 0.9 },
-  overlay: { 
-    position: 'absolute', 
-    left: s(16), 
-    right: s(80),
-    zIndex: 3
-  },
+  overlay: { position: 'absolute', left: s(16), right: s(80), zIndex: 3 },
   username: { color: '#ffffff', fontWeight: '700', fontSize: ms(15), marginBottom: 4 },
   caption: { color: '#e2e8f0', fontSize: ms(13), lineHeight: ms(18), marginBottom: 4 },
   hashtagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
   hashtag: { color: '#a78bfa', fontSize: ms(13), fontWeight: '600' },
-  actions: { 
-    position: 'absolute', 
-    right: s(12), 
-    alignItems: 'center', 
-    width: s(56),
-    zIndex: 10
-  },
+  actions: { position: 'absolute', right: s(12), alignItems: 'center', width: s(56), zIndex: 10 },
   actionBtn: { alignItems: 'center', marginBottom: 20 },
   actionIcon: { fontSize: ms(32) },
   actionCount: { color: '#fff', fontSize: ms(11), textAlign: 'center', marginTop: 2 },
   creatorContainer: { alignItems: 'center', marginBottom: 24 },
-  creatorAvatar: { 
-    width: s(52), 
-    height: s(52), 
-    borderRadius: s(26), 
-    backgroundColor: '#7c3aed', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    borderWidth: 2, 
-    borderColor: '#ffffff' 
-  },
+  creatorAvatar: { width: s(52), height: s(52), borderRadius: s(26), backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
   creatorAvatarFollowed: { borderColor: '#a78bfa', borderWidth: 2 },
   creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: ms(20) },
-  followBadge: { 
-    width: 22, 
-    height: 22, 
-    borderRadius: 11, 
-    backgroundColor: '#ff2d55', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    marginTop: -11, 
-    borderWidth: 1.5, 
-    borderColor: '#0f0f0f' 
-  },
+  followBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#ff2d55', alignItems: 'center', justifyContent: 'center', marginTop: -11, borderWidth: 1.5, borderColor: '#0f0f0f' },
   followedBadge: { backgroundColor: '#10b981' },
   followBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800', lineHeight: 14 },
-  dlOverlay: { 
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    bottom: 0, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    zIndex: 99, 
-    backgroundColor: 'rgba(0,0,0,0.55)', 
-    pointerEvents: 'none' 
-  },
-  dlBox: { 
-    backgroundColor: '#1a1d27', 
-    borderRadius: 20, 
-    padding: 28, 
-    width: '75%', 
-    alignItems: 'center', 
-    gap: 14 
-  },
+  dlOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', pointerEvents: 'none' },
+  dlBox: { backgroundColor: '#1a1d27', borderRadius: 20, padding: 28, width: '75%', alignItems: 'center', gap: 14 },
   dlTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  dlBarBg: { 
-    width: '100%', 
-    height: 8, 
-    backgroundColor: '#2d3148', 
-    borderRadius: 4, 
-    overflow: 'hidden' 
-  },
-  dlBarFill: { 
-    height: '100%', 
-    backgroundColor: '#7c3aed', 
-    borderRadius: 4 
-  },
+  dlBarBg: { width: '100%', height: 8, backgroundColor: '#2d3148', borderRadius: 4, overflow: 'hidden' },
+  dlBarFill: { height: '100%', backgroundColor: '#7c3aed', borderRadius: 4 },
   dlPercent: { color: '#a78bfa', fontSize: 22, fontWeight: '800' },
 });
 
-// Prevent re-render when follow status changes
+// Only re-render when these props change
 function areEqual(prevProps, nextProps) {
   return (
     prevProps.item.id === nextProps.item.id &&
