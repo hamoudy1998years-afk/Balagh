@@ -9,6 +9,7 @@ import {
   Dimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height } = Dimensions.get('window');
 const ITEM_HEIGHT = 80;
@@ -16,6 +17,7 @@ const MIN_AGE = 13;
 const VISIBLE_ITEMS = 5;
 
 export default function AgeGateScreen({ onVerified }) {
+  const insets = useSafeAreaInsets();
   const [selectedAge, setSelectedAge] = useState(18);
   const flatListRef = useRef(null);
   
@@ -87,7 +89,7 @@ export default function AgeGateScreen({ onVerified }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.emoji}></Text>
         <Text style={styles.title}>How old are you?</Text>
         <Text style={styles.subtitle}>
@@ -116,8 +118,8 @@ export default function AgeGateScreen({ onVerified }) {
           scrollEventThrottle={16}
           initialScrollIndex={initialScrollIndex}
           contentContainerStyle={{
-            paddingTop: (height * 0.35) - (ITEM_HEIGHT * 2),
-            paddingBottom: (height * 0.35) - (ITEM_HEIGHT * 2),
+            paddingTop: (height * 0.35) - (ITEM_HEIGHT * 2) + insets.top,
+            paddingBottom: (height * 0.35) - (ITEM_HEIGHT * 2) + insets.bottom,
           }}
         />
         
@@ -130,7 +132,7 @@ export default function AgeGateScreen({ onVerified }) {
         <Text style={styles.selectedValue}>{selectedAge} years old</Text>
       </View>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
         <TouchableOpacity
           style={styles.button}
           onPress={handleContinue}

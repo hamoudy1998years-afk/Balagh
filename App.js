@@ -429,11 +429,19 @@ function App() {
   }
 
   if (onboardingCompleted === false) {
-    return <OnboardingScreen onComplete={() => setOnboardingCompleted(true)} />;
+    return (
+      <SafeAreaProvider>
+        <OnboardingScreen onComplete={() => setOnboardingCompleted(true)} />
+      </SafeAreaProvider>
+    );
   }
 
   if (!ageVerified) {
-    return <AgeGateScreen onVerified={() => setAgeVerified(true)} />;
+    return (
+      <SafeAreaProvider>
+        <AgeGateScreen onVerified={() => setAgeVerified(true)} />
+      </SafeAreaProvider>
+    );
   }
 
   if (session === undefined) {
@@ -445,42 +453,42 @@ function App() {
   }
 
   return (
-    <ErrorBoundary>
-    <UserProvider>
-      <DownloadProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <SafeAreaProvider>
-            <BottomSheetModalProvider>
-              <NavigationContainer ref={navigationRef} linking={linking}>
-                <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
-                  <Stack.Screen name="Main">
-                    {() => <MainTabs session={session} />}
-                  </Stack.Screen>
-                  <Stack.Screen name="Login" component={LoginScreen} />
-                  <Stack.Screen name="Signup" component={SignupScreen} />
-                  <Stack.Screen name="CommentsModal" component={CommentsModal} options={{ presentation: 'modal' }} />
-                  <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-                  <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
-                  <Stack.Screen name="Search" component={SearchScreen} />
-                  <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
-                  <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
-                  <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
-                  <Stack.Screen name="FollowList" component={FollowListScreen} />
-                  <Stack.Screen name="Settings" component={SettingsScreen} />
-                  <Stack.Screen name="UserProfile" component={ProfileScreen} />
-                  <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
-                  <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
-                  <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
-                  <Stack.Screen name="Admin" component={AdminScreen} />
-                </Stack.Navigator>
-                <GlobalVideoOptionsSheet />
-              </NavigationContainer>
-            </BottomSheetModalProvider>
-          </SafeAreaProvider>
-        </GestureHandlerRootView>
-      </DownloadProvider>
-    </UserProvider>
-    </ErrorBoundary>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <UserProvider>
+          <DownloadProvider>
+            <GestureHandlerRootView style={{ flex: 1 }}>
+              <BottomSheetModalProvider>
+                <NavigationContainer ref={navigationRef} linking={linking}>
+                  <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
+                    <Stack.Screen name="Main">
+                      {() => <MainTabs session={session} />}
+                    </Stack.Screen>
+                    <Stack.Screen name="Login" component={LoginScreen} />
+                    <Stack.Screen name="Signup" component={SignupScreen} />
+                    <Stack.Screen name="CommentsModal" component={CommentsModal} options={{ presentation: 'modal' }} />
+                    <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+                    <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
+                    <Stack.Screen name="Search" component={SearchScreen} />
+                    <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
+                    <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
+                    <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
+                    <Stack.Screen name="FollowList" component={FollowListScreen} />
+                    <Stack.Screen name="Settings" component={SettingsScreen} />
+                    <Stack.Screen name="UserProfile" component={ProfileScreen} />
+                    <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
+                    <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
+                    <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+                    <Stack.Screen name="Admin" component={AdminScreen} />
+                  </Stack.Navigator>
+                  <GlobalVideoOptionsSheet />
+                </NavigationContainer>
+              </BottomSheetModalProvider>
+            </GestureHandlerRootView>
+          </DownloadProvider>
+        </UserProvider>
+      </ErrorBoundary>
+    </SafeAreaProvider>
   );
 }
 
