@@ -32,13 +32,7 @@ const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 const THUMBNAIL_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 
 async function getAgoraToken(channelName, uid, role) {
-  console.log('[FUNC] getAgoraToken() STARTED for role:', role);
-  console.log('[DEBUG-TOKEN] Fetching token... internet:', 'checking...');
   __DEV__ && console.log('🚀 [getAgoraToken] Fetching token...');
-  __DEV__ && console.log('🚀 [getAgoraToken] Channel:', channelName);
-  __DEV__ && console.log('🚀 [getAgoraToken] UID:', uid);
-  __DEV__ && console.log('🚀 [getAgoraToken] Role:', role);
-  __DEV__ && console.log('🚀 [getAgoraToken] Server URL:', THUMBNAIL_SERVER_URL);
   const fetchWithTimeout = (url, options, timeout = 10000) => {
     return Promise.race([
       fetch(url, options),
@@ -58,13 +52,8 @@ async function getAgoraToken(channelName, uid, role) {
       throw new Error(`Token server ${response.status}: ${text.slice(0, 200)}`);
     }
     const data = await response.json();
-    __DEV__ && console.log('✅ [getAgoraToken] Token received:', data.token ? 'YES' : 'NO');
-    __DEV__ && console.log('✅ [getAgoraToken] Token length:', data.token?.length);
-    __DEV__ && console.log('✅ [getAgoraToken] Response UID:', data.uid);
-    __DEV__ && console.log('✅ [getAgoraToken] Response channel:', data.channelName);
     return data.token;
   } catch (error) {
-    console.log('[DEBUG-TOKEN] Token fetch FAILED:', error.message);
     __DEV__ && console.log('[getAgoraToken] Network error:', error.message);
     return null;
   }
@@ -170,30 +159,19 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   useEffect(() => {
       isMountedRef.current = true;
-      console.log('[LIFECYCLE] Component MOUNTED');
       __DEV__ && console.log('📹 [LiveStreamScreen] Component MOUNTED');
-      __DEV__ && console.log('📹 [LiveStreamScreen] AGORA_APP_ID valid:', !!AGORA_APP_ID && AGORA_APP_ID.length === 32);
       
       // REMOVED: setup() - now called manually when pressing "Start Streaming"
       
       // Network monitoring for failover
       const netInfoSubscription = NetInfo.addEventListener(state => {
-        console.log('[NETINFO] State changed! type:', state.type, 'isConnected:', state.isConnected, 'isInternetReachable:', state.isInternetReachable);
-        console.log('[DEBUG-NET] NetInfo changed! isInternetReachable:', state.isInternetReachable, 'current connectionStatus:', connectionStatus);
-        console.log('[DEBUG-OFFLINE] NetInfo listener fired! isInternetReachable:', state.isInternetReachable);
-        
         // Fix offline detection
         if (!state.isInternetReachable) {
-          console.log('[NETINFO] Setting OFFLINE');
-          console.log('[DEBUG-OFFLINE] Internet LOST - setting status to offline');
+          __DEV__ && console.log('[NETINFO] Setting OFFLINE');
           setConnectionStatus('offline');
         } else if (state.isInternetReachable && connectionStatus === 'offline') {
           // Internet back
-          console.log('[NETINFO] Auto-retry triggered! Internet back');
-          console.log('[DEBUG-OFFLINE] INTERNET IS BACK! isInternetReachable=true, current status:', connectionStatus);
-          console.log('[DEBUG-NET] Auto-retry conditions MET! Attempting reconnect...');
-          console.log('[DEBUG-NET] Resetting attemptRef from:', reconnectAttemptRef.current, 'to 0');
-          console.log('[NetInfo] Back online, retrying...');
+          __DEV__ && console.log('[NetInfo] Back online, retrying...');
           reconnectAttemptRef.current = 0;
           setConnectionStatus('connected');
           handleNetworkReconnect();
@@ -264,20 +242,9 @@ export default function LiveStreamScreen({ navigation, route }) {
     }, []);
 
   // Log when connectionStatus changes
-  useEffect(() => {
-    console.log('[STATE] connectionStatus changed to:', connectionStatus);
-    console.log('[DEBUG-OFFLINE] connectionStatus CHANGED to:', connectionStatus);
-  }, [connectionStatus]);
-
-  // Log when isLive changes
-  useEffect(() => {
-    console.log('[STATE] isLive changed to:', isLive);
-  }, [isLive]);
-
   // Simple stuck-state recovery
   useEffect(() => {
     if (isLive && !engineRef.current) {
-      console.log('[RECOVER] Resetting stuck state');
       setIsLive(false);
       setConnectionStatus('disconnected');
     }
@@ -313,7 +280,6 @@ export default function LiveStreamScreen({ navigation, route }) {
   }, [isLive]);
 
   async function requestPermissions() {
-    console.log('[PERM] Requesting permissions...');
     __DEV__ && console.log('🔐 [requestPermissions] Checking permissions...');
     
     if (Platform.OS === 'android') {
@@ -349,63 +315,36 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   // Network failover: handle reconnection with exponential backoff
   const handleNetworkReconnect = useCallback(async (isFromError = false) => {
-    console.log('[FUNC] handleReconnect() STARTED. Attempt:', reconnectAttemptRef.current, 'Status:', connectionStatus);
-    console.log('[DEBUG-RECONNECT] handleReconnect called. attemptRef:', reconnectAttemptRef.current, 'isReconnecting:', isReconnectingRef.current, 'isMounted:', isMountedRef.current);
-    
     // Guard: Don't proceed if component unmounted
-    if (!isMountedRef.current) {
-      console.log('[DEBUG-RECONNECT] Early return - isMounted:', isMountedRef.current);
-      return;
-    }
-    
-    if (!isLiveRef.current || !engineRef.current) {
-      console.log(`[DEBUG] Early return - isLive=${isLiveRef.current}, engine=${engineRef.current ? 'exists' : 'NULL'}`);
-      return;
-    }
+    if (!isMountedRef.current) return;
+    if (!isLiveRef.current || !engineRef.current) return;
     
     // Check internet first
-    console.log('[DEBUG-OFFLINE] handleReconnect START. Checking internet...');
     const netInfo = await NetInfo.fetch();
-    console.log('[DEBUG-OFFLINE] NetInfo result:', netInfo.isInternetReachable, netInfo.type);
     if (!netInfo.isInternetReachable) {
-      console.log('[DEBUG-OFFLINE] NO INTERNET detected. Setting status to offline and returning early.');
-      console.log('[Network] No internet, showing offline UI');
       setConnectionStatus('offline');
-      console.log('[DEBUG-OFFLINE] Setting connectionStatus to: offline');
-      return; // Don't attempt reconnect without internet
+      return;
     }
     
     // Prevent parallel reconnection attempts
-    if (isReconnectingRef.current) {
-      console.log(`[DEBUG] isReconnectingRef is true, skipping`);
-      __DEV__ && console.log('🌐 [Network] Already reconnecting, skipping...');
-      return;
-    }
-    
-    console.log(`[DEBUG] isReconnectingRef is false, proceeding`);
+    if (isReconnectingRef.current) return;
     
     // Check max retries BEFORE attempting
-    console.log(`[DEBUG] Max attempts check: ${reconnectAttemptRef.current} >= ${MAX_RETRIES} ?`);
     if (reconnectAttemptRef.current >= MAX_RETRIES) {
-      __DEV__ && console.log('🌐 [Network] Max retries reached');
       setConnectionStatus('failed');
       return;
     }
     
-    console.log(`[DEBUG] About to increment attempt. Current: ${reconnectAttemptRef.current}`);
     isReconnectingRef.current = true;
     reconnectAttemptRef.current += 1;
     const attempt = reconnectAttemptRef.current;
-    console.log(`[DEBUG] Attempt incremented to: ${reconnectAttemptRef.current}`);
     
     __DEV__ && console.log('🌐 [Network] Reconnect attempt', attempt, '/', MAX_RETRIES);
     setConnectionStatus('reconnecting');
     
     try {
       // Leave current channel
-      console.log(`[DEBUG] Engine before leave: ${engineRef.current ? 'exists' : 'NULL'}`);
       await engineRef.current?.leaveChannel();
-      console.log(`[DEBUG] Left channel successfully`);
       __DEV__ && console.log('🌐 [Network] Left channel for reconnect');
       
       // Exponential backoff: 1s, 2s, 4s, 8s, 16s (max 30s)
@@ -478,33 +417,24 @@ export default function LiveStreamScreen({ navigation, route }) {
       setConnectionStatus('connected');
     } catch (error) {
       console.log('[DEBUG-RECONNECT] handleReconnect FAILED:', error.message);
-      console.log('[DEBUG-RECONNECT] attemptRef is now:', reconnectAttemptRef.current);
       // Use console.log for network errors, not console.error
       if (error.message.includes('Network') || error.message.includes('network') || error.message.includes('offline')) {
-        console.log('🌐 [Network] Reconnect failed due to network:', error.message);
         setConnectionStatus('offline');
-      } else {
-        console.log('🌐 [Network] Reconnect failed:', error.message);
       }
       // Don't reset counter here - keep it for next attempt
       const isRateLimited = error?.response?.status === 429 || error?.message?.includes('429');
-      if (!isMountedRef.current) {
-        console.log(`[DEBUG] Not mounted, not scheduling retry`);
-        return;
-      }
+      if (!isMountedRef.current) return;
       if (attempt < MAX_RETRIES) {
         setTimeout(() => handleNetworkReconnect(isRateLimited), 1000);
       } else {
         setConnectionStatus('failed');
       }
     } finally {
-      console.log(`[DEBUG] Finally block. isReconnectingRef set to false`);
       isReconnectingRef.current = false;
     }
   }, []);
 
   function switchCamera() {
-    console.log('[BTN] Flip Camera pressed');
     __DEV__ && console.log('🎥 [switchCamera] Switching camera...');
     __DEV__ && console.log('🎥 [switchCamera] Engine exists:', !!engineRef.current);
     
@@ -522,7 +452,6 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   async function setup() {
-    console.log('[FUNC] setup() STARTED');
     __DEV__ && console.log('🎬 [setup] ========== SETUP STARTED ==========');
     __DEV__ && console.log('🎬 [setup] currentUser exists:', !!currentUser);
     

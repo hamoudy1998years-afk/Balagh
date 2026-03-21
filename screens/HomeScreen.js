@@ -506,13 +506,13 @@ export default function HomeScreen({ navigation }) {
       const wasOffline = showOffline;
       const isOffline = !state.isInternetReachable;
       
-      console.log(`[Home] Network state: isInternetReachable=${state.isInternetReachable}, wasOffline=${wasOffline}`);
+      __DEV__ && console.log(`[Home] Network state: isInternetReachable=${state.isInternetReachable}, wasOffline=${wasOffline}`);
       
       setShowOffline(isOffline);
       
       // Connection restored - auto refresh both tabs
       if (wasOffline && !isOffline) {
-        console.log('[Home] Connection restored - auto refreshing feeds');
+        __DEV__ && console.log('[Home] Connection restored - auto refreshing feeds');
         setIsReconnecting(true);
         Promise.all([
           followingRef.current?.refresh?.(),

@@ -16,8 +16,8 @@ import { s, ms } from '../utils/responsive';
 import { COLORS } from '../constants/theme';
 import { StatusBar } from 'expo-status-bar';
 
-// Your admin user ID - replace with your actual user ID
-const ADMIN_USER_ID = '6e4ae755-f747-4ba3-b798-53b4da49c2e5'; 
+// Admin user ID from environment variable
+const ADMIN_USER_ID = process.env.EXPO_PUBLIC_ADMIN_USER_ID; 
 
 export default function AdminScreen({ navigation }) {
   const { user: authUser } = useUser();

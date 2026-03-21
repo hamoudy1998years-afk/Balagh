@@ -779,7 +779,7 @@ export default function ProfileScreen({ route, navigation }) {
               </AnimatedButton>
             </View>
           )}
-          {currentUser?.id === '6e4ae755-f747-4ba3-b798-53b4da49c2e5' && (
+          {currentUser?.id === process.env.EXPO_PUBLIC_ADMIN_USER_ID && (
             <TouchableOpacity 
               style={styles.adminButton}
               onPress={() => navigation.navigate('Admin')}
