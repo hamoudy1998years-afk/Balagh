@@ -485,6 +485,7 @@ export default function HomeScreen({ navigation }) {
   ]);
   const [isConnected, setIsConnected] = useState(true);
   const [showOffline, setShowOffline] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   const { width: screenWidth } = useWindowDimensions();
   const isFocused = useIsFocused();
@@ -499,14 +500,35 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => { indexRef.current = index; }, [index]);
   useEffect(() => { isFocusedRef.current = isFocused; }, [isFocused]);
 
-  // NetInfo for offline detection
+  // NetInfo for offline detection with auto-refresh
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
+      const wasOffline = showOffline;
+      const isOffline = !state.isInternetReachable;
+      
+      console.log(`[Home] Network state: isInternetReachable=${state.isInternetReachable}, wasOffline=${wasOffline}`);
+      
+      setShowOffline(isOffline);
+      
+      // Connection restored - auto refresh both tabs
+      if (wasOffline && !isOffline) {
+        console.log('[Home] Connection restored - auto refreshing feeds');
+        setIsReconnecting(true);
+        Promise.all([
+          followingRef.current?.refresh?.(),
+          foryouRef.current?.refresh?.()
+        ]).finally(() => {
+          setIsReconnecting(false);
+        });
+      }
+    });
+    
+    NetInfo.fetch().then(state => {
       setShowOffline(!state.isInternetReachable);
     });
-    NetInfo.fetch().then(state => setShowOffline(!state.isInternetReachable));
+    
     return () => unsubscribe();
-  }, []);
+  }, [showOffline]);
 
   // Pulse animation for LIVE dot
   useEffect(() => {
@@ -706,7 +728,7 @@ export default function HomeScreen({ navigation }) {
           paddingVertical: 8,
           borderRadius: 20,
           borderWidth: 1,
-          borderColor: '#ff4757',
+          borderColor: isReconnecting ? '#4CAF50' : '#ff4757',
           zIndex: 999,
           elevation: 5,
           shadowColor: '#000',
@@ -714,19 +736,23 @@ export default function HomeScreen({ navigation }) {
           shadowOpacity: 0.25,
           shadowRadius: 3.84,
         }}>
-          <View style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: '#ff4757',
-            marginRight: 8
-          }} />
+          {isReconnecting ? (
+            <ActivityIndicator size="small" color="#4CAF50" style={{ marginRight: 8 }} />
+          ) : (
+            <View style={{
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: '#ff4757',
+              marginRight: 8
+            }} />
+          )}
           <Text style={{
             color: '#fff',
             fontSize: 13,
             fontWeight: '600'
           }}>
-            No internet connection
+            {isReconnecting ? 'Reconnecting...' : 'No internet connection'}
           </Text>
         </View>
       )}
