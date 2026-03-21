@@ -73,10 +73,12 @@ export default function LiveVideoCard({ stream, onPress }) {
 const styles = StyleSheet.create({
   container: {
     width: '100%',
+    maxWidth: 280,  // Prevent excessive stretching on tablets
     aspectRatio: 9/16,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#000',
+    alignSelf: 'center',  // Center if parent is wider than maxWidth
   },
   thumbnail: {
     ...StyleSheet.absoluteFillObject,
