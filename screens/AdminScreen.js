@@ -14,6 +14,7 @@ import { useUser } from '../context/UserContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
 import { COLORS } from '../constants/theme';
+import { StatusBar } from 'expo-status-bar';
 
 // Your admin user ID - replace with your actual user ID
 const ADMIN_USER_ID = '6e4ae755-f747-4ba3-b798-53b4da49c2e5'; 
@@ -232,6 +233,7 @@ export default function AdminScreen({ navigation }) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar style="light" backgroundColor="transparent" translucent />
       <Text style={styles.title}>Admin Panel - Reports</Text>
       <Text style={styles.subtitle}>{reports.length} pending reports</Text>
       
@@ -271,7 +273,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: ms(14),
-    color: COLORS.textSecondary,
+    color: '#ffffff',
     paddingHorizontal: s(16),
     marginBottom: s(16),
   },
@@ -364,7 +366,7 @@ const styles = StyleSheet.create({
   },
   empty: {
     textAlign: 'center',
-    color: COLORS.textSecondary,
+    color: '#ffffff',
     fontSize: ms(16),
     marginTop: s(40),
   },

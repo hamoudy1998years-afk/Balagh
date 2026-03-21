@@ -779,12 +779,14 @@ export default function ProfileScreen({ route, navigation }) {
               </AnimatedButton>
             </View>
           )}
-          <TouchableOpacity 
-            style={styles.adminButton}
-            onPress={() => navigation.navigate('Admin')}
-          >
-            <Text style={styles.adminButtonText}> Admin Panel</Text>
-          </TouchableOpacity>
+          {currentUser?.id === '6e4ae755-f747-4ba3-b798-53b4da49c2e5' && (
+            <TouchableOpacity 
+              style={styles.adminButton}
+              onPress={() => navigation.navigate('Admin')}
+            >
+              <Text style={styles.adminButtonText}> Admin Panel</Text>
+            </TouchableOpacity>
+          )}
         </>
       ) : (
         <View style={styles.actionButtons}>

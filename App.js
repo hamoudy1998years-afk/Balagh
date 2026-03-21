@@ -42,10 +42,8 @@ import ErrorBoundary from './components/ErrorBoundary';
 import * as Sentry from '@sentry/react-native';
 import { loadBannedWords } from './utils/moderation';
 
-// ADD THIS IMPORT
 import { UserProvider } from './context/UserContext';
 
-// Global Sheet Imports
 import { DownloadProvider } from './context/DownloadContext';
 import GlobalVideoOptionsSheet from './components/GlobalVideoOptionsSheet';
 
@@ -113,7 +111,6 @@ function MainTabs({ session }) {
     const mainRoute = state?.routes?.find(r => r.name === 'Main');
     const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
     
-    // If activeTab is undefined (navigator not ready) OR we're on Home, do refresh
     if (!activeTab || activeTab === 'Home') {
       if (homeRefreshRef.current) {
         homeRefreshRef.current();
@@ -123,7 +120,7 @@ function MainTabs({ session }) {
     }
   };
 
- return (
+  return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
@@ -224,7 +221,6 @@ function MainTabs({ session }) {
   );
 }
 
-// ADD THIS - tells React Navigation how to handle deep links
 const linking = {
   prefixes: ['bushrann://', 'https://bushrann.app'],
   config: {
@@ -240,7 +236,7 @@ const linking = {
 
 function App() {
   const [session, setSession] = useState(undefined);
-  const [ageVerified, setAgeVerified] = useState(null); // null = loading, false = show gate, true = show app
+  const [ageVerified, setAgeVerified] = useState(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState(null);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
@@ -273,7 +269,6 @@ function App() {
   }, [ageVerified]);
 
   useEffect(() => {
-    // Handle push notification taps
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
       const data = response.notification.request.content.data;
       
@@ -295,13 +290,11 @@ function App() {
     loadBannedWords();
   }, []);
 
-  // Deep link logging
   useEffect(() => {
     const linkingSub = Linking.addEventListener('url', ({ url }) => {
       console.log('[DEEP LINK] URL received:', url);
     });
     
-    // Also log initial URL
     Linking.getInitialURL().then(url => {
       if (url) console.log('[DEEP LINK] Initial URL:', url);
     });
@@ -312,22 +305,16 @@ function App() {
   useEffect(() => {
     runMigrationIfNeeded();
 
-    // Handle app opened from killed state
     Linking.getInitialURL().then((url) => {
       if (url) handleDeepLink(url);
     });
 
-    // Handle app opened from background
     const linkingSub = Linking.addEventListener('url', ({ url }) => {
       if (url) handleDeepLink(url);
     });
 
-    // onAuthStateChange fires INITIAL_SESSION on mount — no need for a separate
-    // getSession() call. Using both causes a race where getSession() can
-    // overwrite a fresher session set by onAuthStateChange.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(prev => {
-        // INITIAL_SESSION fires synchronously; only update if value changed
         if (prev === undefined || prev?.access_token !== session?.access_token) {
           return session;
         }
@@ -342,7 +329,6 @@ function App() {
         updateStoredGoogleToken(session.user.email, session.refresh_token);
       }
 
-      // Recreate missing profile rows (e.g. after admin deletion)
       if ((_event === 'SIGNED_IN' || _event === 'INITIAL_SESSION') && session?.user) {
         ensureProfileExists(session.user);
       }
@@ -378,16 +364,13 @@ function App() {
     }
   }
 
-  // ADD THIS HELPER FUNCTION
   async function handleDeepLink(url) {
     console.log('[DEEP LINK] handleDeepLink called with:', url);
     if (!url || !url.startsWith('bushrann://')) return;
     
-    // Check if it's a recovery link
     if (url.includes('type=recovery')) {
       __DEV__ && console.log('✅ Recovery link detected!');
       
-      // Extract tokens from URL hash or query
       const hashIndex = url.indexOf('#');
       const queryIndex = url.indexOf('?');
       const paramStart = hashIndex !== -1 ? hashIndex + 1 : (queryIndex !== -1 ? queryIndex + 1 : null);
@@ -400,7 +383,6 @@ function App() {
         __DEV__ && console.log('Access token found:', !!access_token);
         
         if (access_token) {
-          // Set session manually
           const { data, error } = await supabase.auth.setSession({
             access_token,
             refresh_token: refresh_token || '',
@@ -410,7 +392,6 @@ function App() {
             __DEV__ && console.log('❌ Session error:', error.message);
           } else {
             __DEV__ && console.log('✅ Session set!');
-            // Navigate to ResetPassword
             setTimeout(() => {
               navigationRef.current?.navigate('ResetPassword');
             }, 500);
@@ -420,9 +401,11 @@ function App() {
     }
   }
 
+  // FIX: Added StatusBar to all early return screens
   if (ageVerified === null || onboardingCompleted === null) {
     return (
-      <View style={{flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center'}}>
+      <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar style="light" />
         <ActivityIndicator size="large" color="#FFD700" />
       </View>
     );
@@ -431,6 +414,7 @@ function App() {
   if (onboardingCompleted === false) {
     return (
       <SafeAreaProvider>
+        <StatusBar style="light" />
         <OnboardingScreen onComplete={() => setOnboardingCompleted(true)} />
       </SafeAreaProvider>
     );
@@ -439,6 +423,7 @@ function App() {
   if (!ageVerified) {
     return (
       <SafeAreaProvider>
+        <StatusBar style="light" />
         <AgeGateScreen onVerified={() => setAgeVerified(true)} />
       </SafeAreaProvider>
     );
@@ -447,53 +432,55 @@ function App() {
   if (session === undefined) {
     return (
       <View style={{ flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center' }}>
+        <StatusBar style="light" />
         <ActivityIndicator color={COLORS.gold} size="large" />
       </View>
     );
   }
 
   return (
-    <SafeAreaProvider>
-      <ErrorBoundary>
-        <UserProvider>
-          <DownloadProvider>
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <BottomSheetModalProvider>
-                <NavigationContainer ref={navigationRef} linking={linking}>
-                  <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
-                    <Stack.Screen name="Main">
-                      {() => <MainTabs session={session} />}
-                    </Stack.Screen>
-                    <Stack.Screen name="Login" component={LoginScreen} />
-                    <Stack.Screen name="Signup" component={SignupScreen} />
-                    <Stack.Screen name="CommentsModal" component={CommentsModal} options={{ presentation: 'modal' }} />
-                    <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-                    <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
-                    <Stack.Screen name="Search" component={SearchScreen} />
-                    <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
-                    <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
-                    <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
-                    <Stack.Screen name="FollowList" component={FollowListScreen} />
-                    <Stack.Screen name="Settings" component={SettingsScreen} />
-                    <Stack.Screen name="UserProfile" component={ProfileScreen} />
-                    <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
-                    <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
-                    <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
-                    <Stack.Screen name="Admin" component={AdminScreen} />
-                  </Stack.Navigator>
-                  <GlobalVideoOptionsSheet />
-                </NavigationContainer>
-              </BottomSheetModalProvider>
-            </GestureHandlerRootView>
-          </DownloadProvider>
-        </UserProvider>
-      </ErrorBoundary>
-    </SafeAreaProvider>
+    <>
+      <StatusBar style="light" />
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <UserProvider>
+            <DownloadProvider>
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <BottomSheetModalProvider>
+                  <NavigationContainer ref={navigationRef} linking={linking}>
+                    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
+                      <Stack.Screen name="Main">
+                        {() => <MainTabs session={session} />}
+                      </Stack.Screen>
+                      <Stack.Screen name="Login" component={LoginScreen} />
+                      <Stack.Screen name="Signup" component={SignupScreen} />
+                      <Stack.Screen name="CommentsModal" component={CommentsModal} options={{ presentation: 'modal' }} />
+                      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+                      <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
+                      <Stack.Screen name="Search" component={SearchScreen} />
+                      <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
+                      <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
+                      <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
+                      <Stack.Screen name="FollowList" component={FollowListScreen} />
+                      <Stack.Screen name="Settings" component={SettingsScreen} />
+                      <Stack.Screen name="UserProfile" component={ProfileScreen} />
+                      <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
+                      <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
+                      <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+                      <Stack.Screen name="Admin" component={AdminScreen} />
+                    </Stack.Navigator>
+                    <GlobalVideoOptionsSheet />
+                  </NavigationContainer>
+                </BottomSheetModalProvider>
+              </GestureHandlerRootView>
+            </DownloadProvider>
+          </UserProvider>
+        </ErrorBoundary>
+      </SafeAreaProvider>
+    </>
   );
 }
 
-// Wrap App with Sentry
 export default Sentry.wrap(App);
 
-const styles = StyleSheet.create({
-});
+const styles = StyleSheet.create({});
