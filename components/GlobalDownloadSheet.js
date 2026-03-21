@@ -4,10 +4,12 @@ import {
 } from 'react-native';
 import { useDownload } from '../context/DownloadContext';
 import { COLORS } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SHEET_HEIGHT = 400;
 
 export default function GlobalDownloadSheet() {
+  const insets = useSafeAreaInsets();
   const context = useDownload();
   
   // SAFETY CHECK - if context is undefined, return null
@@ -77,7 +79,7 @@ export default function GlobalDownloadSheet() {
       </Animated.View>
 
       <Animated.View 
-        style={[styles.sheet, { transform: [{ translateY }] }]} 
+        style={[styles.sheet, { transform: [{ translateY }], paddingBottom: insets.bottom + 20 }]} 
         pointerEvents="auto"
         {...panResponder.panHandlers}
       >
@@ -119,7 +121,7 @@ const styles = StyleSheet.create({
     zIndex: 9999, elevation: 9999, justifyContent: 'flex-end',
   },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
-  sheet: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
+  sheet: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 }, // paddingBottom overridden inline
   dragHandle: { width: 36, height: 5, backgroundColor: COLORS.textGray, borderRadius: 3, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   preview: { marginHorizontal: 16, marginBottom: 16, borderRadius: 12, overflow: 'hidden', height: 90 },
   previewImg: { width: '100%', height: '100%' },

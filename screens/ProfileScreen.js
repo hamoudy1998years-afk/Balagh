@@ -912,7 +912,7 @@ export default function ProfileScreen({ route, navigation }) {
 
       <Modal visible={avatarModal} transparent animationType="slide" onRequestClose={() => dispatchUI({ type: 'SET_AVATAR_MODAL', open: false })} statusBarTranslucent>
         <Pressable style={styles.modalBackdrop} onPress={handleCloseAvatarModal} />
-        <View style={styles.modalSheet}>
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
           <Text style={styles.modalTitle}>Profile Photo</Text>
           {profile?.avatar_url && (
             <AnimatedButton style={styles.modalOption} onPress={handleViewEnlargedAvatar}>
@@ -999,7 +999,7 @@ const styles = StyleSheet.create({
   emptyGridIcon: { fontSize: 48 },
   emptyGridText: { color: '#aaa', fontSize: 15, fontWeight: '600' },
   modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40, paddingTop: 16, borderTopWidth: 0.5, borderColor: '#eee' },
+  modalSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 40, paddingTop: 16, borderTopWidth: 0.5, borderColor: '#eee' }, // paddingBottom overridden inline
   modalTitle: { color: '#111', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 16 },
   modalOption: { paddingVertical: 16, paddingHorizontal: 24 },
   modalOptionText: { color: '#111', fontSize: 16, fontWeight: '500' },

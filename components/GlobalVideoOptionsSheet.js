@@ -4,10 +4,12 @@ import {
 } from 'react-native';
 import { useDownload } from '../context/DownloadContext';
 import { COLORS } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SHEET_HEIGHT = 400; // Reduced height since we removed preview
 
 export default function GlobalVideoOptionsSheet() {
+  const insets = useSafeAreaInsets();
   const context = useDownload();
   
   if (!context) {
@@ -85,7 +87,7 @@ export default function GlobalVideoOptionsSheet() {
       </Animated.View>
 
       <Animated.View 
-        style={[styles.sheet, { transform: [{ translateY }] }]} 
+        style={[styles.sheet, { transform: [{ translateY }], paddingBottom: insets.bottom + 20 }]} 
         pointerEvents="auto"
         {...panResponder.panHandlers}
       >
@@ -142,7 +144,7 @@ const styles = StyleSheet.create({
     zIndex: 9999, elevation: 9999, justifyContent: 'flex-end',
   },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
-  sheet: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
+  sheet: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 }, // paddingBottom overridden inline
   dragHandle: { width: 36, height: 5, backgroundColor: COLORS.textGray, borderRadius: 3, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
   option: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, gap: 16 },
   optionIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.borderDark, alignItems: 'center', justifyContent: 'center' },
