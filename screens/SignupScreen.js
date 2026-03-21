@@ -9,9 +9,11 @@ import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function SignupScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -108,7 +110,7 @@ export default function SignupScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
         <AnimatedButton onPress={navigation.goBack} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
           <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
         </AnimatedButton>
@@ -236,7 +238,7 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1, backgroundColor: COLORS.bgDark, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40,
-  },
+  }, // paddingTop and paddingBottom overridden inline
   arabic: { fontSize: 24, color: COLORS.gold, marginBottom: 8 },
   title: { fontSize: 36, fontWeight: 'bold', color: COLORS.textWhite, marginBottom: 4 },
   subtitle: { fontSize: 14, color: COLORS.textGray, marginBottom: 36 },

@@ -28,6 +28,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCredentialKey } from '../constants/storage';
 import { s, ms } from '../utils/responsive';
 import ModernDialog from './ModernDialog';
@@ -35,6 +36,7 @@ import ModernDialog from './ModernDialog';
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -804,7 +806,7 @@ const handleClosePinModal = useCallback(() => {
         >
           <ScrollView
             style={{ flex: 1, backgroundColor: COLORS.bgDark }}
-            contentContainerStyle={styles.container}
+            contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]}
             keyboardShouldPersistTaps="handled"
             scrollEnabled={!showDropdown}
             nestedScrollEnabled={true}
@@ -1056,7 +1058,7 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1, backgroundColor: COLORS.bgDark, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40,
-  },
+  }, // paddingTop and paddingBottom overridden inline
   arabic: { fontSize: 24, color: COLORS.gold, marginBottom: 8 },
   title: { fontSize: 36, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#64748b', marginBottom: 36 },

@@ -22,6 +22,7 @@ import ReplyInput from '../components/comments/ReplyInput';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function CustomBackdrop({ onClose }) {
   return (
@@ -38,6 +39,7 @@ export default function CommentsModal({
   navigation,
   isCreator = false,
 }) {
+  const insets = useSafeAreaInsets();
   const {
     comments,
     loading,
@@ -268,7 +270,7 @@ export default function CommentsModal({
         <View
           style={[
             styles.inputWrapper,
-            { marginBottom: keyboardHeight },
+            { marginBottom: keyboardHeight, paddingBottom: insets.bottom + 8 },
           ]}
         >
           {replyingTo ? (
@@ -343,6 +345,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
-    paddingBottom: Platform.OS === 'ios' ? 20 : 8,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 8, // overridden inline with insets
   },
 });

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,6 +39,7 @@ const slides = [
 ];
 
 export default function OnboardingScreen({ onComplete }) {
+  const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef(null);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -138,7 +140,7 @@ export default function OnboardingScreen({ onComplete }) {
 
       {renderDots()}
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
         <TouchableOpacity
           style={styles.button}
           onPress={scrollToNext}
@@ -222,7 +224,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingHorizontal: 24,
-    paddingBottom: 60,
+    paddingBottom: 60, // Will be overridden by inline style
   },
   button: {
     backgroundColor: '#ffffff',

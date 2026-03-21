@@ -5,8 +5,10 @@ import { supabase } from '../lib/supabase';
 import VideoCard from '../screens/VideoCard';
 import { COLORS } from '../constants/theme';
 import { useUser } from '../context/UserContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function VideoDetailScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const route = useRoute();
   const videoId = route.params?.id || route.params?.videoId;
   const { height } = useWindowDimensions();
@@ -97,7 +99,7 @@ export default function VideoDetailScreen({ navigation }) {
     <View style={styles.container}>
       <TouchableOpacity
         onPress={navigation.goBack}
-        style={styles.backBtn}
+        style={[styles.backBtn, { top: insets.top + 8 }]}
       >
         <Text style={styles.backText}>←</Text>
       </TouchableOpacity>
@@ -123,6 +125,6 @@ export default function VideoDetailScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   center: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  backBtn: { position: 'absolute', top: 48, left: 16, zIndex: 99 },
+  backBtn: { position: 'absolute', top: 48, left: 16, zIndex: 99 }, // top overridden inline with insets
   backText: { color: '#fff', fontSize: 28, fontWeight: '700' },
 });
