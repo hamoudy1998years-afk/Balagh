@@ -70,15 +70,18 @@ function VideoCard({
 
   // When user scrolls away from this video — reset manual pause so it auto-plays on return
   useEffect(() => {
-    if (!isActive) {
-      manualPauseRef.current = false;
-      setPaused(true); // ensure paused while not active
-    } else {
-      // Scrolled back to this video — always auto-play (TikTok behaviour)
-      manualPauseRef.current = false;
-      setPaused(false);
-    }
-  }, [isActive]);
+  if (!isActive) {
+    manualPauseRef.current = false;
+    setPaused(true);
+  } else {
+    // Scrolled back — restart from 0 and play like TikTok
+    manualPauseRef.current = false;
+    try {
+      if (player?.current) player.current.seek(0);
+    } catch (e) {}
+    setPaused(false);
+  }
+}, [isActive]);
 
   // When tab switches — pause/resume and restart from beginning
   useEffect(() => {
