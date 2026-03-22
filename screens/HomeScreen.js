@@ -15,6 +15,7 @@ import { useVideoPlayerPool } from '../components/VideoPlayerPool';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
+import { StatusBar } from 'expo-status-bar';
 
 // ── Simple in-memory feed cache ────────────────────────────────────────────────
 const feedCache = {
@@ -716,6 +717,7 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
+      <StatusBar style="light" backgroundColor="transparent" translucent />
       {showOffline && (
         <View style={{
           position: 'absolute',
