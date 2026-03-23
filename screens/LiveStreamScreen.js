@@ -861,6 +861,38 @@ export default function LiveStreamScreen({ navigation, route }) {
   async function confirmEndStream() {
     console.log('[BTN] Confirm End Stream pressed');
     setShowEndModal(false);
+    
+    // Save stream to profile if enabled
+    if (saveToProfile && currentUser) {
+      try {
+        console.log('[STREAM] Saving to profile...');
+        
+        // Create video record (metadata only for now - actual recording requires Agora Cloud Recording)
+        const { data: videoData, error: videoError } = await supabase
+          .from('videos')
+          .insert({
+            user_id: currentUser.id,
+            caption: title || 'Live Stream',
+            // Note: video_url would be added here after implementing Agora Cloud Recording
+            // For now, we save metadata so user sees "Live Stream" in their profile
+            thumbnail_url: null, // Could capture final frame
+            views: viewerCount,
+            created_at: new Date().toISOString(),
+            is_live_stream: true,
+            live_stream_id: streamId
+          })
+          .select()
+          .single();
+          
+        if (videoError) throw videoError;
+        
+        Alert.alert('Success', 'Live stream saved to your profile!');
+      } catch (saveError) {
+        console.error('[STREAM] Failed to save:', saveError);
+        Alert.alert('Save Failed', 'Could not save stream to profile, but stream ended successfully.');
+      }
+    }
+    
     await supabase.from('live_streams').delete().eq('id', streamId);
     await cleanup();
     navigation.goBack();
