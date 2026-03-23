@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 const { height } = Dimensions.get('window');
 const ITEM_HEIGHT = 80;
@@ -89,6 +90,7 @@ export default function AgeGateScreen({ onVerified }) {
 
   return (
     <View style={styles.container}>
+      <SystemBars style="light" />
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <Text style={styles.emoji}></Text>
         <Text style={styles.title}>How old are you?</Text>

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, TouchableOpacity, useWindowDimensions, AppState } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, useWindowDimensions, AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { FlashList } from '@shopify/flash-list';
 import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
@@ -15,7 +15,8 @@ import { useVideoPlayerPool } from '../components/VideoPlayerPool';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
-import { StatusBar } from 'expo-status-bar';
+import { SystemBars } from 'react-native-edge-to-edge';
+
 
 // ── Simple in-memory feed cache ────────────────────────────────────────────────
 const feedCache = {
@@ -717,7 +718,7 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
-      <StatusBar style="light" backgroundColor="transparent" translucent />
+      <SystemBars style="light" />
       {showOffline && (
         <View style={{
           position: 'absolute',

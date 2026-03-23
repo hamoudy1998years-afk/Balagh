@@ -6,6 +6,8 @@ import { useState, useRef } from 'react';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 const { width, height } = Dimensions.get('window');
 const CROP_SIZE = width - 60;
@@ -103,7 +105,7 @@ export default function AvatarCropScreen({ route, navigation }) {
         );
 
         setProcessing(false);
-        navigation.navigate('Main', {
+        navigation.navigate(ROUTES.MAIN, {
         screen: 'Profile',
         params: { croppedUri: result.uri },
         });
@@ -118,6 +120,7 @@ export default function AvatarCropScreen({ route, navigation }) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      <SystemBars style="light" />
 
       {/* Top bar */}
       <View style={styles.topBar}>

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
-import { Platform } from 'react-native';
+
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({

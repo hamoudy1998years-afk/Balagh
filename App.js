@@ -32,6 +32,7 @@ import CommentsModal from './screens/CommentsModal';
 import * as WebBrowser from 'expo-web-browser';
 import * as Notifications from 'expo-notifications';
 import { COLORS } from './constants/theme';
+import { ROUTES } from './constants/routes';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import ResetPasswordScreen from './screens/ResetPasswordScreen';
@@ -48,7 +49,7 @@ import GlobalVideoOptionsSheet from './components/GlobalVideoOptionsSheet';
 WebBrowser.maybeCompleteAuthSession();
 
 Sentry.init({
-  dsn: 'https://e204442193cbb2af057e44b9613b630a@o4511072669335552.ingest.us.sentry.io/4511072675954688',
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
   enableInExpoDevelopment: true,
   debug: false,
   tracesSampleRate: 1.0,
@@ -116,7 +117,7 @@ function MainTabs({ session }) {
       }
     } else {
       // On another tab or screen — navigate to Home
-      navigation.navigate('Main', { screen: 'Home' });
+      navigation.navigate(ROUTES.MAIN, { screen: 'Home' });
     }
   };
 
@@ -168,7 +169,7 @@ function MainTabs({ session }) {
               {...props}
               onPress={() => {
                 if (!session) {
-                  navigation.navigate('Login');
+                  navigation.navigate(ROUTES.LOGIN);
                 } else {
                   props.onPress?.();
                 }
@@ -189,7 +190,7 @@ function MainTabs({ session }) {
               {...props}
               onPress={() => {
                 if (!session) {
-                  navigation.navigate('Login');
+                  navigation.navigate(ROUTES.LOGIN);
                 } else {
                   props.onPress?.();
                 }
@@ -208,7 +209,7 @@ function MainTabs({ session }) {
               {...props}
               onPress={() => {
                 if (!session) {
-                  navigation.navigate('Login');
+                  navigation.navigate(ROUTES.LOGIN);
                 } else {
                   props.onPress?.();
                 }
@@ -290,10 +291,10 @@ function App() {
 
   useEffect(() => {
     const linkingSub = Linking.addEventListener('url', ({ url }) => {
-      console.log('[DEEP LINK] URL received:', url);
+      if (__DEV__) console.log('[DEEP LINK] URL received:', url);
     });
     Linking.getInitialURL().then(url => {
-      if (url) console.log('[DEEP LINK] Initial URL:', url);
+      if (url && __DEV__) console.log('[DEEP LINK] Initial URL:', url);
     });
     return () => linkingSub.remove();
   }, []);
@@ -361,7 +362,7 @@ function App() {
   }
 
   async function handleDeepLink(url) {
-    console.log('[DEEP LINK] handleDeepLink called with:', url);
+    if (__DEV__) console.log('[DEEP LINK] handleDeepLink called with:', url);
     if (!url || !url.startsWith('bushrann://')) return;
 
     if (url.includes('type=recovery')) {

@@ -11,7 +11,7 @@ import { userCache } from '../utils/userCache';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
-import { EDGE_FUNCTIONS } from '../constants/api';
+import { EDGE_FUNCTIONS, CONFIG } from '../constants/api';
 import { ERROR_TITLES, ERROR_MESSAGES } from '../constants/errors';
 import { clearFeedCache } from './HomeScreen';
 import { useUser } from '../context/UserContext';
@@ -589,7 +589,7 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="LEGAL" />
       <Card>
         <Row icon="📄" label="Terms of Service" onPress={handleNavigateTerms} />
-        <Row icon="🔏" label="Privacy Policy" onPress={handleNavigatePrivacyPolicy} sublabel="https://sites.google.com/view/bushrann" last />
+        <Row icon="🔏" label="Privacy Policy" onPress={handleNavigatePrivacyPolicy} sublabel={CONFIG.PRIVACY_POLICY_URL} last />
       </Card>
       <GroupLabel text="APP INFO" />
       <Card>

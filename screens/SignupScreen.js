@@ -1,6 +1,6 @@
 import {
   View, Text, TextInput, StyleSheet,
-  Alert, ScrollView, KeyboardAvoidingView, Platform,
+  ScrollView, KeyboardAvoidingView, Platform,
   TouchableOpacity, Animated,
 } from 'react-native';
 import { useState, useRef, useCallback } from 'react';
@@ -11,6 +11,7 @@ import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 export default function SignupScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -109,7 +110,9 @@ export default function SignupScreen({ navigation }) {
   }, [navigation]);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <>
+      <SystemBars style="light" />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
         <AnimatedButton onPress={navigation.goBack} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
           <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
@@ -231,6 +234,7 @@ export default function SignupScreen({ navigation }) {
         </AnimatedButton>
       </ScrollView>
     </KeyboardAvoidingView>
+    </>
   );
 }
 

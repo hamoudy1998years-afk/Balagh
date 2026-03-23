@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Animated, Pressable, PanResponder, // Removed Image import
 } from 'react-native';

@@ -6,6 +6,7 @@ import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 export default function ResetPasswordScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -67,6 +68,7 @@ export default function ResetPasswordScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <SystemBars style="light" />
     <ScrollView
       contentContainerStyle={[styles.container, { paddingTop: Math.max(28, insets.top + 16), paddingBottom: Math.max(28, insets.bottom + 16) }]}
       keyboardShouldPersistTaps="handled"

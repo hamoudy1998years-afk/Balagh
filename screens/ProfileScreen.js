@@ -1,25 +1,25 @@
 import {
-  View, Text, StyleSheet, FlatList,
+  View, Text, StyleSheet,
   Image, Modal, Alert, useWindowDimensions,
   RefreshControl, Animated, Pressable,
   TouchableOpacity,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import React, { useReducer, useEffect as useEffectHook, useCallback, useRef, useState } from 'react';
+import React, { useReducer, useEffect as useEffectHook, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import NetInfo from '@react-native-community/netinfo';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system/legacy';
+
 import AnimatedButton from './AnimatedButton';
 import { useDownload } from '../context/DownloadContext';
 import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
+import { useCallback } from 'react';
 
 const useDownloadedVideos = () => {
   const downloadedRef = useRef(new Set());
@@ -426,8 +426,9 @@ export default function ProfileScreen({ route, navigation }) {
 
   async function uploadCroppedAvatar(croppedUri) {
     try {
-      const user = currentUser;
-      if (!user) { Alert.alert('Error', 'Not logged in.'); return; }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { Alert.alert('Error', 'Not logged in.'); return; }
+      const user = session.user;
       const ext = 'jpg';
       const fileName = `${user.id}_avatar.${ext}`;
       const formData = new FormData();
@@ -787,7 +788,7 @@ export default function ProfileScreen({ route, navigation }) {
           {currentUser?.id === process.env.EXPO_PUBLIC_ADMIN_USER_ID && (
             <TouchableOpacity 
               style={styles.adminButton}
-              onPress={() => navigation.navigate('Admin')}
+              onPress={() => navigation.navigate(ROUTES.ADMIN)}
             >
               <Text style={styles.adminButtonText}> Admin Panel</Text>
             </TouchableOpacity>

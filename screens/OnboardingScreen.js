@@ -11,6 +11,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 const { width, height } = Dimensions.get('window');
 
@@ -123,6 +124,7 @@ export default function OnboardingScreen({ onComplete }) {
 
   return (
     <View style={styles.container}>
+      <SystemBars style="light" />
       <FlatList
         ref={flatListRef}
         data={slides}

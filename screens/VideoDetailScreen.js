@@ -1,4 +1,5 @@
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import { useEffect, useState, useRef } from 'react';
 import { useRoute } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -97,6 +98,7 @@ export default function VideoDetailScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <SystemBars style="light" />
       <TouchableOpacity
         onPress={navigation.goBack}
         style={[styles.backBtn, { top: insets.top + 8 }]}

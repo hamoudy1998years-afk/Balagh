@@ -14,17 +14,18 @@ import {
   Keyboard,
   Animated,
 } from 'react-native';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import * as LocalAuthentication from 'expo-local-authentication';
 import AnimatedButton from './AnimatedButton';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { SystemBars } from 'react-native-edge-to-edge';
 import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
@@ -798,7 +799,9 @@ const handleClosePinModal = useCallback(() => {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
+    <>
+      <SystemBars style="light" />
+      <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
       <TouchableWithoutFeedback onPress={closeDropdown}>
         <KeyboardAvoidingView 
           style={{ flex: 1, backgroundColor: COLORS.bgDark }} 
@@ -1051,6 +1054,7 @@ const handleClosePinModal = useCallback(() => {
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
     </View>
+    </>
   );
 }
 

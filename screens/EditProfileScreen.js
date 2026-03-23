@@ -2,6 +2,7 @@ import {
   View, Text, TextInput, StyleSheet,
   ActivityIndicator, ScrollView, Keyboard
 } from 'react-native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -148,6 +149,7 @@ export default function EditProfileScreen({ navigation }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
+      <SystemBars style="light" />
       <ScrollView
         ref={scrollRef}
         style={epStyles.container}

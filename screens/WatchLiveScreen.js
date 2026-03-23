@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList,
   Keyboard, Platform, ActivityIndicator,
   Animated, Dimensions, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SystemBars } from 'react-native-edge-to-edge';
 import {
   createAgoraRtcEngine,
   ChannelProfileType,
@@ -461,6 +462,7 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   return (
     <View style={styles.container}>
+      <SystemBars style="light" />
       <RtcSurfaceView 
         style={StyleSheet.absoluteFill} 
         canvas={{ uid: hostUid, renderMode: 1 }} 

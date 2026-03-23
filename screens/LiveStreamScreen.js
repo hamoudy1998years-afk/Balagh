@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList, Alert,
   Keyboard, Platform, ActivityIndicator, BackHandler,
-  Dimensions, PermissionsAndroid, AppState, Image, Switch,
+  Dimensions, PermissionsAndroid, AppState, Switch,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -24,6 +24,7 @@ import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 import { filterMessage } from '../utils/moderation';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 const { width, height } = Dimensions.get('window');
 const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
@@ -976,6 +977,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   
   return (
     <View style={styles.container}>
+      <SystemBars style="light" />
       <RtcSurfaceView
         style={StyleSheet.absoluteFill}
         canvas={{ uid: 0, sourceType: VideoSourceType.VideoSourceCamera }}

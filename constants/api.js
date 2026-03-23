@@ -1,6 +1,13 @@
+// Hardcoded configuration (move to env vars in production)
+export const CONFIG = {
+  SUPABASE_URL: 'https://waurtjtnyinncbdhfydu.supabase.co',
+  PRIVACY_POLICY_URL: 'https://sites.google.com/view/bushrann',
+  TERMS_URL: 'https://sites.google.com/view/bushrann/terms',
+};
+
 // API Configuration
 export const API_BASE_URLS = {
-  SUPABASE: process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://waurtjtnyinncbdhfydu.supabase.co',
+  SUPABASE: process.env.EXPO_PUBLIC_SUPABASE_URL || CONFIG.SUPABASE_URL,
   TOKEN_SERVER: process.env.EXPO_PUBLIC_SERVER_URL,
 };
 

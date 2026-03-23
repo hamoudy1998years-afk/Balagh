@@ -5,6 +5,7 @@ import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUser } from '../context/UserContext';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 export default function ApplyScholarScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -79,6 +80,8 @@ export default function ApplyScholarScreen({ navigation }) {
   }
 
   return (
+    <>
+      <SystemBars style="light" />
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
       <AnimatedButton onPress={navigation.goBack} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
@@ -115,6 +118,7 @@ export default function ApplyScholarScreen({ navigation }) {
       </AnimatedButton>
     </ScrollView>
     </KeyboardAvoidingView>
+    </>
   );
 }
 
