@@ -41,15 +41,12 @@ import OnboardingScreen from './screens/OnboardingScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import * as Sentry from '@sentry/react-native';
 import { loadBannedWords } from './utils/moderation';
-
 import { UserProvider } from './context/UserContext';
-
 import { DownloadProvider } from './context/DownloadContext';
 import GlobalVideoOptionsSheet from './components/GlobalVideoOptionsSheet';
 
 WebBrowser.maybeCompleteAuthSession();
 
-// Sentry initialization
 Sentry.init({
   dsn: 'https://e204442193cbb2af057e44b9613b630a@o4511072669335552.ingest.us.sentry.io/4511072675954688',
   enableInExpoDevelopment: true,
@@ -106,16 +103,19 @@ function MainTabs({ session }) {
   const [homeKey, setHomeKey] = useState(0);
   const navigation = useNavigation();
 
+  // FIX: Removed !activeTab condition — was causing refresh instead of navigate
   const handleHomePress = () => {
     const state = navigation.getState();
     const mainRoute = state?.routes?.find(r => r.name === 'Main');
     const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
-    
-    if (!activeTab || activeTab === 'Home') {
+
+    if (activeTab === 'Home') {
+      // Already on Home tab — refresh the feed
       if (homeRefreshRef.current) {
         homeRefreshRef.current();
       }
     } else {
+      // On another tab or screen — navigate to Home
       navigation.navigate('Main', { screen: 'Home' });
     }
   };
@@ -271,7 +271,6 @@ function App() {
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
       const data = response.notification.request.content.data;
-      
       if (data?.type === 'video' && data?.videoId) {
         navigationRef.current?.navigate('VideoDetail', { id: data.videoId });
       } else if (data?.type === 'live' && data?.streamId) {
@@ -282,7 +281,6 @@ function App() {
         navigationRef.current?.navigate('Notifications');
       }
     });
-
     return () => subscription.remove();
   }, []);
 
@@ -294,11 +292,9 @@ function App() {
     const linkingSub = Linking.addEventListener('url', ({ url }) => {
       console.log('[DEEP LINK] URL received:', url);
     });
-    
     Linking.getInitialURL().then(url => {
       if (url) console.log('[DEEP LINK] Initial URL:', url);
     });
-    
     return () => linkingSub.remove();
   }, []);
 
@@ -367,27 +363,26 @@ function App() {
   async function handleDeepLink(url) {
     console.log('[DEEP LINK] handleDeepLink called with:', url);
     if (!url || !url.startsWith('bushrann://')) return;
-    
+
     if (url.includes('type=recovery')) {
       __DEV__ && console.log('✅ Recovery link detected!');
-      
       const hashIndex = url.indexOf('#');
       const queryIndex = url.indexOf('?');
       const paramStart = hashIndex !== -1 ? hashIndex + 1 : (queryIndex !== -1 ? queryIndex + 1 : null);
-      
+
       if (paramStart) {
         const params = new URLSearchParams(url.substring(paramStart));
         const access_token = params.get('access_token');
         const refresh_token = params.get('refresh_token');
-        
+
         __DEV__ && console.log('Access token found:', !!access_token);
-        
+
         if (access_token) {
           const { data, error } = await supabase.auth.setSession({
             access_token,
             refresh_token: refresh_token || '',
           });
-          
+
           if (error) {
             __DEV__ && console.log('❌ Session error:', error.message);
           } else {
@@ -401,7 +396,6 @@ function App() {
     }
   }
 
-  // FIX: Added StatusBar to all early return screens
   if (ageVerified === null || onboardingCompleted === null) {
     return (
       <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
 import { useUser } from '../context/UserContext';
-import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { videoCache } from '../utils/VideoCache';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
@@ -64,46 +64,52 @@ function VideoCard({
   const manualPauseRef = useRef(false);
 
   // ── PLAY/PAUSE LOGIC ──────────────────────────────────────────────────────
-  // NOTE: isVisible passed to VideoCard is always true (HomeScreen returns a plain
-  // View when isVisible=false, so VideoCard never mounts with isVisible=false).
-  // Therefore we watch isActive to know when the user scrolled away/back.
 
-  // When user scrolls away from this video — reset manual pause so it auto-plays on return
+  // When user scrolls away — reset manual pause so it auto-plays on return
   useEffect(() => {
-  if (!isActive) {
-    manualPauseRef.current = false;
-    setPaused(true);
-  } else {
-    // Scrolled back — restart from 0 and play like TikTok
-    manualPauseRef.current = false;
-    try {
-      if (player?.current) player.current.seek(0);
-    } catch (e) {}
-    setPaused(false);
-  }
-}, [isActive]);
+    if (!isActive) {
+      manualPauseRef.current = false;
+      setPaused(true);
+    } else {
+      // Scrolled back — restart from 0 and play like TikTok
+      manualPauseRef.current = false;
+      try {
+        if (player?.current) player.current.seek(0);
+      } catch (e) {}
+      setPaused(false);
+    }
+  }, [isActive]);
 
   // When tab switches — pause/resume and restart from beginning
   useEffect(() => {
     if (isTabActive) {
       if (isActive) {
-        // Only the active video restarts and plays
         manualPauseRef.current = false;
         setPaused(false);
         try { if (player?.current) player.current.seek(0); } catch (e) {}
       } else {
-        // Other visible videos just unpause so they're ready when scrolled to
         manualPauseRef.current = false;
         setPaused(false);
       }
     } else {
-      // Tab went inactive — pause everything
       setPaused(true);
       if (isActive) {
         try { if (player?.current) player.current.seek(0); } catch (e) {}
       }
     }
   }, [isTabActive]);
+
+  // FIX: Pause video when navigating away to profile/search/other screens
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        // Screen lost focus — pause video to stop audio leak
+        setPaused(true);
+        manualPauseRef.current = false;
+      };
+    }, [])
+  );
+
   // ─────────────────────────────────────────────────────────────────────────
 
   const [dialog, setDialog] = useState({
@@ -213,7 +219,6 @@ function VideoCard({
   const handleTap = useCallback(() => {
     const now = Date.now();
     if (lastTap.current && now - lastTap.current < 300) {
-      // Double tap — like
       clearTimeout(tapTimer.current);
       lastTap.current = null;
       handleLike();
@@ -455,7 +460,6 @@ const styles = StyleSheet.create({
   dlPercent: { color: '#a78bfa', fontSize: 22, fontWeight: '800' },
 });
 
-// Only re-render when these props change
 function areEqual(prevProps, nextProps) {
   return (
     prevProps.item.id === nextProps.item.id &&
