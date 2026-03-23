@@ -124,6 +124,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [showViewerList, setShowViewerList] = useState(false);
   const [viewerListMode, setViewerListMode] = useState('recent');
   const [allowQuestions, setAllowQuestions] = useState(true);
+  const [saveToProfile, setSaveToProfile] = useState(true); // default ON
   const [isStarting, setIsStarting] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -938,6 +939,21 @@ export default function LiveStreamScreen({ navigation, route }) {
                 onValueChange={setAllowQuestions}
                 trackColor={{ false: '#767577', true: COLORS.gold }}
                 thumbColor={allowQuestions ? '#fff' : '#f4f3f4'}
+              />
+            </View>
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Save to Profile</Text>
+                <Text style={styles.settingDescription}>
+                  Save this stream to your profile after it ends
+                </Text>
+              </View>
+              <Switch
+                value={saveToProfile}
+                onValueChange={setSaveToProfile}
+                trackColor={{ false: '#767577', true: COLORS.gold }}
+                thumbColor={saveToProfile ? '#fff' : '#f4f3f4'}
               />
             </View>
 

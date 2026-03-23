@@ -44,6 +44,10 @@ export default function AdminScreen({ navigation }) {
         .order('created_at', { ascending: false })
         .limit(50);
 
+      console.log('DEBUG - Reports fetched:', reportsData);
+      console.log('DEBUG - Reports count:', reportsData?.length);
+      console.log('DEBUG - Reports error:', reportsError);
+
       if (reportsError) throw reportsError;
       
       // Fetch reporter and reported user info separately
