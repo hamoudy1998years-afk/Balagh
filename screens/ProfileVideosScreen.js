@@ -1,6 +1,8 @@
-import { View, StyleSheet, FlatList, Text, useWindowDimensions, StatusBar } from 'react-native';
+import { View, StyleSheet, FlatList, Text, useWindowDimensions } from 'react-native';
 import { useVideoPlayerPool } from '../components/VideoPlayerPool';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import VideoCard from './VideoCard';
 import AnimatedButton from './AnimatedButton';
 
@@ -28,11 +30,18 @@ export default function ProfileVideosScreen({ route, navigation }) {
     }
   }).current;
 
+  useFocusEffect(
+    useCallback(() => {
+      const entry = SystemBars.pushStackEntry({ style: 'light' });
+      return () => SystemBars.popStackEntry(entry);
+    }, [])
+  );
+
   // Show empty state if no videos
   if (videos.length === 0) {
     return (
       <View style={[styles.container, { height, width, justifyContent: 'center', alignItems: 'center' }]}>
-        <StatusBar hidden />
+
         <AnimatedButton style={styles.backBtn} onPress={navigation.goBack}>
           <Text style={styles.backText}>✕</Text>
         </AnimatedButton>
@@ -43,7 +52,7 @@ export default function ProfileVideosScreen({ route, navigation }) {
 
   return (
     <View style={[styles.container, { height, width }]}>
-      <StatusBar hidden />
+
       <AnimatedButton style={styles.backBtn} onPress={navigation.goBack}>
         <Text style={styles.backText}>✕</Text>
       </AnimatedButton>

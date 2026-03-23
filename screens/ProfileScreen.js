@@ -1,12 +1,13 @@
 import {
   View, Text, StyleSheet, FlatList,
   Image, Modal, Alert, useWindowDimensions,
-  StatusBar, RefreshControl, Animated, Pressable,
+  RefreshControl, Animated, Pressable,
   TouchableOpacity,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import React, { useReducer, useEffect as useEffectHook, useCallback, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import NetInfo from '@react-native-community/netinfo';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -250,8 +251,12 @@ export default function ProfileScreen({ route, navigation }) {
         init(currentId);
       }
       
+      // Dark icons for light/white background
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      
       return () => {
         unsubscribe();
+        SystemBars.popStackEntry(entry);
       };
     }, [targetUserId, globalUser?.id, cachedUser?.id])
   );
@@ -845,7 +850,6 @@ export default function ProfileScreen({ route, navigation }) {
   // Show loading only on initial load when we have no data at all
   if (userLoading && !globalUser && !cachedUser) return (
     <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       <ActivityIndicator color={COLORS.gold} size="large" />
     </View>
   );
@@ -856,7 +860,6 @@ export default function ProfileScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         {!isOwnProfile && (

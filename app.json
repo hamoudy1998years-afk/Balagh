@@ -55,6 +55,16 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withForceLightStatusBar.js",
+      [
+        "react-native-edge-to-edge",
+        {
+          "android": {
+            "parentTheme": "Default",
+            "enforceNavigationBarContrast": false
+          }
+        }
+      ],
       "expo-video",
       "expo-secure-store",
       [

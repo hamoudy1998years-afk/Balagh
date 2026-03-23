@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Pl
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { readAsStringAsync, deleteAsync } from 'expo-file-system/legacy';
@@ -51,6 +52,11 @@ export default function UploadScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       scrollRef.current?.scrollTo({ y: 0, animated: false });
+      // Dark icons for light/white background
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      return () => {
+        SystemBars.popStackEntry(entry);
+      };
     }, [])
   );
 

@@ -1,10 +1,11 @@
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Image, ActivityIndicator, RefreshControl, StatusBar,
+  Image, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
@@ -83,6 +84,8 @@ export default function FollowListScreen({ route, navigation }) {
   useFocusEffect(
     useCallback(() => {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      const entry = SystemBars.pushStackEntry({ style: 'light' });
+      return () => SystemBars.popStackEntry(entry);
     }, [])
   );
 
@@ -150,7 +153,7 @@ export default function FollowListScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f0f0f" />
+
 
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity onPress={navigation.goBack} style={styles.backBtn}>

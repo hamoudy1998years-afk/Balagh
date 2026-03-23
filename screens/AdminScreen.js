@@ -14,7 +14,8 @@ import { useUser } from '../context/UserContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
 import { COLORS } from '../constants/theme';
-import { StatusBar } from 'expo-status-bar';
+import { SystemBars } from 'react-native-edge-to-edge';
+import { useFocusEffect } from '@react-navigation/native';
 
 // Admin user ID from environment variable
 const ADMIN_USER_ID = process.env.EXPO_PUBLIC_ADMIN_USER_ID; 
@@ -223,6 +224,13 @@ export default function AdminScreen({ navigation }) {
     </View>
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      const entry = SystemBars.pushStackEntry({ style: 'light' });
+      return () => SystemBars.popStackEntry(entry);
+    }, [])
+  );
+
   if (loading) {
     return (
       <View style={[styles.container, styles.center]}>
@@ -233,7 +241,7 @@ export default function AdminScreen({ navigation }) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar style="light" backgroundColor="transparent" translucent />
+
       <Text style={styles.title}>Admin Panel - Reports</Text>
       <Text style={styles.subtitle}>{reports.length} pending reports</Text>
       

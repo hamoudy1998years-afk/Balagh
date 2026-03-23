@@ -3,9 +3,10 @@ import { useUser } from '../context/UserContext';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, FlatList, ActivityIndicator,
-  Alert, Animated, PanResponder, Vibration, RefreshControl, StatusBar,
+  Alert, Animated, PanResponder, Vibration, RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SystemBars } from 'react-native-edge-to-edge';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
@@ -176,6 +177,11 @@ export default function NotificationsScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      // Dark icons for light/white background
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      return () => {
+        SystemBars.popStackEntry(entry);
+      };
     }, [])
   );
 
@@ -280,7 +286,6 @@ export default function NotificationsScreen({ navigation }) {
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { paddingTop: insets.top }]}>
-        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
         <ActivityIndicator size="large" color={COLORS.gold} />
         <Text style={styles.loadingText}>Loading notifications...</Text>
       </View>
@@ -289,7 +294,6 @@ export default function NotificationsScreen({ navigation }) {
 
   return (
     <View style={styles.fullScreen}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
       
       {/* Offline floating pill */}
       {showOffline && (

@@ -1,7 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, Animated, StatusBar, Alert, Image, Modal,
+  Switch, Animated, Alert, Image, Modal,
   TextInput, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform, BackHandler,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
@@ -194,6 +196,16 @@ export default function SettingsScreen({ navigation }) {
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
   }, [screen]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Dark icons for light/white background
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      return () => {
+        SystemBars.popStackEntry(entry);
+      };
+    }, [])
+  );
 
   async function init() {
     if (!currentUser) return;
@@ -720,7 +732,7 @@ export default function SettingsScreen({ navigation }) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {logoutModal}
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+
       <View style={styles.header}>
         <TouchableOpacity onPress={navigation.goBack} style={styles.backBtn}>
           <Text style={styles.backIcon}>‹</Text>

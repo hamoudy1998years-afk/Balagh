@@ -1,5 +1,5 @@
 import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
+import { SystemBars } from 'react-native-edge-to-edge';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -405,7 +405,7 @@ function App() {
   if (ageVerified === null || onboardingCompleted === null) {
     return (
       <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
-        <StatusBar style="light" />
+        <SystemBars style="light" />
         <ActivityIndicator size="large" color="#FFD700" />
       </View>
     );
@@ -414,7 +414,7 @@ function App() {
   if (onboardingCompleted === false) {
     return (
       <SafeAreaProvider>
-        <StatusBar style="light" />
+        <SystemBars style="light" />
         <OnboardingScreen onComplete={() => setOnboardingCompleted(true)} />
       </SafeAreaProvider>
     );
@@ -423,7 +423,7 @@ function App() {
   if (!ageVerified) {
     return (
       <SafeAreaProvider>
-        <StatusBar style="light" />
+        <SystemBars style="light" />
         <AgeGateScreen onVerified={() => setAgeVerified(true)} />
       </SafeAreaProvider>
     );
@@ -432,7 +432,7 @@ function App() {
   if (session === undefined) {
     return (
       <View style={{ flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center' }}>
-        <StatusBar style="light" />
+        <SystemBars style="light" />
         <ActivityIndicator color={COLORS.gold} size="large" />
       </View>
     );
@@ -440,7 +440,7 @@ function App() {
 
   return (
     <>
-      <StatusBar style="light" />
+      <SystemBars style="light" />
       <SafeAreaProvider>
         <ErrorBoundary>
           <UserProvider>

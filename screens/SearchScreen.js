@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image, 
 import { useState, useRef, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
@@ -73,6 +74,11 @@ export default function SearchScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       scrollRef.current?.scrollTo({ y: 0, animated: false });
+      // Dark icons for light/white background
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      return () => {
+        SystemBars.popStackEntry(entry);
+      };
     }, [])
   );
 

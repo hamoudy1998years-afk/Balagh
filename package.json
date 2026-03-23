@@ -39,6 +39,7 @@
     "react": "19.2.0",
     "react-native": "0.83.2",
     "react-native-agora": "^4.6.2",
+    "react-native-edge-to-edge": "^1.8.1",
     "react-native-fbsdk-next": "^13.4.3",
     "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "~2.30.0",
