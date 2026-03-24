@@ -32,6 +32,9 @@ const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 // 🔧 FIXED: Removed trailing space
 const THUMBNAIL_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 
+// ✅ Dedicated recording UID - must NOT match any real participant UID
+const RECORDING_UID = 12345;
+
 async function getAgoraToken(channelName, uid, role) {
   __DEV__ && console.log('🚀 [getAgoraToken] Fetching token...');
   const fetchWithTimeout = (url, options, timeout = 10000) => {
@@ -126,6 +129,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [allowQuestions, setAllowQuestions] = useState(true);
   const [saveToProfile, setSaveToProfile] = useState(true); // default ON
   const [isStarting, setIsStarting] = useState(false);
+  const [recordingIds, setRecordingIds] = useState({ resourceId: null, sid: null });
   const [showEndModal, setShowEndModal] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   
@@ -675,6 +679,11 @@ export default function LiveStreamScreen({ navigation, route }) {
       isLiveRef.current = true;
       __DEV__ && console.log('🔥 Engine exists:', engineRef.current !== null);
       setLoading(false);
+      
+      // Start cloud recording if saveToProfile is enabled
+      if (saveToProfile) {
+        startCloudRecording(channel, currentStreamId);
+      }
 
       pingInterval.current = setInterval(async () => {
         if (currentStreamId) {
@@ -858,11 +867,97 @@ export default function LiveStreamScreen({ navigation, route }) {
     setShowEndModal(true);
   }
 
+  // Start Agora Cloud Recording
+  async function startCloudRecording(channelName, currentStreamId) {
+    try {
+      console.log('[RECORDING] Starting cloud recording...');
+
+      // ✅ Get a token for the recording UID
+      const recordingToken = await getAgoraToken(channelName, RECORDING_UID, 'host');
+      if (!recordingToken) {
+        console.log('[RECORDING] Could not get recording token, skipping');
+        return;
+      }
+      console.log('[RECORDING] Got recording token:', !!recordingToken);
+
+      const url = `${THUMBNAIL_SERVER_URL}/api/recording/start`;
+      console.log('[RECORDING] Calling URL:', url);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelName: channelName,
+          uid: RECORDING_UID,
+          token: recordingToken, // ✅ pass token to server
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to start recording: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('[RECORDING] Started:', data);
+      setRecordingIds({ resourceId: data.resourceId, sid: data.sid });
+    } catch (error) {
+      console.error('[RECORDING] Failed to start:', error);
+    }
+  }
+  
+  // Stop Agora Cloud Recording
+  async function stopCloudRecording() {
+    if (!recordingIds.resourceId || !recordingIds.sid) {
+      console.log('[APP] No recording to stop');
+      return null;
+    }
+    
+    try {
+      console.log('[APP] Calling recording/stop with:', { 
+        resourceId: recordingIds.resourceId, 
+        sid: recordingIds.sid, 
+        channelName: currentChannelRef.current, 
+        uid: RECORDING_UID, 
+        userId: currentUser?.id 
+      });
+      
+      const response = await fetch(`${THUMBNAIL_SERVER_URL}/api/recording/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resourceId: recordingIds.resourceId,
+          sid: recordingIds.sid,
+          channelName: currentChannelRef.current,
+          uid: RECORDING_UID,
+          userId: currentUser?.id,
+          title: title || 'Live Stream',
+          description: ''
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[APP] Failed to stop recording:', response.status, errorData);
+        throw new Error(`Failed to stop recording: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('[APP] Recording stopped. Video saved:', data);
+      return data;
+    } catch (error) {
+      console.error('[APP] Failed to stop recording:', error.message, error.response?.status, error.response?.data);
+      return null;
+    }
+  }
+
   async function confirmEndStream() {
     console.log('[BTN] Confirm End Stream pressed');
     setShowEndModal(false);
     
-    // Save stream to profile if enabled
+    // Stop cloud recording first (saves to livestreams table automatically)
+    await stopCloudRecording();
+    
+    // Also save to videos table for profile if enabled
     if (saveToProfile && currentUser) {
       try {
         console.log('[STREAM] Saving to profile...');

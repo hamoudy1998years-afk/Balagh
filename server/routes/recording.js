@@ -16,7 +16,7 @@ const getAuthHeader = () => {
 
 // Start recording
 router.post('/start', async (req, res) => {
-  const { channelName, uid } = req.body;
+  const { channelName, uid, token } = req.body; // ✅ added token
   
   try {
     const acquireRes = await axios.post(
@@ -37,6 +37,7 @@ router.post('/start', async (req, res) => {
         cname: channelName,
         uid: uid.toString(),
         clientRequest: {
+          token: token, // ✅ added token here
           recordingConfig: {
             maxIdleTime: 30,
             streamTypes: 2,
@@ -70,7 +71,6 @@ router.post('/start', async (req, res) => {
   } catch (error) {
     console.error('Start recording error:', JSON.stringify(error.response?.data) || error.message);
     console.error('Start recording status:', error.response?.status);
-    console.error('Start recording full error:', error.message);
     res.status(500).json({ 
       error: 'Failed to start recording',
       detail: error.response?.data || error.message
@@ -82,7 +82,14 @@ router.post('/start', async (req, res) => {
 router.post('/stop', async (req, res) => {
   const { resourceId, sid, channelName, uid, userId, title, description } = req.body;
   
+  console.log('[RECORDING] Stopping recording for channel:', channelName, 'UID:', uid);
+  console.log('[RECORDING] Resource ID:', resourceId, 'SID:', sid);
+  console.log('[RECORDING] User ID:', userId, 'Title:', title);
+  
   try {
+    console.log('[RECORDING] Calling Agora stop API...');
+    console.log('[RECORDING] Auth header present:', !!getAuthHeader());
+    
     const response = await axios.post(
       `https://api.agora.io/v1/apps/${AGORA_APP_ID}/cloud_recording/resourceid/${resourceId}/sid/${sid}/mode/mix/stop`,
       {
@@ -93,12 +100,18 @@ router.post('/stop', async (req, res) => {
       { headers: { Authorization: getAuthHeader() } }
     );
     
+    console.log('[RECORDING] Agora stop response received');
+    
     const fileList = response.data.serverResponse?.fileList || [];
     const videoUrl = fileList.length > 0 ? fileList[0] : null;
+    
+    console.log('[RECORDING] File list:', fileList);
+    console.log('[RECORDING] Video URL:', videoUrl);
     
     // Save to livestreams table if we have a video URL
     let livestreamRecord = null;
     if (videoUrl && userId) {
+      console.log('[RECORDING] Saving to livestreams table for user:', userId);
       const { data, error } = await supabase.from('livestreams').insert({
         user_id: userId,
         video_url: videoUrl,
@@ -107,11 +120,16 @@ router.post('/stop', async (req, res) => {
       }).select().single();
       
       if (error) {
-        console.error('Failed to save livestream to database:', error);
+        console.error('[RECORDING] Failed to save livestream to database:', error);
       } else {
+        console.log('[RECORDING] Livestream saved to database:', data);
         livestreamRecord = data;
       }
+    } else {
+      console.log('[RECORDING] Skipping database save - no videoUrl or userId');
     }
+    
+    console.log('[RECORDING] Recording stopped successfully');
     
     res.json({ 
       serverResponse: response.data.serverResponse,
@@ -119,9 +137,10 @@ router.post('/stop', async (req, res) => {
       livestream: livestreamRecord
     });
   } catch (error) {
-    console.error('Stop recording error:', JSON.stringify(error.response?.data) || error.message);
-    console.error('Stop recording status:', error.response?.status);
-    console.error('Stop recording full error:', error.message);
+    console.error('[RECORDING] Stop failed:', error.response?.status, error.response?.data || error.message);
+    console.error('[RECORDING] Stop recording error:', JSON.stringify(error.response?.data) || error.message);
+    console.error('[RECORDING] Stop recording status:', error.response?.status);
+    console.error('[RECORDING] Stop recording full error:', error.message);
     res.status(500).json({ 
       error: 'Failed to stop recording',
       detail: error.response?.data || error.message
