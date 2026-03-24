@@ -68,8 +68,13 @@ router.post('/start', async (req, res) => {
       sid: startRes.data.sid
     });
   } catch (error) {
-    console.error('Start recording error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to start recording' });
+    console.error('Start recording error:', JSON.stringify(error.response?.data) || error.message);
+    console.error('Start recording status:', error.response?.status);
+    console.error('Start recording full error:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to start recording',
+      detail: error.response?.data || error.message
+    });
   }
 });
 
@@ -114,8 +119,13 @@ router.post('/stop', async (req, res) => {
       livestream: livestreamRecord
     });
   } catch (error) {
-    console.error('Stop recording error:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Failed to stop recording' });
+    console.error('Stop recording error:', JSON.stringify(error.response?.data) || error.message);
+    console.error('Stop recording status:', error.response?.status);
+    console.error('Stop recording full error:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to stop recording',
+      detail: error.response?.data || error.message
+    });
   }
 });
 
