@@ -82,14 +82,7 @@ router.post('/start', async (req, res) => {
 router.post('/stop', async (req, res) => {
   const { resourceId, sid, channelName, uid, userId, title, description } = req.body;
   
-  console.log('[RECORDING] Stopping recording for channel:', channelName, 'UID:', uid);
-  console.log('[RECORDING] Resource ID:', resourceId, 'SID:', sid);
-  console.log('[RECORDING] User ID:', userId, 'Title:', title);
-  
   try {
-    console.log('[RECORDING] Calling Agora stop API...');
-    console.log('[RECORDING] Auth header present:', !!getAuthHeader());
-    
     const response = await axios.post(
       `https://api.agora.io/v1/apps/${AGORA_APP_ID}/cloud_recording/resourceid/${resourceId}/sid/${sid}/mode/mix/stop`,
       {
@@ -99,48 +92,48 @@ router.post('/stop', async (req, res) => {
       },
       { headers: { Authorization: getAuthHeader() } }
     );
-    
-    console.log('[RECORDING] Agora stop response received');
-    
-    const fileList = response.data.serverResponse?.fileList || [];
-    const videoUrl = fileList.length > 0 ? fileList[0] : null;
-    
-    console.log('[RECORDING] File list:', fileList);
-    console.log('[RECORDING] Video URL:', videoUrl);
-    
+
+    const serverResponse = response.data.serverResponse;
+    const fileListMode = serverResponse?.fileListMode;
+    const rawFileList = serverResponse?.fileList;
+
+    // ✅ FIX: Agora returns fileList as a string when fileListMode is "string"
+    const videoUrl = fileListMode === 'string'
+      ? rawFileList || null
+      : (Array.isArray(rawFileList) && rawFileList.length > 0 ? rawFileList[0] : null);
+
+    const fileList = videoUrl ? [videoUrl] : [];
+
+    console.log('[RECORDING] Stop response:', JSON.stringify(serverResponse));
+    console.log('[RECORDING] fileListMode:', fileListMode);
+    console.log('[RECORDING] videoUrl:', videoUrl);
+
     // Save to livestreams table if we have a video URL
     let livestreamRecord = null;
     if (videoUrl && userId) {
-      console.log('[RECORDING] Saving to livestreams table for user:', userId);
       const { data, error } = await supabase.from('livestreams').insert({
         user_id: userId,
         video_url: videoUrl,
         title: title || 'Live Stream',
         description: description || ''
       }).select().single();
-      
+
       if (error) {
-        console.error('[RECORDING] Failed to save livestream to database:', error);
+        console.error('Failed to save livestream to database:', error);
       } else {
-        console.log('[RECORDING] Livestream saved to database:', data);
         livestreamRecord = data;
+        console.log('[RECORDING] Saved to DB:', livestreamRecord.id);
       }
-    } else {
-      console.log('[RECORDING] Skipping database save - no videoUrl or userId');
     }
-    
-    console.log('[RECORDING] Recording stopped successfully');
-    
+
     res.json({ 
-      serverResponse: response.data.serverResponse,
+      serverResponse: serverResponse,
       fileList: fileList,
       livestream: livestreamRecord
     });
   } catch (error) {
-    console.error('[RECORDING] Stop failed:', error.response?.status, error.response?.data || error.message);
-    console.error('[RECORDING] Stop recording error:', JSON.stringify(error.response?.data) || error.message);
-    console.error('[RECORDING] Stop recording status:', error.response?.status);
-    console.error('[RECORDING] Stop recording full error:', error.message);
+    console.error('Stop recording error:', JSON.stringify(error.response?.data) || error.message);
+    console.error('Stop recording status:', error.response?.status);
     res.status(500).json({ 
       error: 'Failed to stop recording',
       detail: error.response?.data || error.message
