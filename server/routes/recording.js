@@ -97,12 +97,12 @@ router.post('/stop', async (req, res) => {
     const fileListMode = serverResponse?.fileListMode;
     const rawFileList = serverResponse?.fileList;
 
-    // ✅ FIX: Agora returns fileList as a string when fileListMode is "string"
-    const videoUrl = fileListMode === 'string'
-      ? rawFileList || null
-      : (Array.isArray(rawFileList) && rawFileList.length > 0 ? rawFileList[0] : null);
+    // ✅ FIX: fallback to constructing filename if Agora returns empty fileList
+    const videoUrl = (fileListMode === 'string' && rawFileList)
+      ? rawFileList
+      : `${sid}_${channelName}.m3u8`;
 
-    const fileList = videoUrl ? [videoUrl] : [];
+    const fileList = [videoUrl];
 
     console.log('[RECORDING] Stop response:', JSON.stringify(serverResponse));
     console.log('[RECORDING] fileListMode:', fileListMode);
