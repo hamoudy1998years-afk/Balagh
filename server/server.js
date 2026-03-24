@@ -7,6 +7,9 @@ require('dotenv').config();
 const app = express();
 app.set('trust proxy', true);
 
+// Import routes
+const recordingRoutes = require('./routes/recording');
+
 // Force HTTPS in production
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
@@ -114,6 +117,9 @@ app.get('/token', rateLimit, (req, res) => {
     res.status(500).json({ error: 'Failed to generate token' });
   }
 });
+
+// Mount recording routes
+app.use('/api/recording', recordingRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
