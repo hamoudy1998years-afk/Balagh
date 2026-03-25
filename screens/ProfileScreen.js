@@ -62,6 +62,7 @@ const initialVideoState = {
   publicVideos: [],
   privateVideos: [],
   likedVideos: [],
+  livestreams: [],
   totalLikes: 0,
   activeTab: 'videos',
 };
@@ -72,11 +73,13 @@ function videoReducer(state, action) {
     case 'SET_PUBLIC': return { ...state, publicVideos: action.videos, totalLikes: action.totalLikes };
     case 'SET_PRIVATE': return { ...state, privateVideos: action.videos };
     case 'SET_LIKED': return { ...state, likedVideos: action.videos };
+    case 'SET_LIVESTREAMS': return { ...state, livestreams: action.videos };
     case 'SET_ACTIVE_TAB': return { ...state, activeTab: action.tab };
     case 'REMOVE_VIDEO': return {
       ...state,
       publicVideos: state.publicVideos.filter(v => v.id !== action.id),
       privateVideos: state.privateVideos.filter(v => v.id !== action.id),
+      livestreams: state.livestreams.filter(v => v.id !== action.id),
     };
     default: return state;
   }
@@ -127,8 +130,9 @@ const Avatar = React.memo(function Avatar({ uri, username, size = 90, onPress })
   );
 });
 
-const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongPress }) {
+const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongPress, isLivestreamItem }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  // Livestreams have video_url, regular videos have video_uri
 
   function handleLongPress() {
     Animated.sequence([
@@ -141,9 +145,10 @@ const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongP
     <Animated.View style={[styles.gridItem, { transform: [{ scale: scaleAnim }] }]}>
       <AnimatedButton style={StyleSheet.absoluteFill} onPress={onPress} onLongPress={handleLongPress} delayLongPress={400}>
         <Image source={{ uri: item.thumbnail_url || item.video_url, cache: 'force-cache', headers: { 'Cache-Control': 'max-age=86400' } }} style={styles.gridThumb} resizeMode="cover" />
-        <View style={styles.gridOverlay}><Text style={styles.gridPlayCount}>▶ {formatCount(item.views_count)}</Text></View>
+        <View style={styles.gridOverlay}><Text style={styles.gridPlayCount}>▶ {formatCount(item.views_count || item.view_count)}</Text></View>
         {item.is_pinned && <View style={styles.pinnedLabel}><Text style={styles.pinnedLabelText}>📌</Text></View>}
         {item.is_private && <View style={styles.privateLabel}><Text style={styles.privateLabelText}>🔒</Text></View>}
+        {isLivestreamItem && <View style={styles.liveLabel}><Text style={styles.liveLabelText}>🔴 REPLAY</Text></View>}
       </AnimatedButton>
     </Animated.View>
   );
@@ -187,7 +192,7 @@ export default function ProfileScreen({ route, navigation }) {
   const [uiState, dispatchUI] = useReducer(uiReducer, initialUIState);
 
   const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData } = profileState;
-  const { publicVideos, privateVideos, likedVideos, totalLikes, activeTab } = videoState;
+  const { publicVideos, privateVideos, likedVideos, livestreams, totalLikes, activeTab } = videoState;
   const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress, toast } = uiState;
 
   useEffectHook(() => {
@@ -211,6 +216,7 @@ export default function ProfileScreen({ route, navigation }) {
   }, [currentUser]);
 
   const flatListRef = useRef(null);
+  const livestreamIdsRef = useRef(new Set());
   const hasLoaded = useRef(false);
   const downloadedVideoIds = useDownloadedVideos();
 
@@ -232,6 +238,17 @@ export default function ProfileScreen({ route, navigation }) {
       
       // Scroll to top on focus
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+
+      // Always reload livestreams on focus to catch new recordings
+      const user = globalUser || cachedUser;
+      const viewingId = targetUserId ?? user?.id;
+      if (viewingId && !isOffline) {
+        loadLivestreams(viewingId);
+        // Reload again after 4s to catch newly saved recordings from server
+        setTimeout(() => {
+          loadLivestreams(viewingId);
+        }, 4000);
+      }
       
       // DEBUG: Log focus state
       __DEV__ && console.log('[DEBUG] Profile focus - current isOffline:', isOffline);
@@ -240,14 +257,23 @@ export default function ProfileScreen({ route, navigation }) {
       const currentId = targetUserId ?? globalUser?.id ?? cachedUser?.id;
       const activeUser = globalUser || cachedUser;
       
-      if (currentId && currentId !== lastUserIdRef.current) {
-        __DEV__ && console.log('[ProfileScreen] User changed - loading profile for:', currentId);
-        lastUserIdRef.current = currentId;
-        hasLoaded.current = false;
-        init(currentId);
-      } else if (activeUser && !hasLoaded.current) {
+      let initTimer = null;
+      
+      // Always refresh on focus to get latest data (especially after livestream)
+      if (currentId) {
+        if (currentId !== lastUserIdRef.current) {
+          __DEV__ && console.log('[ProfileScreen] User changed - loading profile for:', currentId);
+          lastUserIdRef.current = currentId;
+        }
+        
+        // Delay fetch slightly to allow background save to complete
+        // This ensures new livestreams appear immediately after ending stream
+        initTimer = setTimeout(() => {
+          __DEV__ && console.log('[ProfileScreen] Refreshing profile for:', currentId);
+          init(currentId);
+        }, 500); // 500ms delay
+      } else if (activeUser) {
         __DEV__ && console.log('[ProfileScreen] Loading profile for:', currentId);
-        hasLoaded.current = true;
         init(currentId);
       }
       
@@ -257,6 +283,7 @@ export default function ProfileScreen({ route, navigation }) {
       return () => {
         unsubscribe();
         SystemBars.popStackEntry(entry);
+        if (initTimer) clearTimeout(initTimer);
       };
     }, [targetUserId, globalUser?.id, cachedUser?.id])
   );
@@ -267,6 +294,10 @@ export default function ProfileScreen({ route, navigation }) {
       lastUserIdRef.current = null;
     };
   }, []);
+
+  useEffectHook(() => {
+    livestreamIdsRef.current = new Set(livestreams.map(v => v.id));
+  }, [livestreams]);
 
   async function init(viewingId) {
     const user = globalUser || cachedUser;
@@ -303,6 +334,7 @@ export default function ProfileScreen({ route, navigation }) {
       Promise.all([
         loadProfile(viewingId),
         loadVideos(viewingId, ownProfile),
+        loadLivestreams(viewingId),
       ]).catch(async (e) => {
         __DEV__ && console.error('Profile load error (offline?):', e);
         __DEV__ && console.log('[DEBUG] Error in init - error:', e.message);
@@ -366,11 +398,29 @@ export default function ProfileScreen({ route, navigation }) {
     const { data: pub } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', false)
       .order('is_pinned', { ascending: false }).order('pin_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
     const pubVideos = pub ?? [];
+    
     dispatchVideo({ type: 'SET_PUBLIC', videos: pubVideos, totalLikes: pubVideos.reduce((sum, v) => sum + (v.likes_count ?? 0), 0) });
     if (isOwner) {
       const { data: priv } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', true).order('created_at', { ascending: false });
       dispatchVideo({ type: 'SET_PRIVATE', videos: priv ?? [] });
     }
+  }
+
+  async function loadLivestreams(userId) {
+    const { data, error } = await supabase
+      .from('livestreams')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      __DEV__ && console.error('[ProfileScreen] loadLivestreams error:', error);
+    }
+    
+    console.log('[PROFILE] Fetched livestreams count:', data?.length);
+    console.log('[PROFILE] First livestream:', data?.[0]);
+    
+    dispatchVideo({ type: 'SET_LIVESTREAMS', videos: data ?? [] });
   }
 
   async function loadLikedVideos(userId) {
@@ -495,11 +545,22 @@ export default function ProfileScreen({ route, navigation }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
-          await supabase.from('videos').delete().eq('id', video.id);
+          const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
+          console.log('[DELETE] Deleting from table:', table, 'id:', video.id);
+          
+          const { error } = await supabase.from(table).delete().eq('id', video.id);
+          
+          if (error) {
+            console.error('[DELETE] Supabase error:', error);
+            Alert.alert('Error', error.message);
+            return;
+          }
+          
+          console.log('[DELETE] Success');
           dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
           Alert.alert('Deleted', 'Video has been deleted.');
         } catch (e) {
-          __DEV__ && console.error('[ProfileScreen] handleDeleteVideo error:', e);
+          console.error('[DELETE] Catch error:', e);
           Alert.alert('Error', 'Could not delete video. Please try again.');
         }
       }},
@@ -590,6 +651,10 @@ export default function ProfileScreen({ route, navigation }) {
     dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'liked' });
   }, []);
 
+  const handleTabLivestreams = useCallback(() => {
+    dispatchVideo({ type: 'SET_ACTIVE_TAB', tab: 'livestreams' });
+  }, []);
+
   const handleNavigateSettings = useCallback(() => {
     navigation.navigate(ROUTES.SETTINGS);
   }, [navigation]);
@@ -633,6 +698,7 @@ export default function ProfileScreen({ route, navigation }) {
           await Promise.all([
             loadProfile(viewingId),
             loadVideos(viewingId, ownProfile),
+            loadLivestreams(viewingId),
           ]);
           __DEV__ && console.log('[ProfileScreen] Refresh successful');
         } catch (e) {
@@ -665,22 +731,64 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }, [globalUser, cachedUser, targetUserId, isOffline]);
   const openVideo = useCallback((videos, index) => {
-    navigation.navigate(ROUTES.PROFILE_VIDEOS, { videos, startIndex: index });
+    // Normalize videos to handle both regular videos and livestreams
+    const normalizedVideos = videos.map(v => {
+      const normalized = {
+        ...v,
+        // Normalize video URL: livestreams use video_url, regular videos use video_uri
+        video_uri: v.video_uri || v.video_url,
+        // Normalize thumbnail: livestreams use thumbnail_url, regular videos use thumbnail_uri
+        thumbnail_uri: v.thumbnail_uri || v.thumbnail_url || null,
+        thumbnail: v.thumbnail_url || v.thumbnail_uri || null,  // ADD THIS for compatibility
+        thumbnailUrl: v.thumbnail_url || v.thumbnail_uri || null,  // ADD THIS for compatibility
+        // Mark type for UI display
+        type: v.video_url && !v.video_uri ? 'livestream' : 'video'
+      };
+      
+      // Log livestream mapping
+      if (v.video_url && !v.video_uri) {
+        console.log('[PROFILE] Mapping livestream:', v.id, 'thumbnail:', v.thumbnail_url, '-> thumbnail_uri:', normalized.thumbnail_uri);
+      }
+      
+      return normalized;
+    });
+    
+    console.log('[PROFILE] Combined content:', normalizedVideos?.length);
+    console.log('[PROFILE] Content items:', normalizedVideos?.map(item => ({
+      id: item.id,
+      type: item.type,
+      hasThumbnail: !!item.thumbnail_uri,
+      thumbnail_uri: item.thumbnail_uri,
+      thumbnail: item.thumbnail,
+      thumbnailUrl: item.thumbnailUrl
+    })));
+    
+    navigation.navigate(ROUTES.PROFILE_VIDEOS, { videos: normalizedVideos, startIndex: index });
   }, [navigation]);
 
-  const renderItem = useCallback(({ item, index }) => (
-    <VideoGridItem 
-      item={item} 
-      onPress={() => {
-        // Get fresh videos array at tap time (not stale closure)
-        const videosToPass = activeTab === 'videos' ? publicVideos : 
-                            activeTab === 'private' ? privateVideos : 
-                            likedVideos;
-        openVideo(videosToPass, index);
-      }} 
-      onLongPress={handleLongPress} 
-    />
-  ), [activeTab, publicVideos, privateVideos, likedVideos, openVideo, handleLongPress]);
+  const renderItem = useCallback(({ item, index }) => {
+    console.log('[PROFILE] Rendering item:', { 
+      id: item.id, 
+      type: item.video_url && !item.video_uri ? 'livestream' : 'video', 
+      thumbnail: item.thumbnail_url || item.thumbnail_uri 
+    });
+    
+    return (
+      <VideoGridItem 
+        item={item}
+        isLivestreamItem={activeTab === 'livestreams'}
+        onPress={() => {
+          // Get fresh videos array at tap time (not stale closure)
+          const videosToPass = activeTab === 'videos' ? publicVideos : 
+                              activeTab === 'private' ? privateVideos : 
+                              activeTab === 'livestreams' ? livestreams :
+                              likedVideos;
+          openVideo(videosToPass, index);
+        }} 
+        onLongPress={handleLongPress} 
+      />
+    );
+  }, [activeTab, publicVideos, privateVideos, livestreams, likedVideos, openVideo, handleLongPress]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
@@ -818,6 +926,9 @@ export default function ProfileScreen({ route, navigation }) {
             <Text style={[styles.tabText, activeTab === 'private' && styles.activeTabText]}>🔒</Text>
           </AnimatedButton>
         )}
+        <AnimatedButton style={[styles.tab, activeTab === 'livestreams' && styles.activeTab]} onPress={handleTabLivestreams}>
+          <Text style={[styles.tabText, activeTab === 'livestreams' && styles.activeTabText]}>🔴</Text>
+        </AnimatedButton>
         <AnimatedButton style={[styles.tab, activeTab === 'liked' && styles.activeTab]} onPress={handleTabLiked}>
           <Text style={[styles.tabText, activeTab === 'liked' && styles.activeTabText]}>❤️</Text>
         </AnimatedButton>
@@ -825,7 +936,17 @@ export default function ProfileScreen({ route, navigation }) {
     </View>
   ), [profile, isScholar, scholarData, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation]);
 
-  const activeVideos = activeTab === 'videos' ? publicVideos : activeTab === 'private' ? privateVideos : likedVideos;
+  const activeVideos = activeTab === 'videos' 
+    ? publicVideos.filter(v => !v.video_url?.includes('.m3u8'))
+    : activeTab === 'private' 
+      ? privateVideos.filter(v => !v.video_url?.includes('.m3u8'))
+      : activeTab === 'livestreams' 
+        ? livestreams 
+        : likedVideos;
+  
+  // Debug: Log which array is being used for current tab
+  console.log('[PROFILE] Active tab:', activeTab, '| Active videos count:', activeVideos?.length);
+  console.log('[PROFILE] All arrays - public:', publicVideos?.length, '| livestreams:', livestreams?.length, '| private:', privateVideos?.length);
 
   // Check for cached user when globalUser is null (offline scenario)
   const [cachedUser, setCachedUser] = useState(null);
@@ -906,8 +1027,8 @@ export default function ProfileScreen({ route, navigation }) {
         renderItem={renderItem}
         ListEmptyComponent={
           <View style={styles.emptyGrid}>
-            <Text style={styles.emptyGridIcon}>{activeTab === 'videos' ? '🎥' : activeTab === 'private' ? '🔒' : '❤️'}</Text>
-            <Text style={styles.emptyGridText}>{activeTab === 'videos' ? 'No videos yet' : activeTab === 'private' ? 'No private videos' : 'No liked videos'}</Text>
+            <Text style={styles.emptyGridIcon}>{activeTab === 'videos' ? '🎥' : activeTab === 'private' ? '🔒' : activeTab === 'livestreams' ? '🔴' : '❤️'}</Text>
+            <Text style={styles.emptyGridText}>{activeTab === 'videos' ? 'No videos yet' : activeTab === 'private' ? 'No private videos' : activeTab === 'livestreams' ? 'No live replays' : 'No liked videos'}</Text>
           </View>
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 20, paddingTop: insets.top + 50 }}
@@ -1001,6 +1122,8 @@ const styles = StyleSheet.create({
   pinnedLabelText: { fontSize: 14 },
   privateLabel: { position: 'absolute', top: 4, right: 4 },
   privateLabelText: { fontSize: 14 },
+  liveLabel: { position: 'absolute', bottom: 4, right: 4, backgroundColor: COLORS.gold, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  liveLabelText: { fontSize: 10, fontWeight: '700', color: '#fff' },
   emptyGrid: { alignItems: 'center', paddingVertical: 60, gap: 12 },
   emptyGridIcon: { fontSize: 48 },
   emptyGridText: { color: '#aaa', fontSize: 15, fontWeight: '600' },

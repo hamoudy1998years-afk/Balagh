@@ -130,8 +130,14 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [saveToProfile, setSaveToProfile] = useState(true); // default ON
   const [isStarting, setIsStarting] = useState(false);
   const [recordingIds, setRecordingIds] = useState({ resourceId: null, sid: null });
+  const recordingIdsRef = useRef({ resourceId: null, sid: null });
   const [showEndModal, setShowEndModal] = useState(false);
+  const [isEndingStream, setIsEndingStream] = useState(false);
+  const [thumbnailUrl, setThumbnailUrl] = useState(null);
+  const thumbnailUrlRef = useRef(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isEnding, setIsEnding] = useState(false);
+  const [endingMessage, setEndingMessage] = useState('');
   
   // Network failover state
   const [connectionStatus, setConnectionStatus] = useState('connected'); // 'connected' | 'reconnecting' | 'failed'
@@ -579,7 +585,13 @@ export default function LiveStreamScreen({ navigation, route }) {
           __DEV__ && console.log('📸 [Agora] Dimensions:', width, 'x', height);
           __DEV__ && console.log('📸 [Agora] Error code:', errCode);
           if (errCode === 0 && filePath) {
-            uploadThumbnail(filePath, currentStreamIdRef.current);
+            uploadThumbnail(filePath, currentStreamIdRef.current).then(url => {
+              if (url) {
+                __DEV__ && console.log('📸 [Agora] Thumbnail URL saved to state:', url);
+                setThumbnailUrl(url);
+                thumbnailUrlRef.current = url;
+              }
+            });
           } else {
             __DEV__ && console.log('📸 Snapshot failed (offline?):', errCode);
           }
@@ -900,6 +912,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       const data = await response.json();
       console.log('[RECORDING] Started:', data);
       setRecordingIds({ resourceId: data.resourceId, sid: data.sid });
+      recordingIdsRef.current = { resourceId: data.resourceId, sid: data.sid };
     } catch (error) {
       console.error('[RECORDING] Failed to start:', error);
     }
@@ -907,31 +920,43 @@ export default function LiveStreamScreen({ navigation, route }) {
   
   // Stop Agora Cloud Recording
   async function stopCloudRecording() {
-    if (!recordingIds.resourceId || !recordingIds.sid) {
+    // Read IDs from state
+    const { resourceId, sid } = recordingIdsRef.current;
+    
+    // Guard against double execution
+    if (!resourceId || !sid) {
       console.log('[APP] No recording to stop');
       return null;
     }
     
+    // CRITICAL: Clear state BEFORE async call to prevent race condition
+    setRecordingIds({ resourceId: null, sid: null });
+    recordingIdsRef.current = { resourceId: null, sid: null };
+    console.log('[APP] Recording IDs cleared, proceeding with stop...');
+    
     try {
       console.log('[APP] Calling recording/stop with:', { 
-        resourceId: recordingIds.resourceId, 
-        sid: recordingIds.sid, 
+        resourceId, 
+        sid, 
         channelName: currentChannelRef.current, 
         uid: RECORDING_UID, 
-        userId: currentUser?.id 
+        userId: currentUser?.id,
+        title: title || 'Live Stream',
+        thumbnail_url: thumbnailUrlRef.current
       });
       
       const response = await fetch(`${THUMBNAIL_SERVER_URL}/api/recording/stop`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          resourceId: recordingIds.resourceId,
-          sid: recordingIds.sid,
+          resourceId,
+          sid,
           channelName: currentChannelRef.current,
           uid: RECORDING_UID,
           userId: currentUser?.id,
           title: title || 'Live Stream',
-          description: ''
+          description: '',
+          thumbnail_url: thumbnailUrlRef.current
         })
       });
       
@@ -950,48 +975,24 @@ export default function LiveStreamScreen({ navigation, route }) {
     }
   }
 
-  async function confirmEndStream() {
+  const confirmEndStream = useCallback(async () => {
     console.log('[BTN] Confirm End Stream pressed');
     setShowEndModal(false);
+    setIsEnding(true);
+    setEndingMessage('Ending stream...');
     
-    // Stop cloud recording first (saves to livestreams table automatically)
     await stopCloudRecording();
-    
-    // Also save to videos table for profile if enabled
-    if (saveToProfile && currentUser) {
-      try {
-        console.log('[STREAM] Saving to profile...');
-        
-        // Create video record (metadata only for now - actual recording requires Agora Cloud Recording)
-        const { data: videoData, error: videoError } = await supabase
-          .from('videos')
-          .insert({
-            user_id: currentUser.id,
-            caption: title || 'Live Stream',
-            // Note: video_url would be added here after implementing Agora Cloud Recording
-            // For now, we save metadata so user sees "Live Stream" in their profile
-            thumbnail_url: null, // Could capture final frame
-            views: viewerCount,
-            created_at: new Date().toISOString(),
-            is_live_stream: true,
-            live_stream_id: streamId
-          })
-          .select()
-          .single();
-          
-        if (videoError) throw videoError;
-        
-        Alert.alert('Success', 'Live stream saved to your profile!');
-      } catch (saveError) {
-        console.error('[STREAM] Failed to save:', saveError);
-        Alert.alert('Save Failed', 'Could not save stream to profile, but stream ended successfully.');
-      }
-    }
+    setEndingMessage('Saving your stream...');
     
     await supabase.from('live_streams').delete().eq('id', streamId);
     await cleanup();
-    navigation.goBack();
-  }
+    
+    setEndingMessage('Almost done...');
+    await new Promise(r => setTimeout(r, 1000));
+    
+    setIsEnding(false);
+    navigation.pop(2);
+  }, [navigation, streamId]);
 
   const handleStartStreaming = () => {
     console.log('[BTN] Start Live pressed');
@@ -1041,7 +1042,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   
   console.log('[RENDER] Rendering. isLive:', isLive, 'status:', connectionStatus, 'engine:', hasEngine);
   
-  if (!isLive) {
+  if (!isLive && !isEnding) {
     return (
       <View style={styles.loadingContainer}>
         {isStarting ? (
@@ -1373,6 +1374,14 @@ export default function LiveStreamScreen({ navigation, route }) {
           </View>
         </View>
       )}
+      
+      {/* Loading overlay when ending stream */}
+      {isEnding && (
+        <View style={styles.endingOverlay}>
+          <ActivityIndicator color="#fff" size="large" />
+          <Text style={styles.endingText}>{endingMessage}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -1584,4 +1593,17 @@ const styles = StyleSheet.create({
   reconnectIcon: { fontSize: 48 },
   reconnectBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12, marginTop: 20 },
   reconnectBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  endingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 999,
+  },
+  endingText: {
+    color: '#fff',
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
