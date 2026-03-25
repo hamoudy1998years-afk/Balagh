@@ -20,6 +20,7 @@ import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const useDownloadedVideos = () => {
   const downloadedRef = useRef(new Set());
@@ -103,7 +104,9 @@ function uiReducer(state, action) {
     case 'SET_ENLARGE_AVATAR': return { ...state, enlargeAvatar: action.open };
     case 'SET_DOWNLOADING': return { ...state, isDownloading: action.isDownloading, downloadProgress: action.progress ?? state.downloadProgress };
     case 'SET_DOWNLOAD_PROGRESS': return { ...state, downloadProgress: action.progress };
-    case 'SET_TOAST': return { ...state, toast: action.toast };
+    case 'SET_TOAST': 
+      console.log('[TOAST REDUCER] SET_TOAST called with:', JSON.stringify(action.toast));
+      return { ...state, toast: action.toast };
     default: return state;
   }
 }
@@ -548,30 +551,55 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   async function handleDeleteVideo(video) {
-    Alert.alert('Delete Video', 'Are you sure? This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        try {
-          const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
-          console.log('[DELETE] Deleting from table:', table, 'id:', video.id);
-          
-          const { error } = await supabase.from(table).delete().eq('id', video.id);
-          
-          if (error) {
-            console.error('[DELETE] Supabase error:', error);
-            Alert.alert('Error', error.message);
-            return;
-          }
-          
-          console.log('[DELETE] Success');
-          dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
-          Alert.alert('Deleted', 'Video has been deleted.');
-        } catch (e) {
-          console.error('[DELETE] Catch error:', e);
-          Alert.alert('Error', 'Could not delete video. Please try again.');
-        }
-      }},
-    ]);
+    const skipAlert = await AsyncStorage.getItem('skip_delete_alert');
+    if (skipAlert === 'true') {
+      try {
+        const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
+        console.log('[DELETE] fast path - table:', table, 'video id:', video.id);
+        const { error } = await supabase.from(table).delete().eq('id', video.id);
+        console.log('[DELETE] fast path - delete result error:', error);
+        if (error) { Alert.alert('Error', error.message); return; }
+        dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
+        console.log('[DELETE] fast path - about to set timeout for toast');
+        setTimeout(() => {
+          console.log('[DELETE] fast path - inside timeout, dispatching toast');
+          dispatchUI({ type: 'SET_TOAST', toast: { message: 'Done', type: 'success' } });
+          setTimeout(() => {
+            console.log('[DELETE] fast path - clearing toast');
+            dispatchUI({ type: 'SET_TOAST', toast: null });
+          }, 1500);
+        }, 300);
+      } catch (e) {
+        console.log('[DELETE] fast path - CATCH ERROR:', e);
+        Alert.alert('Error', 'Could not delete video. Please try again.');
+      }
+    } else {
+      setDontShowAgain(false);
+      setDeleteModal({ visible: true, video });
+    }
+  }
+
+  async function confirmDelete() {
+    const { video } = deleteModal;
+    console.log('[DELETE] confirmDelete called, video:', video?.id);
+    setDeleteModal({ visible: false, video: null });
+    try {
+      const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
+      const { error } = await supabase.from(table).delete().eq('id', video.id);
+      console.log('[DELETE] supabase delete result - error:', error);
+      if (error) { Alert.alert('Error', error.message); return; }
+      dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
+      console.log('[DELETE] dontShowAgain:', dontShowAgain);
+      if (dontShowAgain) await AsyncStorage.setItem('skip_delete_alert', 'true');
+      setTimeout(() => {
+        console.log('[DELETE] firing toast now');
+        dispatchUI({ type: 'SET_TOAST', toast: { message: 'Done', type: 'success' } });
+        setTimeout(() => dispatchUI({ type: 'SET_TOAST', toast: null }), 1500);
+      }, 300);
+    } catch (e) {
+      console.log('[DELETE] catch error:', e);
+      Alert.alert('Error', 'Could not delete video. Please try again.');
+    }
   }
 
   function handleDownloadVideo(video) {
@@ -958,6 +986,8 @@ export default function ProfileScreen({ route, navigation }) {
   // Check for cached user when globalUser is null (offline scenario)
   const [cachedUser, setCachedUser] = useState(null);
   const [isOffline, setIsOffline] = useState(false);
+  const [deleteModal, setDeleteModal] = useState({ visible: false, video: null });
+  const [dontShowAgain, setDontShowAgain] = useState(false);
   
   useEffectHook(() => {
     async function checkCachedUser() {
@@ -1005,15 +1035,8 @@ export default function ProfileScreen({ route, navigation }) {
         )}
         
         {/* Toast notification */}
-        {toast && (
-          <View style={[
-            styles.toastContainer, 
-            toast.type === 'offline' && styles.toastOffline,
-            toast.type === 'error' && styles.toastError
-          ]}>
-            <Text style={styles.toastText}>{toast.message}</Text>
-          </View>
-        )}
+        
+        <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
         
         <View style={{ flex: 1 }} />
         {isOwnProfile && (
@@ -1044,6 +1067,21 @@ export default function ProfileScreen({ route, navigation }) {
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
 
+        {toast && (
+          <View style={[
+            styles.toastContainer,
+            toast.type === 'error' && styles.toastError,
+            toast.type === 'offline' && styles.toastOffline,
+          ]}>
+            {toast.type === 'success' && (
+              <View style={styles.toastCheckCircle}>
+                <Text style={styles.toastCheckMark}>✓</Text>
+              </View>
+            )}
+            <Text style={styles.toastText}>{toast.message}</Text>
+          </View>
+        )}
+
       <Modal visible={avatarModal} transparent animationType="slide" onRequestClose={() => dispatchUI({ type: 'SET_AVATAR_MODAL', open: false })} statusBarTranslucent>
         <Pressable style={styles.modalBackdrop} onPress={handleCloseAvatarModal} />
         <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
@@ -1072,9 +1110,34 @@ export default function ProfileScreen({ route, navigation }) {
           )}
         </Pressable>
       </Modal>
-    </View>
-  );
-}
+
+        <Modal visible={deleteModal.visible} transparent animationType="fade" onRequestClose={() => setDeleteModal({ visible: false, video: null })}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setDeleteModal({ visible: false, video: null })} />
+          <View style={styles.deleteModalBox}>
+            <Text style={styles.deleteModalTitle}>Delete Video</Text>
+            <Text style={styles.deleteModalMsg}>Are you sure? This cannot be undone.</Text>
+
+            <TouchableOpacity style={styles.deleteCheckRow} onPress={() => setDontShowAgain(p => !p)} activeOpacity={0.7}>
+              <View style={[styles.deleteCheckBox, dontShowAgain && styles.deleteCheckBoxChecked]}>
+                {dontShowAgain && <Text style={styles.deleteCheckMark}>✓</Text>}
+              </View>
+              <Text style={styles.deleteCheckLabel}>Don't show this again</Text>
+            </TouchableOpacity>
+
+            <View style={styles.deleteModalButtons}>
+              <TouchableOpacity style={styles.deleteCancelBtn} onPress={() => setDeleteModal({ visible: false, video: null })}>
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmDelete}>
+                <Text style={styles.deleteConfirmText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        </View>
+      );
+    }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#ffffff' },
@@ -1176,26 +1239,65 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   toastContainer: {
-    position: 'absolute',
-    bottom: 100,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  position: 'absolute',
+  top: '50%',
+  alignSelf: 'center',
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+  backgroundColor: '#1a1a1a',
+  borderRadius: 100,
+  paddingHorizontal: 18,
+  paddingVertical: 10,
+  zIndex: 9999,
+  elevation: 9999,
+  },
+  toastCheckCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#22c55e',
     alignItems: 'center',
-    zIndex: 1000,
+    justifyContent: 'center',
   },
-  toastOffline: {
-    backgroundColor: 'rgba(245, 166, 35, 0.9)', // Orange for offline
-  },
-  toastError: {
-    backgroundColor: 'rgba(255, 68, 88, 0.9)', // Red for error
+  toastCheckMark: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 13,
   },
   toastText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '500',
   },
+  toastError: {
+    backgroundColor: '#ef4444',
+  },
+  toastOffline: {
+    backgroundColor: '#555',
+  },
+  deleteModalBox: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 24, paddingBottom: 40,
+  },
+  deleteModalTitle: { fontSize: 17, fontWeight: '800', color: '#111', marginBottom: 6 },
+  deleteModalMsg: { fontSize: 14, color: '#666', marginBottom: 20 },
+  deleteCheckRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 24 },
+  deleteCheckBox: {
+    width: 20, height: 20, borderRadius: 4, borderWidth: 1.5, borderColor: '#aaa',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  deleteCheckBoxChecked: { backgroundColor: '#ef4444', borderColor: '#ef4444' },
+  deleteCheckMark: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  deleteCheckLabel: { fontSize: 14, color: '#555' },
+  deleteModalButtons: { flexDirection: 'row', gap: 10 },
+  deleteCancelBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 10,
+    borderWidth: 0.5, borderColor: '#ccc', alignItems: 'center',
+  },
+  deleteCancelText: { fontSize: 15, color: '#111' },
+  deleteConfirmBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: '#ef4444', alignItems: 'center' },
+  deleteConfirmText: { fontSize: 15, color: '#fff', fontWeight: '700' },
 });
