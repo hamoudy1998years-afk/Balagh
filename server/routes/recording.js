@@ -131,14 +131,31 @@ router.post('/stop', async (req, res) => {
       const thumbnailUrl = req.body.thumbnail_url;
       console.log('[RECORDING] Received thumbnail_url:', thumbnailUrl);
 
-      const { data, error } = await supabase.from('livestreams').insert({
-        user_id: req.body.userId,
-        video_url: videoUrl,
-        thumbnail_url: thumbnailUrl || null,  // EXPLICITLY ADD THIS
-        title: req.body.title || 'Live Stream',
-        description: req.body.description || '',
-        is_public: true
-      }).select().single();
+      const { placeholderId } = req.body;
+
+      let query;
+      if (placeholderId) {
+        // Update the placeholder record the client already inserted
+        query = supabase.from('livestreams').update({
+          video_url: videoUrl,
+          thumbnail_url: thumbnailUrl || null,
+          title: req.body.title || 'Live Stream',
+          description: req.body.description || '',
+          is_public: true
+        }).eq('id', placeholderId).select().single();
+      } else {
+        // Fallback: insert new record
+        query = supabase.from('livestreams').insert({
+          user_id: req.body.userId,
+          video_url: videoUrl,
+          thumbnail_url: thumbnailUrl || null,
+          title: req.body.title || 'Live Stream',
+          description: req.body.description || '',
+          is_public: true
+        }).select().single();
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('Failed to save livestream to database:', error);

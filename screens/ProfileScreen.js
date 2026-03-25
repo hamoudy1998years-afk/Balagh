@@ -148,7 +148,13 @@ const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongP
         <View style={styles.gridOverlay}><Text style={styles.gridPlayCount}>▶ {formatCount(item.views_count || item.view_count)}</Text></View>
         {item.is_pinned && <View style={styles.pinnedLabel}><Text style={styles.pinnedLabelText}>📌</Text></View>}
         {item.is_private && <View style={styles.privateLabel}><Text style={styles.privateLabelText}>🔒</Text></View>}
-        {isLivestreamItem && <View style={styles.liveLabel}><Text style={styles.liveLabelText}>🔴 REPLAY</Text></View>}
+        {isLivestreamItem && (
+          <View style={styles.liveLabel}>
+            <Text style={styles.liveLabelText}>
+              {item.video_url && item.video_url !== 'processing' ? '🔴 REPLAY' : '⏳ Processing...'}
+            </Text>
+          </View>
+        )}
       </AnimatedButton>
     </Animated.View>
   );
@@ -244,10 +250,11 @@ export default function ProfileScreen({ route, navigation }) {
       const viewingId = targetUserId ?? user?.id;
       if (viewingId && !isOffline) {
         loadLivestreams(viewingId);
-        // Reload again after 4s to catch newly saved recordings from server
-        setTimeout(() => {
-          loadLivestreams(viewingId);
-        }, 4000);
+        // Poll a few times to catch processing → ready transition
+        setTimeout(() => loadLivestreams(viewingId), 3000);
+        setTimeout(() => loadLivestreams(viewingId), 6000);
+        setTimeout(() => loadLivestreams(viewingId), 12000);
+        setTimeout(() => loadLivestreams(viewingId), 20000);
       }
       
       // DEBUG: Log focus state

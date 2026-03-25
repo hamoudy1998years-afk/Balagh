@@ -269,22 +269,8 @@ export default function LiveStreamScreen({ navigation, route }) {
         navigation.goBack();
         return true;
       }
-      Alert.alert(
-        'End Live Stream?',
-        'Going back will end your live stream.',
-        [
-          { text: 'Cancel', onPress: () => null, style: 'cancel' },
-          { 
-            text: 'End Stream', 
-            onPress: () => {
-              cleanup();
-              setIsLive(false);
-              navigation.goBack();
-            },
-            style: 'destructive'
-          }
-        ]
-      );
+      // Show the same end stream modal as the End button
+      setShowEndModal(true);
       return true;
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
@@ -919,7 +905,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
   
   // Stop Agora Cloud Recording
-  async function stopCloudRecording() {
+  async function stopCloudRecording(placeholderId = null) {
     // Read IDs from state
     const { resourceId, sid } = recordingIdsRef.current;
     
@@ -956,7 +942,8 @@ export default function LiveStreamScreen({ navigation, route }) {
           userId: currentUser?.id,
           title: title || 'Live Stream',
           description: '',
-          thumbnail_url: thumbnailUrlRef.current
+          thumbnail_url: thumbnailUrlRef.current,
+          placeholderId: placeholderId
         })
       });
       
@@ -978,21 +965,25 @@ export default function LiveStreamScreen({ navigation, route }) {
   const confirmEndStream = useCallback(async () => {
     console.log('[BTN] Confirm End Stream pressed');
     setShowEndModal(false);
-    setIsEnding(true);
-    setEndingMessage('Ending stream...');
-    
-    await stopCloudRecording();
-    setEndingMessage('Saving your stream...');
-    
+
+    // Insert placeholder record and capture its ID
+    const { data: placeholder } = await supabase.from('livestreams').insert({
+      user_id: currentUser?.id,
+      title: title || 'Live Stream',
+      thumbnail_url: thumbnailUrlRef.current,
+      video_url: 'processing',
+      created_at: new Date().toISOString(),
+    }).select().single();
+
+    // Pass placeholder ID to server so it updates instead of inserting a new record
+    stopCloudRecording(placeholder?.id);
+
     await supabase.from('live_streams').delete().eq('id', streamId);
     await cleanup();
-    
-    setEndingMessage('Almost done...');
-    await new Promise(r => setTimeout(r, 1000));
-    
-    setIsEnding(false);
+
+    // Instantly go back
     navigation.pop(2);
-  }, [navigation, streamId]);
+  }, [navigation, streamId, currentUser, title]);
 
   const handleStartStreaming = () => {
     console.log('[BTN] Start Live pressed');
