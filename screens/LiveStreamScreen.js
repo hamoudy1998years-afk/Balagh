@@ -138,6 +138,8 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isEnding, setIsEnding] = useState(false);
   const [endingMessage, setEndingMessage] = useState('');
+  const [streamDuration, setStreamDuration] = useState(0);
+  const durationIntervalRef = useRef(null);
   
   // Network failover state
   const [connectionStatus, setConnectionStatus] = useState('connected'); // 'connected' | 'reconnecting' | 'failed'
@@ -675,6 +677,9 @@ export default function LiveStreamScreen({ navigation, route }) {
       reconnectAttemptRef.current = 0;
       setIsLive(true);
       isLiveRef.current = true;
+      durationIntervalRef.current = setInterval(() => {
+        setStreamDuration(prev => prev + 1);
+      }, 1000);
       __DEV__ && console.log('🔥 Engine exists:', engineRef.current !== null);
       setLoading(false);
       
@@ -737,6 +742,10 @@ export default function LiveStreamScreen({ navigation, route }) {
     if (pingInterval.current) {
       clearInterval(pingInterval.current);
       pingInterval.current = null;
+    }
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
     }
     if (chatChannelRef.current) {
       await supabase.removeChannel(chatChannelRef.current);
@@ -1172,6 +1181,11 @@ export default function LiveStreamScreen({ navigation, route }) {
         <View style={styles.liveBadge}>
           <View style={styles.liveDot} />
           <Text style={styles.liveText}>LIVE</Text>
+          <Text style={styles.liveDuration}>
+            {String(Math.floor(streamDuration / 3600)).padStart(2, '0')}:
+            {String(Math.floor((streamDuration % 3600) / 60)).padStart(2, '0')}:
+            {String(streamDuration % 60).padStart(2, '0')}
+          </Text>
         </View>
         <AnimatedButton
           style={styles.viewerBadge}
@@ -1597,4 +1611,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  liveDuration: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
 });
