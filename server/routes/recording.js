@@ -44,7 +44,15 @@ router.post('/start', async (req, res) => {
     );
     
     const { resourceId } = acquireRes.data;
-    
+
+    console.log('[STORAGE CONFIG]', JSON.stringify({
+      vendor: 1,
+      region: 9,
+      bucket: process.env.S3_BUCKET_NAME,
+      accessKey: process.env.AWS_ACCESS_KEY?.substring(0, 8),
+      secretKeyLength: process.env.AWS_SECRET_KEY?.length,
+    }));
+        
     const startRes = await axios.post(
       `https://api.agora.io/v1/apps/${AGORA_APP_ID}/cloud_recording/resourceid/${resourceId}/mode/mix/start`,
       {
@@ -66,6 +74,7 @@ router.post('/start', async (req, res) => {
             }
           },
           storageConfig: {
+            
             vendor: 1,
             region: 9,
             bucket: process.env.S3_BUCKET_NAME,
