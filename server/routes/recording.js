@@ -137,6 +137,8 @@ router.post('/stop', async (req, res) => {
     console.log('[RECORDING] Full S3 URL:', videoUrl);
     
     // Make the S3 object public after Agora upload
+    console.log('[DEBUG] Using key prefix:', process.env.AWS_ACCESS_KEY?.substring(0, 4));
+    console.log('[DEBUG] Secret length:', process.env.AWS_SECRET_KEY?.length);
     try {
       const m3u8Key = 'livestreams/' + fileName;
       await s3Client.send(new CopyObjectCommand({
