@@ -3,8 +3,11 @@ const { GetObjectCommand, CopyObjectCommand, S3Client } = require('@aws-sdk/clie
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const s3Client = new S3Client({
-  region: process.env.S3_REGION || 'ap-southeast-2'
-  // Credentials auto-detected from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY env vars
+  region: process.env.S3_REGION || 'ap-southeast-2',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY,
+    secretAccessKey: process.env.AWS_SECRET_KEY,
+  }
 });
 const router = express.Router();
 const axios = require('axios');
