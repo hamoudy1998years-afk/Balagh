@@ -135,22 +135,6 @@ router.post('/stop', async (req, res) => {
     console.log('[S3 UPLOAD] Region:', S3_REGION);
     console.log('[S3 UPLOAD] Filename:', fileName);
     console.log('[RECORDING] Full S3 URL:', videoUrl);
-    
-    // Make the S3 object public after Agora upload
-    console.log('[DEBUG] Using key prefix:', process.env.AWS_ACCESS_KEY?.substring(0, 4));
-    console.log('[DEBUG] Secret length:', process.env.AWS_SECRET_KEY?.length);
-    try {
-      const m3u8Key = 'livestreams/' + fileName;
-      await s3Client.send(new CopyObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        CopySource: `${process.env.S3_BUCKET_NAME}/${m3u8Key}`,
-        Key: m3u8Key,
-        MetadataDirective: 'COPY',
-      }));
-      console.log('[S3] Ownership transferred:', m3u8Key);
-    } catch (copyError) {
-      console.error('[S3] Copy failed:', copyError.message);
-    }
 
 
     const fileList = [videoUrl];

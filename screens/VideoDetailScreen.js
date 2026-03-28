@@ -27,14 +27,8 @@ export default function VideoDetailScreen({ navigation }) {
     if (videoId && !route.params?.video) {
       fetchVideoById(videoId);
     } else if (route.params?.video) {
-      // ✅ NEW - check if m3u8
-      const videoData = route.params.video;
-      if (videoData.video_url && videoData.video_url.includes('.m3u8')) {
-        getSignedUrl(videoData);
-      } else {
-        setVideo(videoData);
-        setLoading(false);
-      }
+      setVideo(route.params.video);
+      setLoading(false);
     }
   }, [videoId]);
 
