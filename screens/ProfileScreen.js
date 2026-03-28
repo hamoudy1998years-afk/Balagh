@@ -808,22 +808,38 @@ export default function ProfileScreen({ route, navigation }) {
       thumbnail: item.thumbnail_url || item.thumbnail_uri 
     });
     
+    const isLivestream = activeTab === 'livestreams';
+    
     return (
       <VideoGridItem 
         item={item}
-        isLivestreamItem={activeTab === 'livestreams'}
+        isLivestreamItem={isLivestream}
         onPress={() => {
-          // Get fresh videos array at tap time (not stale closure)
-          const videosToPass = activeTab === 'videos' ? publicVideos : 
-                              activeTab === 'private' ? privateVideos : 
-                              activeTab === 'livestreams' ? livestreams :
-                              likedVideos;
-          openVideo(videosToPass, index);
+          if (isLivestream) {
+            navigation.navigate(ROUTES.VIDEO_DETAIL, {
+              video: {
+                id: item.id,
+                video_url: item.video_url,
+                thumbnail_uri: item.thumbnail_url,
+                title: item.title,
+                description: item.description,
+                user_id: item.user_id,
+                type: 'livestream',
+                profiles: { username: profile?.username ?? 'user', avatar_url: profile?.avatar_url }
+              }
+            });
+          } else {
+            // Get fresh videos array at tap time (not stale closure)
+            const videosToPass = activeTab === 'videos' ? publicVideos : 
+                                activeTab === 'private' ? privateVideos : 
+                                likedVideos;
+            openVideo(videosToPass, index);
+          }
         }} 
         onLongPress={handleLongPress} 
       />
     );
-  }, [activeTab, publicVideos, privateVideos, livestreams, likedVideos, openVideo, handleLongPress]);
+  }, [activeTab, publicVideos, privateVideos, livestreams, likedVideos, openVideo, handleLongPress, navigation]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
@@ -988,6 +1004,19 @@ export default function ProfileScreen({ route, navigation }) {
   const [isOffline, setIsOffline] = useState(false);
   const [deleteModal, setDeleteModal] = useState({ visible: false, video: null });
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const [loadingVideo, setLoadingVideo] = useState(false);
+
+  // Fetch signed URL for secure video playback
+  const getSignedVideoUrl = async (livestreamId) => {
+    try {
+      const response = await fetch(`https://balagh-server-production.up.railway.app/api/recording/livestreams/${livestreamId}/play`);
+      const data = await response.json();
+      return data.signedUrl;
+    } catch (e) {
+      console.error('[VIDEO] Failed to get signed URL:', e);
+      return null;
+    }
+  };
   
   useEffectHook(() => {
     async function checkCachedUser() {

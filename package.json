@@ -22,6 +22,7 @@
     "babel-preset-expo": "^55.0.12",
     "base64-arraybuffer": "^1.0.2",
     "expo": "^55.0.8",
+    "expo-asset": "~55.0.10",
     "expo-auth-session": "~55.0.7",
     "expo-camera": "~55.0.9",
     "expo-crypto": "~55.0.9",

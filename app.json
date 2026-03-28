@@ -97,7 +97,8 @@
         }
       ],
       "expo-web-browser",
-      "react-native-video"
+      "react-native-video",
+      "expo-asset"
     ],
     "extra": {
       "eas": {

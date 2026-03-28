@@ -20,13 +20,41 @@ export default function VideoDetailScreen({ navigation }) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    console.log('[VIDEO_DETAIL] Received params:', route.params);
+    console.log('[VIDEO_DETAIL] Video object:', route.params?.video);
+    console.log('[VIDEO_DETAIL] Video URI:', route.params?.video?.video_url);
+    
     if (videoId && !route.params?.video) {
       fetchVideoById(videoId);
     } else if (route.params?.video) {
-      setVideo(route.params.video);
-      setLoading(false);
+      // ✅ NEW - check if m3u8
+      const videoData = route.params.video;
+      if (videoData.video_url && videoData.video_url.includes('.m3u8')) {
+        getSignedUrl(videoData);
+      } else {
+        setVideo(videoData);
+        setLoading(false);
+      }
     }
   }, [videoId]);
+
+  async function getSignedUrl(videoData) {
+    try {
+      setLoading(true);
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL}/api/recording/livestreams/${videoData.id}/play`);
+      const data = await response.json();
+      if (data.signedUrl) {
+        setVideo({ ...videoData, video_url: data.signedUrl });
+      } else {
+        setVideo(videoData);
+      }
+    } catch (e) {
+      console.error('[VideoDetail] Signed URL error:', e);
+      setVideo(videoData); // fallback to original URL
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function fetchVideoById(id) {
     try {

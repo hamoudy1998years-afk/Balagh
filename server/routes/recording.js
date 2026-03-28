@@ -1,4 +1,11 @@
 const express = require('express');
+const { GetObjectCommand, CopyObjectCommand, S3Client } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
+const s3Client = new S3Client({
+  region: process.env.S3_REGION || 'ap-southeast-2'
+  // Credentials auto-detected from AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY env vars
+});
 const router = express.Router();
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
@@ -117,7 +124,26 @@ router.post('/stop', async (req, res) => {
     
     // Construct full S3 URL
     const videoUrl = `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/livestreams/${fileName}`;
+    console.log('[S3 UPLOAD] Constructed S3 URL:', videoUrl);
+    console.log('[S3 UPLOAD] Bucket:', S3_BUCKET);
+    console.log('[S3 UPLOAD] Region:', S3_REGION);
+    console.log('[S3 UPLOAD] Filename:', fileName);
     console.log('[RECORDING] Full S3 URL:', videoUrl);
+    
+    // Make the S3 object public after Agora upload
+    try {
+      const m3u8Key = 'livestreams/' + fileName;
+      await s3Client.send(new CopyObjectCommand({
+        Bucket: process.env.S3_BUCKET_NAME,
+        CopySource: `${process.env.S3_BUCKET_NAME}/${m3u8Key}`,
+        Key: m3u8Key,
+        MetadataDirective: 'COPY',
+      }));
+      console.log('[S3] Ownership transferred:', m3u8Key);
+    } catch (copyError) {
+      console.error('[S3] Copy failed:', copyError.message);
+    }
+
 
     const fileList = [videoUrl];
 
@@ -177,6 +203,44 @@ router.post('/stop', async (req, res) => {
       error: 'Failed to stop recording',
       detail: error.response?.data || error.message
     });
+  }
+});
+
+// Generate signed URL for secure video playback
+router.get('/livestreams/:id/play', async (req, res) => {
+  try {
+    console.log('[DEBUG] AWS_KEY exists:', !!process.env.AWS_ACCESS_KEY_ID);
+    console.log('[DEBUG] AWS_SECRET exists:', !!process.env.AWS_SECRET_ACCESS_KEY);
+    console.log('[DEBUG] BUCKET:', process.env.S3_BUCKET_NAME);
+    console.log('[DEBUG] REGION:', process.env.S3_REGION);
+    console.log('[DEBUG] Livestream ID:', req.params.id);
+    
+    const { data: livestream, error } = await supabase
+      .from('livestreams')
+      .select('video_url')
+      .eq('id', req.params.id)
+      .single();
+    
+    if (error || !livestream) {
+      return res.status(404).json({ error: 'Livestream not found' });
+    }
+    
+    const urlParts = livestream.video_url.split('/');
+    const key = 'livestreams/' + urlParts[urlParts.length - 1];
+    
+    const command = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: key
+    });
+    
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    
+    res.json({ signedUrl, expiresIn: 3600 });
+    
+  } catch (err) {
+    console.error('[SIGNED URL] Full error:', err);
+    console.error('[SIGNED URL] Error message:', err.message);
+    res.status(500).json({ error: 'Failed to generate signed URL', details: err.message });
   }
 });
 

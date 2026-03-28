@@ -52,6 +52,9 @@ function VideoCard({
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
   const [videoUri, setVideoUri] = useState(item.video_url);
+  console.log('[VIDEO_PLAYER] Received item:', item);
+  console.log('[VIDEO_PLAYER] Video URI being used:', item.video_url);
+  console.log('[VIDEO_PLAYER] Item keys:', Object.keys(item));
   const { user: authUser, loading: authLoading } = useUser();
   const currentUserId = authUser?.id ?? null;
   const [paused, setPaused] = useState(false);
@@ -325,7 +328,14 @@ function VideoCard({
           bufferForPlaybackMs: 250,
           bufferForPlaybackAfterRebufferMs: 500,
         }}
-        onError={(e) => __DEV__ && console.log('Video error:', e)}
+        onError={(e) => {
+          console.log('[VIDEO ERROR] Full error:', JSON.stringify(e));
+          console.log('[VIDEO ERROR] Video URL:', videoUri);
+          __DEV__ && console.log('Video error:', e);
+        }}
+        onLoad={() => {
+          console.log('[VIDEO SUCCESS] Video loaded:', videoUri);
+        }}
         useTextureView={false}
       />
 
