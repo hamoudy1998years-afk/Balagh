@@ -68,7 +68,10 @@ router.post('/start', async (req, res) => {
             bucket: process.env.S3_BUCKET_NAME,
             accessKey: process.env.AWS_ACCESS_KEY,
             secretKey: process.env.AWS_SECRET_KEY,
-            fileNamePrefix: ["livestreams"]
+            fileNamePrefix: ["livestreams"],
+            extensionParams: {
+              acl: "bucket-owner-full-control"
+            }
           }
         }
       },
