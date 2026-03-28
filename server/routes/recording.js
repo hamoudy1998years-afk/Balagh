@@ -1,5 +1,5 @@
 const express = require('express');
-const { GetObjectCommand, CopyObjectCommand, S3Client } = require('@aws-sdk/client-s3');
+const { GetObjectCommand, PutObjectAclCommand, S3Client } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const s3Client = new S3Client({
@@ -67,7 +67,7 @@ router.post('/start', async (req, res) => {
           },
           storageConfig: {
             vendor: 1,
-            region: 6,
+            region: 9,
             bucket: process.env.S3_BUCKET_NAME,
             accessKey: process.env.AWS_ACCESS_KEY,
             secretKey: process.env.AWS_SECRET_KEY,
@@ -132,7 +132,20 @@ router.post('/stop', async (req, res) => {
     console.log('[S3 UPLOAD] Region:', S3_REGION);
     console.log('[S3 UPLOAD] Filename:', fileName);
     console.log('[RECORDING] Full S3 URL:', videoUrl);
-
+    
+    // Make the S3 object public after Agora upload
+    try {
+      const m3u8Key = 'livestreams/' + fileName;
+      await s3Client.send(new PutObjectAclCommand({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: m3u8Key,
+        ACL: 'public-read'
+      }));
+      console.log('[S3 ACL] Made file public:', m3u8Key);
+    } catch (aclError) {
+      console.error('[S3 ACL] Failed to make file public:', aclError.message);
+      // Don't fail the request if ACL update fails - file might already be public
+    }
 
     const fileList = [videoUrl];
 
