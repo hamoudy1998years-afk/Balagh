@@ -67,7 +67,7 @@ router.post('/start', async (req, res) => {
           },
           storageConfig: {
             vendor: 1,
-            region: 8,
+            region: 6,
             bucket: process.env.S3_BUCKET_NAME,
             accessKey: process.env.AWS_ACCESS_KEY,
             secretKey: process.env.AWS_SECRET_KEY,
