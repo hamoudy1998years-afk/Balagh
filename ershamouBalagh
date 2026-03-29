@@ -1,0 +1,131 @@
+[33m6e2d54b5cbd8c728d59cb38f77d455e03592ef97[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Add pre-signed URL endpoint for video playback
+[33m99695dbe5cbbfb9c28157de640ada854daabfef0[m debug storage config
+[33mb9f8918e7e4ce2ac4953512d60a8927cd1579574[m fix agora region to 9 ap-southeast-2
+[33mac933dff7caa1c03e3857448c0bdb2897002a5e6[m fix agora region to 6 sydney
+[33m7352e51e103dc0277b7c8356104a9778be332ac2[m remove acl extensionParams
+[33mea991bd3bf8d3dd1d0e4cee2c3dc21c383e85432[m fix agora region to ap-southeast-2
+[33m926379a8692dd2404f15fc4ebe6ab00178400b31[m remove copy block
+[33m6368173009fb6b137f51dd0d3d0373231e93339e[m debug credentials
+[33md9afcf220aa9b0ada13f8c76199aa2019d90262a[m fix s3 credentials
+[33m0383ca7fcb09583f38f1853df9b0d0fda1be7ec7[m fix agora acl bucket owner
+[33me612e291aa06aaf7ae20d0f0bcba494de91be577[m fix s3 copy ownership
+[33m44e5a90111245187050c39afc9cad516a18bba26[m feat: live stream duration timer
+[33maedef4e6866d7b54577da637dc371394f40ea0a3[m feat: custom delete modal with checkbox + pill toast redesign
+[33mb9af6672818d3401fdffea6822535154bf728b59[m Update package-lock.json
+[33mab48586cd0920b5cf67459dd6d751586dbb2ff2b[m Fix: update placeholder record instead of inserting duplicate
+[33m0fd50d42f1a7449ee8a82b908412cbdec70f6438[m backup v2.2 latest Fix livestream end flow: refs for stale closures, spinner with messages, pop(2) navigation
+[33m0d4c0673b416a3c7d4194677efceb695f40a8a6b[m Fix empty fileList by falling back to constructed filename
+[33mdd40e54bcc48ee83315a02e42b45e97fe0b028c4[m Fix fileList parsing for Agora string mode response
+[33mcf4c0e19338ba3ca76284b4281c1f021d1023b20[m Pass recording token to Agora cloud recording
+[33m05972428e96b8fd0255d44aa5ef1dba809bde5b3[m Add detailed error logging to recording routes
+[33m9f16c2514d90428f7340939c568f7e4623fe8d70[m Add axios dependency
+[33m4ca783409beee36ca73b7b19389dc87ba41bb193[m Add recording routes
+[33m4ce232a37ec29080288ac780f60fc8a1e937cd6a[m fix: release signing config and keystore setup
+[33m31933a6a31d3a0941f648bf45e373338a3171d4a[m build: generate release AAB for Google Play submission
+[33m33982fe70b6b04edf4e9e07ad01954c01a1f3bc3[m pre-launch: backup v2.1 ready for Google Play submission
+[33m845b8acce9d75f2f34ffbb0755ee6751759e57b6[m[33m ([m[1;33mtag: [m[1;33mv2[m[33m)[m v2: Status bar fix, all hook imports, avatar upload auth fix, code cleanup
+[33mfffa73213ba2b7c88a891aaddf74e43c94b326d8[m fix: latest backup march 2026 video audio leak and home button navigation
+[33mc984bf60d59e2338463254cce328811dee5ec03b[m fix: status bar per screen
+[33m57e0d7b3f5b0c5acb804aa723f22f0a0f7622f7b[m fix: status bar light on home screen
+[33mfedde8cad22f356ba9f49ca1acd82d66d5cdfbdb[m fix: video restart from beginning on scroll and tab switch
+[33maab67bbc197a709b578feffbf6d83ae7d152a68d[m Production ready v1.1.0 - SafeArea, video playback, security fixes
+[33mab7941c13e010c46d52a343a63f5bcb93aba347b[m Add StatusBar fixes for consistent white text + Admin screen protection
+[33m879eacb850580da941dbe659395e20cd5f04c465[m Complete fixes: SafeArea insets, video auto-resume (TikTok behavior), tablet layout, network auto-refresh
+[33m7edc0a88f37b1a9bfed55a2c34570f6351bc4f78[m Fix video playback auto-resume (TikTok behavior) + SafeArea insets for all screens + tablet layout fixes
+[33mdeba8b22684e527572c779f78d8b075076151c7a[m Fix tablet layout - add maxWidth to live stream cards
+[33m123bca57de14a49a48c58ca744fa60b224165f87[m Complete SafeArea insets implementation - all 9 screens fixed
+[33m2bf4483f2c8ed5aeb71e3251d386cc8bd069effb[m Fix SafeArea insets for critical screens - Profile, Downloads, Video Options
+[33m48aa69d2d2876397b76d24b40655d6a0d0260b6c[m Add SafeAreaProvider and SafeArea insets for cross-device compatibility
+[33m19ab01ed7c75a96905f04c8ef9e9d18423f39b98[m Production ready: Remove dev-client, add privacy URLs, secure Agora cert
+[33m0c1557bffab2c0da3d5e8cad3631b5b9fa33e7d8[m Remove or divider, clean button stack
+[33m51faff1eec89220c9cedf783dfd9a167331972af[m Batch 7: Remove production logs, cleanup
+[33mdaa88d0468fcdae68dbf9df0c64a7161542d6c19[m Update app config and dependencies
+[33m909ecd71d60660d27aebfaa55fe041fdb568c282[m Batch 6: Add onboarding walkthrough (3 slides)
+[33m7b207dcc3db394fa043b709612d6067bd6670143[m Batch 5: Age verification gate, fix profile video navigation, deep link fixes, remove debug logs
+[33me74430ee43a09a821dc0917480710ac8ae20b729[m Fix Profile videos not loading - stale closure bug in renderItem
+[33m30316c41012dd14f0581fb2112523f6ff26a1228[m Fix deep link video loading - add null checks, maybeSingle, separate profile fetch
+[33me756d5bdea95046eec4d8c93979b03b1ea35d6bc[m Add Admin Panel for content moderation (Fix #5) - Create AdminScreen for reviewing reports - Add banned_users table in Supabase - Restrict access to admin user ID only - Fetch reports with separate queries (no FK joins) - Add ban user and delete video functionality
+[33m1cc35aa7d6d91fb297700f6186ff7ae525effbb2[m Fix navigation error when ending live stream - use goBack()
+[33m2163cbf0d0c6ba10a014369c50c041cff74742f9[m Add dynamic banned words from Supabase (Fix #5 Part 2) - Create banned_words table in Supabase - Fetch words dynamically on app start - Add severity levels and categories - Fallback to default list if fetch fails
+[33md2ada696e948dc678a6a69395b3b86d20b946db2[m Add video file caching (Fix #4) - Cache videos locally for instant replay - Auto-cleanup when storage hits 200MB/30 files - Use legacy file system API for compatibility
+[33m6299f8781af0245110ae9df0a0ed94bdd45622e0[m Fix #4: Video FlatList optimization - prevent reload on scroll
+[33m089d44269350c047ef8d47fd62c14f272e436d5b[m Add offline handling to Home and Notifications screens (Fix #3) - Add NetInfo-based offline detection - Modern floating pill UI (dark with red border + dot) - Remove duplicate global banner from App.js - Add to HomeScreen below Following/For You/Live tabs - Add to NotificationsScreen
+[33mad7cc33a5765f97ecf135a1e161b485d59240661[m Add Sentry crash reporting (Fix #2)
+[33ma5cf7981936ec890e5a81151ad466add7b2a9e33[m Add Sentry crash reporting (Fix #2)
+[33m50373a70c70305b6e12a3dc736293f84113d662e[m Fix: Network recovery for live streaming v1.0 - Add NetInfo-based offline detection - Fix Agora connection state handling (State 3 = connected) - Implement exponential backoff retry (1s, 2s, 4s, 8s, 16s) - Add isMounted guards to prevent null engine crashes - Show 'No internet connection' UI when offline - Auto-retry when internet returns - Prevent console.error red screens for network failures - Add Alert confirmation dialog for back button
+[33m622c64b4bf94bcaa54f6b709cd46e399dcd2b5f8[m Fix: Network recovery for live streaming - Add NetInfo-based offline detection - Fix Agora connection state handling (State 3 = connected) - Implement exponential backoff retry (1s, 2s, 4s, 8s, 16s) - Add isMounted guards to prevent null engine crashes - Show 'No internet connection' UI when offline - Auto-retry when internet returns - Prevent console.error red screens for network failures
+[33mefd2c02e8b27cc3dc28ceee1c2c3689adde249c2[m Add video compression - reduces upload sizes by 5-80%
+[33m50aa860809fd36d85992bde2aff315eae361dc1e[m[33m ([m[1;33mtag: [m[1;33mv0.9.0-critical-fixes-complete[m[33m)[m Fix: All critical issues resolved - Production ready foundation - ProfileScreen: Fix memory leak, re-render loop, offline data persistence - NetInfo: Fix offline detection sync issues - UI: Remove duplicate offline/online indicators, clean UI - Security: HTTPS enforcement, helmet headers, 100MB upload limit - Performance: Comments pagination, server rate limiter cleanup - Code quality: Constants, utilities, error handling - Build: Fix google-services.json location, colors.xml
+[33mf395a5e5570eb6d0a21718319f81fe0e04770892[m Add HTTPS enforcement and security headers
+[33mac73345fc51019a6deb52e36691b5053014006e1[m BACKUP: Pre-HTTPS enforcement - All fixes up to file size limit - ProfileScreen memory leak fixed - Re-render loop fixed - File upload 100MB limit added - Server rate limiter cleanup - Constants/utilities refactored
+[33m4be12e4f93c3b35b3fabe6d3ffdd06a06805ca56[m[33m ([m[1;33mtag: [m[1;33mbackup-before-https-fix[m[33m)[m BACKUP: Pre-HTTPS enforcement - All fixes up to file size limit - ProfileScreen memory leak fixed - Re-render loop fixed - File upload 100MB limit added - Server rate limiter cleanup - Constants/utilities refactored
+[33m4055be1a163da098863a85b5a032e0ca58e10453[m revert: remove initialRouteName override, app always opens on Main feed
+[33mb351a6ce960eac5a7d97ee37edaf2f838a3e854f[m fix: set initialRouteName to Login when no session on cold start
+[33me1f7d23f21112215333d399340661c2cb55258f9[m fix: add 100ms delay before navigation after biometric login to prevent addViewAt render conflict
+[33mf338b5c75217b7dfdb89072c00bcf10d9faf2ec5[m fix: redirect to login on cold start using useEffect
+[33m77405c8488b21cc290d370b4a0d6a346b3fdced7[m fix: move navigation.replace Login into useEffect to avoid update-during-render warning
+[33mdd2c6c07ecf5c8e590a70de260e5b6aee52e6360[m fix: redirect to Login when globalUser is null after UserContext finishes loading in ProfileScreen
+[33m59bbbcfff7bf844b31df21d2da09731ae68fd6cd[m fix: call setUser directly with merged profile after biometric/PIN login instead of refreshUser() to ensure UserContext is updated before navigation
+[33md0aaa246c675afcf457170b18063b34872b463f4[m fix: loadUser fetches full profile and merges correctly so globalUser has all fields after any login method
+[33m3d0308ae76246cf35fc4bdaf9f9e2035ca384103[m debug: add console.log traces to ProfileScreen for globalUser/init/userId tracking
+[33m6842447b9554e026ca2a4253a648a77e9031de3b[m fix: update userCache and call refreshUser after biometric and PIN login so ProfileScreen loads correctly
+[33md5281e3d8987ba157f8f42bfc79b372a4a963d4f[m fix: reset hasLoaded when globalUser.id changes so profile reloads on account switch
+[33mf51df34360ba7e0c200435a39e428c4fa1af389c[m fix: clear UserContext state with setUser(null) on logout
+[33md655badf0805ea07284209b5b42111bbb7c9f342[m fix: add autoCorrect=false autoCapitalize=none to all password inputs
+[33m01c424df29098188ac017c325f451ee56349726e[m fix: always save username to profiles on signup, include phone if provided
+[33mccd94262763df4837533e77671e0b2604f09cdf6[m chore: remove ENV CHECK debug log
+[33m07ed880c518d23ad9d0d4382b6c485892e65c43a[m fix: null check for currentUser at top of setup, replace bare user.id with currentUser.id in WatchLiveScreen
+[33m38abe2b7ed6df3a1d4f7df26f3e811827d4c88c1[m fix: replace bare user.id with currentUser.id in LiveStreamScreen insert
+[33mb7218e6aecdb7a0684092540caee83ccb41d09a1[m fix: null check for currentUser in LiveStreamScreen setup
+[33m4a23df0317ab63766ca9742a5df925a7008782c9[m debug: expand ENV CHECK log to show Agora key names and NODE_ENV
+[33m0eccb0a2c7d9521ac1fcab6c5147203c7af39f68[m fix: revert dotenv to simple config()
+[33m4e1a12404d010d320b94f6d3368933610be84069[m fix: explicitly set dotenv override:false so Railway env vars take priority
+[33m2655d096465cd99aa1c8fdb6a9c382ad2b366bfc[m fix: use __dirname in dotenv config so Railway env vars are loaded correctly
+[33m3e23e3c917a21a0c1bdf5e8a0237e2697eca65e6[m debug: log env var presence on startup
+[33mf32bc76ffafa7217e8e78b720dbf7db2dc096438[m fix: move railway.json to root, point startCommand to server/server.js
+[33mfef64f4e1491222299c36529ba20c6f1fbca857c[m fix: add railway.json to point to correct server entry
+[33mcb4b8a0fa8080450fb80e9add7e1497c9f470452[m fix: Agora token server crash on /token endpoint
+[33m42ee55a030eeae4ae9d3e1031c4437b8cc90bfab[m fix: profile screen empty when auth loads after focus
+[33md6eb0f0e25ddb7a1c733881e7bfff535b2b0446f[m fix: move renderItem before early returns in HomeScreen
+[33m6a3c139d2d1142cb71bf05cd804fbb3b1ef21afb[m perf: remove dead HomeScreen.js and fix ProfileScreen getUser
+[33m2bfd0f32ca4a1f70c1b9843cafa0d9a4fc549864[m perf: use UserContext instead of getUser in SettingsScreen
+[33mc782e60729f9f532cf8894d97b887209fcaafbcb[m perf: use UserContext instead of getUser in ApplyScholarScreen
+[33m88e73b4de82e0e9ac5a761be3fb5779e1f0d220d[m perf: use UserContext instead of getUser in useComments
+[33m5ad6941b8f66c85b80a17c6f6c6d665515ab8395[m perf: use UserContext instead of getUser in EditProfileScreen
+[33md3a6585c1d3d0f458e7a825e224a14315b66e212[m perf: use UserContext instead of getUser in WatchLiveScreen
+[33m4a0727e219dbd6c390b5539b2b139441a6f209c9[m perf: use UserContext instead of getUser in LiveStreamScreen
+[33m80b87bf7203d9f628f496f8d5b91ab9f5a62dd8e[m perf: use UserContext instead of getUser in UploadScreen
+[33m02b8bc774c70368b70eb31130b73a9aa13d1522f[m perf: wrap renderItem in useCallback in ProfileScreen
+[33m843d81133a3bee53bc3dd2f7186bb5235736ab90[m perf: replace getUser calls with UserContext across all screens
+[33m3881a3d5493d7df65208ebb626f4ca8a24559fcb[m chore: remove duplicate UserContext file
+[33mf012c47d8329a28b33767ac4aef335a7f415684e[m perf: use UserContext instead of getUser in SearchScreen
+[33mb05b4f3ac1b460954785c8b17443a6fb80a572e9[m perf: use UserContext instead of getUser per VideoCard
+[33m85d2003562730488e6124781508080607a952c34[m perf: optimize FlatList rendering props in HomeScreen
+[33m13147f623ae4d01bf6d7fdfcbca028507d69424a[m perf: wrap renderItem in useCallback in HomeScreen
+[33m667f10224b062c17cddf07bab5abe468a49fcaf5[m chore: remove stale comment in HomeScreen
+[33mad89306aff088ed0ebb66629ee3dfd264831c90c[m fix: remove Facebook login button
+[33mc2f919f9dd99062a650b051de0d5a94027915ab7[m fix: move server URL to .env
+[33m5ee2b7fc36df4ee3f55e61a237a1311344d2a3c0[m fix: Android and iOS device compatibility improvements
+[33ma77ef73e2eb7e951125b6e97cee01babdcb9efb4[m fix: image caching, iOS swipe fix, video player pool expanded to 5
+[33m381dc199b0c3610a01d0ea19f249b61048fa9910[m feat: search shows people + videos, fixed categories layout
+[33m8423efac614e40782fb7191925ddd9ca115997da[m fix: all pre-launch fixes verified and working
+[33meca0ccc1caf81f33916b097fcd3076c317799727[m fix: final pre-launch fixes - netinfo, race condition, rate limiter
+[33m646c8cb54b19bc4ce2d07e3103b3c1751e4465e6[m fix: critical security, crash, and performance fixes pre-launch
+[33m4d5858d9e01670751f3d8cb32746f0e9fca9f790[m feat: add privacy policy URL to settings
+[33m7462e7f8a31dd2f1262c6e00662789b17a8c61fd[m feat: add report button to VideoCard
+[33md6b4767f2088905eaf6d1258fc2709372a717f60[m feat: add block button to ProfileScreen
+[33md9b000b2a165ca4321d4a5beb0e2d3eb89338a2c[m fix: remove outdated Android storage permissions
+[33m503da0a01e97c5995b08da8f488cab0ba5d0c075[m backup before pre-launch fixes
+[33mef6a487ab79f489bc3e1a0cf68d9376fb825e798[m Add autocomplete filter to email dropdown - filters saved accounts as you type
+[33m2ff44b516d67036587bd107385dd3efdb675101e[m Fix email dropdown to show on every tap, not just first focus
+[33mdb4769cc498dacf96a5244cbcbc06cca621a515f[m Update PIN modal with modern gold-themed design matching app theme
+[33mdc0fda789cb66a7c98333cb347129e57491aa410[m Fix PIN backspace to show single deleted digit instead of remaining PIN
+[33m76442d88e37a3eef9d9586eae2c9a2d844db6d0e[m Fix status bar to use system default color
+[33m81deb2827cac7dc314b005f591eb18922127456c[m Update Google login button with proper branding and white background
+[33m8d54b0ea4f6e09bb1e6373751630514d40650ab8[m fix: update activity indicator colors to gold theme
+[33mad4d998444bd0e6cb0c4e3610d09c216e534721d[m Move Following feed preload to HomeScreen for instant tab switch
+[33m73e4a86ac777c8c728f96750724340065cfce73b[m Fix Following tab videos not playing on first switch - add isTabActive useEffect
+[33mff4daf1ce92619aa0fa6a3f3bd56611f26f0ded8[m Merge VideoCard - instant loading + caching + follow fix
+[33m9140c784bd8d8a263eedf445ba8d2443f195965d[m chore: save progress before video caching implementation
+[33m61b918d47964dc092d37c461a2b6f050cfe30f28[m Fix follow button flash on own videos - add currentUserId check
+[33m87b79229f4e6a4aff7c3b99a1f11df682244ec15

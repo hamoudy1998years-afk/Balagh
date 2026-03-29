@@ -6,12 +6,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
-import {
-  createAgoraRtcEngine,
-  ChannelProfileType,
-  ClientRoleType,
-  RtcSurfaceView,
-} from 'react-native-agora';
+import { Room, RoomEvent, Track } from 'livekit-client';
+import { registerGlobals, VideoView } from '@livekit/react-native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { useViewerTracking } from '../hooks/useViewerTracking';
@@ -20,20 +16,16 @@ import { COLORS } from '../constants/theme';
 import { useUser } from '../context/UserContext';
 
 const { width, height } = Dimensions.get('window');
-const AGORA_APP_ID = process.env.EXPO_PUBLIC_AGORA_APP_ID;
 const TOKEN_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
-const TOKEN_EXPIRY_SECONDS = 86400;
-const TOKEN_REFRESH_BUFFER_SECONDS = 300; // refresh if within 5 min of expiry
 const REACTIONS = ['❤️', '🤲', '☪️', '🌟', '👍'];
-const HOST_TIMEOUT_MS = 30000; // ⏱️ TIMEOUT: 30 seconds
+const HOST_TIMEOUT_MS = 30000;
 
 export default function WatchLiveScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { stream } = route.params ?? {};
 
-  const [loading, setLoading] = useState(false);
   const [joining, setJoining] = useState(true);
-  const [hostUid, setHostUid] = useState(0);
+  const [hostVideoTrack, setHostVideoTrack] = useState(null);
   const [hostJoined, setHostJoined] = useState(false);
   const [streamEnded, setStreamEnded] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -45,12 +37,11 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [username, setUsername] = useState('');
   const [questionsLeft, setQuestionsLeft] = useState(stream.max_questions ?? 5);
   const [floatingReactions, setFloatingReactions] = useState([]);
-  const [hostTimeoutReached, setHostTimeoutReached] = useState(false); // ⏱️ TIMEOUT: Track if we hit timeout
+  const [hostTimeoutReached, setHostTimeoutReached] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const hasJoinedRef = useRef(false);
 
-  const engineRef = useRef(null);
+  const roomRef = useRef(null);
   const flatListRef = useRef(null);
   const reactionId = useRef(0);
   const isCleaningUp = useRef(false);
@@ -59,9 +50,8 @@ export default function WatchLiveScreen({ navigation, route }) {
   const questionsChannelRef = useRef(null);
   const streamChannelRef = useRef(null);
 
-  // ✅ NEW: Use the viewer tracking hooks
-  useViewerTracking(stream.id, false, currentUser, retryCount); // Track this viewer (isStreamer = false)
-  const { viewerCount } = useViewerCount(stream.id); // Get real-time viewer count
+  useViewerTracking(stream.id, false, currentUser, retryCount);
+  const { viewerCount } = useViewerCount(stream.id);
 
   useEffect(() => {
     setup();
@@ -72,37 +62,27 @@ export default function WatchLiveScreen({ navigation, route }) {
     };
   }, []);
 
-  // ⏱️ TIMEOUT: Cleanup timeout on unmount
   useEffect(() => {
-      const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
-      });
-      const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => {
-        setKeyboardHeight(0);
-      });
+    const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      if (hostWaitTimeoutRef.current) clearTimeout(hostWaitTimeoutRef.current);
+      keyboardDidShow.remove();
+      keyboardDidHide.remove();
+    };
+  }, []);
 
-      return () => {
-        if (hostWaitTimeoutRef.current) {
-          clearTimeout(hostWaitTimeoutRef.current);
-        }
-        keyboardDidShow.remove();
-        keyboardDidHide.remove();
-      };
-    }, []);
-
-  // ⏱️ TIMEOUT: Start timeout when joining completes but host hasn't joined
   useEffect(() => {
     if (!joining && !hostJoined && !hostTimeoutReached && !streamEnded) {
-      __DEV__ && console.log('⏱️ TIMEOUT: Starting 30s host wait timer...');
       hostWaitTimeoutRef.current = setTimeout(() => {
-        __DEV__ && console.log('⏱️ TIMEOUT: Host wait timeout reached!');
         setHostTimeoutReached(true);
       }, HOST_TIMEOUT_MS);
     }
-
-    // Clear timeout if host joins or stream ends
     if ((hostJoined || streamEnded) && hostWaitTimeoutRef.current) {
-      __DEV__ && console.log('⏱️ TIMEOUT: Clearing timer - host joined or stream ended');
       clearTimeout(hostWaitTimeoutRef.current);
       hostWaitTimeoutRef.current = null;
     }
@@ -123,87 +103,74 @@ export default function WatchLiveScreen({ navigation, route }) {
         .single();
       setUsername(profile?.username ?? 'viewer');
 
-      const rawToken = stream.viewer_token;
+      // Register LiveKit WebRTC globals
+      try { registerGlobals(); } catch (e) {}
 
-      if (!rawToken) {
-        Alert.alert('Error', 'Stream token not available.');
-        navigation.goBack();
-        return;
-      }
+      // Get LiveKit token from server
+      const response = await fetch(`${TOKEN_SERVER_URL}/api/livekit/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomName: stream.channel_name,
+          userId: currentUser.id,
+          isHost: false,
+        }),
+      });
 
-      // Check token expiry and refresh if needed
-      let token = rawToken;
-      if (stream?.created_at) {
-        const streamCreatedAt = Math.floor(new Date(stream.created_at).getTime() / 1000);
-        const tokenExpiresAt = streamCreatedAt + TOKEN_EXPIRY_SECONDS;
-        const now = Math.floor(Date.now() / 1000);
-        if (now >= tokenExpiresAt - TOKEN_REFRESH_BUFFER_SECONDS) {
-          __DEV__ && console.log('Viewer token expired or near expiry, fetching fresh token...');
-          try {
-            const response = await fetch(
-              `${TOKEN_SERVER_URL}/token?channelName=${stream.channel_name}&role=subscriber`
-            );
-            if (!response.ok) {
-              const text = await response.text();
-              throw new Error(`Token server ${response.status}: ${text.slice(0, 200)}`);
-            }
-            const data = await response.json();
-            if (data?.token) {
-              token = data.token;
-              __DEV__ && console.log('Fresh viewer token obtained.');
-            }
-          } catch (e) {
-            __DEV__ && console.warn('Token refresh failed, using existing token:', e);
+      if (!response.ok) throw new Error(`Token server error: ${response.status}`);
+      const { token, url } = await response.json();
+
+      // Create LiveKit room
+      const room = new Room({ adaptiveStream: true, dynacast: true });
+      roomRef.current = room;
+
+      // Listen for host's video track
+      room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+        if (track.kind === Track.Kind.Video) {
+          __DEV__ && console.log('[LIVEKIT] Host video track received');
+          setHostVideoTrack(track);
+          setHostJoined(true);
+          setHostTimeoutReached(false);
+        }
+      });
+
+      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        if (track.kind === Track.Kind.Video) {
+          setHostVideoTrack(null);
+          setHostJoined(false);
+        }
+      });
+
+      room.on(RoomEvent.ParticipantConnected, (participant) => {
+        __DEV__ && console.log('[LIVEKIT] Participant connected:', participant.identity);
+      });
+
+      room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+        __DEV__ && console.log('[LIVEKIT] Participant disconnected:', participant.identity);
+        setHostJoined(false);
+        setStreamEnded(true);
+      });
+
+      room.on(RoomEvent.Disconnected, () => {
+        setHostJoined(false);
+        setStreamEnded(true);
+      });
+
+      // Connect to room
+      await room.connect(url, token);
+      setJoining(false);
+
+      // Check if host is already in the room and has video
+      for (const participant of room.remoteParticipants.values()) {
+        for (const publication of participant.trackPublications.values()) {
+          if (publication.track && publication.track.kind === Track.Kind.Video) {
+            setHostVideoTrack(publication.track);
+            setHostJoined(true);
           }
         }
       }
 
-      // ✅ REMOVED: No more increment_viewer_count RPC call
-      // The useViewerTracking hook now handles adding this user to stream_viewers table
-      hasJoinedRef.current = true;
-
-      const engine = createAgoraRtcEngine();
-      engineRef.current = engine;
-
-      engine.initialize({ appId: AGORA_APP_ID });
-      engine.setChannelProfile(ChannelProfileType.ChannelProfileLiveBroadcasting);
-      engine.setClientRole(ClientRoleType.ClientRoleAudience);
-      engine.enableVideo();
-
-      await engine.joinChannel(token, stream.channel_name, 0, {
-        clientRoleType: ClientRoleType.ClientRoleAudience,
-      });
-
-      setJoining(false);
-
-      engine.addListener('onUserJoined', (connection, remoteUid) => {
-        setHostUid(remoteUid);
-        setHostJoined(true);
-        setHostTimeoutReached(false); // ⏱️ TIMEOUT: Reset timeout state if host joins
-      });
-
-      engine.addListener('onRemoteVideoStateChanged', (connection, remoteUid, state, reason, elapsed) => {
-        if (state === 2) {
-          setHostUid(remoteUid);
-          setHostJoined(true);
-          setHostTimeoutReached(false); // ⏱️ TIMEOUT: Reset timeout state
-        }
-      });
-
-      engine.addListener('onUserOffline', (connection, remoteUid, reason) => {
-        __DEV__ && console.log('Host offline, reason:', reason);
-        setHostJoined(false);
-        if (reason === 0) {
-          setStreamEnded(true);
-        }
-      });
-
-      engine.addListener('onError', (err) => {
-        __DEV__ && console.log('Agora error:', err);
-      });
-
-      setLoading(false);
-
+      // Load existing chat messages
       const { data: existingMessages } = await supabase
         .from('live_messages')
         .select('*')
@@ -230,6 +197,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       subscribeToChat();
       subscribeToQuestions();
       subscribeToStream();
+
     } catch (e) {
       __DEV__ && console.error('Setup error:', e);
       Alert.alert('Error', 'Failed to join stream.');
@@ -237,70 +205,46 @@ export default function WatchLiveScreen({ navigation, route }) {
     }
   }
 
-  // ⏱️ TIMEOUT: Retry function to rejoin
   async function handleRetryJoin() {
-    __DEV__ && console.log('🔄 RETRY: User clicked try again');
     setHostTimeoutReached(false);
     setJoining(true);
     setRetryCount(prev => prev + 1);
-    
-    // Cleanup existing engine
-    if (engineRef.current) {
+
+    if (roomRef.current) {
       try {
-        engineRef.current.removeAllListeners();
-        await engineRef.current.leaveChannel();
-        engineRef.current.release();
-      } catch (e) {
-        __DEV__ && console.log('Retry cleanup error:', e);
-      }
-      engineRef.current = null;
+        await roomRef.current.disconnect();
+      } catch (e) {}
+      roomRef.current = null;
     }
-    
-    // Small delay then rejoin
-    setTimeout(() => {
-      setup();
-    }, 1000);
+
+    setTimeout(() => { setup(); }, 1000);
   }
 
   async function cleanup() {
     if (isCleaningUp.current) return;
     isCleaningUp.current = true;
 
-    __DEV__ && console.log('🧹 Cleanup called');
-
-    // ⏱️ TIMEOUT: Clear timeout on cleanup
     if (hostWaitTimeoutRef.current) {
       clearTimeout(hostWaitTimeoutRef.current);
       hostWaitTimeoutRef.current = null;
     }
 
-    // ✅ REMOVED: No more decrement_viewer_count RPC call
-    // The useViewerTracking hook now handles removing this user from stream_viewers table
-    // (it runs cleanup on unmount)
     if (chatChannelRef.current) { await supabase.removeChannel(chatChannelRef.current); chatChannelRef.current = null; }
     if (questionsChannelRef.current) { await supabase.removeChannel(questionsChannelRef.current); questionsChannelRef.current = null; }
     if (streamChannelRef.current) { await supabase.removeChannel(streamChannelRef.current); streamChannelRef.current = null; }
 
-    if (engineRef.current) {
-      try {
-        engineRef.current.removeAllListeners();
-        engineRef.current.leaveChannel();
-        engineRef.current.release();
-      } catch (e) {
-        __DEV__ && console.log('Engine cleanup error:', e);
-      }
-      engineRef.current = null;
+    if (roomRef.current) {
+      try { await roomRef.current.disconnect(); } catch (e) {}
+      roomRef.current = null;
     }
   }
 
   function subscribeToChat() {
     chatChannelRef.current = supabase.channel(`watch_messages_${stream.id}`);
     chatChannelRef.current
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'live_messages', 
-        filter: `stream_id=eq.${stream.id}` 
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public',
+        table: 'live_messages', filter: `stream_id=eq.${stream.id}`
       }, (payload) => {
         setMessages(prev => [...prev, payload.new]);
         setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -311,11 +255,9 @@ export default function WatchLiveScreen({ navigation, route }) {
   function subscribeToQuestions() {
     questionsChannelRef.current = supabase.channel(`watch_questions_${stream.id}`);
     questionsChannelRef.current
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'live_questions', 
-        filter: `stream_id=eq.${stream.id}` 
+      .on('postgres_changes', {
+        event: '*', schema: 'public',
+        table: 'live_questions', filter: `stream_id=eq.${stream.id}`
       }, (payload) => {
         if (payload.new.is_selected) {
           setSelectedQuestion(payload.new);
@@ -329,25 +271,15 @@ export default function WatchLiveScreen({ navigation, route }) {
   function subscribeToStream() {
     streamChannelRef.current = supabase.channel(`watch_stream_${stream.id}`);
     streamChannelRef.current
-      .on('postgres_changes', { 
-        event: 'DELETE', 
-        schema: 'public', 
-        table: 'live_streams', 
-        filter: `id=eq.${stream.id}` 
-      }, () => {
-        __DEV__ && console.log('Stream deleted, ending...');
-        setStreamEnded(true);
-      })
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'live_streams', 
-        filter: `id=eq.${stream.id}` 
+      .on('postgres_changes', {
+        event: 'DELETE', schema: 'public',
+        table: 'live_streams', filter: `id=eq.${stream.id}`
+      }, () => { setStreamEnded(true); })
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public',
+        table: 'live_streams', filter: `id=eq.${stream.id}`
       }, (payload) => {
-        // ✅ REMOVED: setViewerCount - now handled by useViewerCount hook
-        if (!payload.new.is_live) {
-          setStreamEnded(true);
-        }
+        if (!payload.new.is_live) setStreamEnded(true);
       })
       .subscribe();
   }
@@ -356,53 +288,33 @@ export default function WatchLiveScreen({ navigation, route }) {
     if (!chatInput.trim() || !stream.id || !currentUser) return;
     const msg = chatInput.replace(/<[^>]*>/g, '').trim();
     setChatInput('');
-
     try {
-      await supabase.from('live_messages').insert({ 
-        stream_id: stream.id, 
-        user_id: currentUser.id, 
-        username, 
-        message: msg 
+      await supabase.from('live_messages').insert({
+        stream_id: stream.id, user_id: currentUser.id, username, message: msg
       });
-    } catch (e) {
-      __DEV__ && console.log('Failed to send message:', e);
-    }
+    } catch (e) { __DEV__ && console.log('Failed to send message:', e); }
   }
 
   async function submitQuestion() {
     if (!questionInput.trim() || !currentUser) return;
-    
-    // Check if questions are allowed for this stream
     const { data: streamData } = await supabase
-      .from('live_streams')
-      .select('allow_questions')
-      .eq('id', stream.id)
-      .single();
-      
+      .from('live_streams').select('allow_questions').eq('id', stream.id).single();
     if (!streamData?.allow_questions) {
       Alert.alert('Questions Disabled', 'The scholar is not accepting questions right now.');
       return;
     }
-    
-    if (questionsLeft <= 0) { 
-      Alert.alert('Limit Reached', `The scholar has set a limit of ${stream.max_questions} questions per viewer.`); 
-      return; 
+    if (questionsLeft <= 0) {
+      Alert.alert('Limit Reached', `The scholar has set a limit of ${stream.max_questions} questions per viewer.`);
+      return;
     }
-    
     const q = questionInput.replace(/<[^>]*>/g, '').trim();
     setQuestionInput('');
-
     try {
-      await supabase.from('live_questions').insert({ 
-        stream_id: stream.id, 
-        user_id: currentUser.id, 
-        username, 
-        question: q 
+      await supabase.from('live_questions').insert({
+        stream_id: stream.id, user_id: currentUser.id, username, question: q
       });
       setQuestionsLeft(prev => prev - 1);
-    } catch (e) {
-      __DEV__ && console.log('Failed to submit question:', e);
-    }
+    } catch (e) { __DEV__ && console.log('Failed to submit question:', e); }
   }
 
   function sendReaction(emoji) {
@@ -413,40 +325,20 @@ export default function WatchLiveScreen({ navigation, route }) {
     Animated.timing(anim, { toValue: 1, duration: 2000, useNativeDriver: true }).start(() => {
       setFloatingReactions(prev => prev.filter(r => r.id !== id));
     });
-
     if (stream?.id && currentUser) {
-      // 🔧 FIXED: Proper async/await with try-catch
       const saveReaction = async () => {
         try {
-          await supabase.from('live_reactions').insert({ 
-            stream_id: stream.id, 
-            user_id: currentUser.id, 
-            reaction: emoji 
+          await supabase.from('live_reactions').insert({
+            stream_id: stream.id, user_id: currentUser.id, reaction: emoji
           });
-        } catch (e) {
-          __DEV__ && console.log('Reaction error:', e);
-        }
+        } catch (e) { __DEV__ && console.log('Reaction error:', e); }
       };
       saveReaction();
     }
   }
 
-  const handleTabChat = React.useCallback(() => {
-    setActiveTab('chat');
-  }, []);
-
-  const handleTabQuestion = React.useCallback(() => {
-    setActiveTab('question');
-  }, []);
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#ef4444" size="large" />
-        <Text style={styles.loadingText}>Joining live stream...</Text>
-      </View>
-    );
-  }
+  const handleTabChat = useCallback(() => setActiveTab('chat'), []);
+  const handleTabQuestion = useCallback(() => setActiveTab('question'), []);
 
   if (streamEnded) {
     return (
@@ -463,20 +355,24 @@ export default function WatchLiveScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <SystemBars style="light" />
-      <RtcSurfaceView 
-        style={StyleSheet.absoluteFill} 
-        canvas={{ uid: hostUid, renderMode: 1 }} 
-        zOrderMediaOverlay={true}
-      />
 
-      {joining && (
-        <View style={styles.connectingOverlay}>
-          <ActivityIndicator color="#fff" size="small" />
-          <Text style={styles.connectingText}>Joining...</Text>
+      {/* Host video - full screen */}
+      {hostVideoTrack ? (
+        <VideoView
+          style={StyleSheet.absoluteFill}
+          videoTrack={hostVideoTrack}
+          mirror={false}
+        />
+      ) : (
+        <View style={styles.waitingContainer}>
+          <ActivityIndicator color="#ef4444" size="large" />
+          <Text style={styles.waitingText}>
+            {joining ? 'Joining...' : 'Waiting for host...'}
+          </Text>
         </View>
       )}
 
-      {/* ⏱️ TIMEOUT: Show timeout UI instead of infinite "Waiting for host" */}
+      {/* Timeout UI */}
       {!hostJoined && !joining && hostTimeoutReached && (
         <View style={styles.timeoutContainer}>
           <Text style={{ fontSize: 48 }}>⏱️</Text>
@@ -493,14 +389,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         </View>
       )}
 
-      {/* Original waiting UI - only show if NOT timed out */}
-      {!hostJoined && !joining && !hostTimeoutReached && (
-        <View style={styles.waitingContainer}>
-          <ActivityIndicator color="#ef4444" size="large" />
-          <Text style={styles.waitingText}>Waiting for host...</Text>
-        </View>
-      )}
-
+      {/* Floating reactions */}
       {floatingReactions.map(r => (
         <Animated.Text key={r.id} style={[styles.floatingReaction, {
           left: r.startX,
@@ -509,6 +398,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         }]}>{r.emoji}</Animated.Text>
       ))}
 
+      {/* Top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <View style={styles.liveBadge}>
           <View style={styles.liveDot} />
@@ -523,6 +413,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         </AnimatedButton>
       </View>
 
+      {/* Selected question banner */}
       {selectedQuestion && (
         <View style={styles.questionBanner}>
           <Text style={styles.questionBannerLabel}>❓ Question from @{selectedQuestion.username}</Text>
@@ -530,6 +421,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         </View>
       )}
 
+      {/* Bottom panel */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
         <View style={styles.tabs}>
           <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={handleTabChat}>
@@ -568,7 +460,6 @@ export default function WatchLiveScreen({ navigation, route }) {
         {activeTab === 'question' && (
           <View style={styles.questionInputContainer}>
             {stream.allow_questions === false ? (
-              // Questions disabled by streamer
               <View style={styles.disabledContainer}>
                 <Text style={styles.disabledEmoji}>🚫</Text>
                 <Text style={styles.disabledTitle}>Questions Disabled</Text>
@@ -577,7 +468,6 @@ export default function WatchLiveScreen({ navigation, route }) {
                 </Text>
               </View>
             ) : (
-              // Questions allowed
               <>
                 <Text style={styles.questionHint}>
                   Ask the scholar a question. You have {questionsLeft} question{questionsLeft !== 1 ? 's' : ''} left.
@@ -613,7 +503,6 @@ const styles = StyleSheet.create({
   loadingText:      { color: '#fff', fontSize: 16, fontWeight: '600' },
   waitingContainer: { ...StyleSheet.absoluteFillObject, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center', gap: 16, zIndex: 5 },
   waitingText:      { color: '#fff', fontSize: 15 },
-  // ⏱️ TIMEOUT: New styles for timeout UI
   timeoutContainer: { ...StyleSheet.absoluteFillObject, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center', gap: 16, zIndex: 5, padding: 32 },
   timeoutTitle:     { color: '#ef4444', fontSize: 20, fontWeight: '700', textAlign: 'center' },
   timeoutText:      { color: '#94a3b8', fontSize: 14, textAlign: 'center', marginBottom: 16 },
@@ -640,25 +529,12 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#fff' },
   chatList:    { maxHeight: height * 0.25, marginBottom: 8 },
   chatMessage: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4 },
-  chatUsername: { 
-    color: COLORS.gold, 
-    fontWeight: '700', 
-    fontSize: 13,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2
-  },
-  chatText: { 
-    color: '#fff', 
-    fontSize: 13,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2
-  },
-  chatInputRow:         { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  chatInput: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, color: 'rgba(255,255,255,0.9)', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
-  sendBtn:              { backgroundColor: COLORS.gold, borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
-  sendBtnText:          { color: '#fff', fontWeight: '700', fontSize: 13 },
+  chatUsername: { color: COLORS.gold, fontWeight: '700', fontSize: 13, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  chatText:     { color: '#fff', fontSize: 13, textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  chatInputRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  chatInput:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, color: 'rgba(255,255,255,0.9)', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  sendBtn:      { backgroundColor: COLORS.gold, borderRadius: 20, paddingHorizontal: 16, justifyContent: 'center' },
+  sendBtnText:  { color: '#fff', fontWeight: '700', fontSize: 13 },
   questionInputContainer: { marginBottom: 8 },
   questionHint:           { color: '#94a3b8', fontSize: 12, marginBottom: 8 },
   reactionsRow:  { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 8 },
@@ -666,42 +542,8 @@ const styles = StyleSheet.create({
   reactionEmoji: { fontSize: 26 },
   goBackBtn:     { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12, marginTop: 8 },
   goBackBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  connectingOverlay: {
-    position: 'absolute',
-    top: 100,
-    right: 16,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    zIndex: 50,
-  },
-  connectingText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  disabledContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-  },
-  disabledEmoji: {
-    fontSize: 40,
-    marginBottom: 12,
-  },
-  disabledTitle: {
-    color: '#ef4444',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  disabledText: {
-    color: '#94a3b8',
-    fontSize: 14,
-    textAlign: 'center',
-  },
+  disabledContainer: { alignItems: 'center', paddingVertical: 20, paddingHorizontal: 16 },
+  disabledEmoji: { fontSize: 40, marginBottom: 12 },
+  disabledTitle: { color: '#ef4444', fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  disabledText:  { color: '#94a3b8', fontSize: 14, textAlign: 'center' },
 });

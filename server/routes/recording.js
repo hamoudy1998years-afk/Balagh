@@ -1,5 +1,5 @@
 const express = require('express');
-const { GetObjectCommand, PutObjectAclCommand, HeadObjectCommand, S3Client } = require('@aws-sdk/client-s3');
+const { GetObjectCommand, PutObjectCommand, PutObjectAclCommand, HeadObjectCommand, CopyObjectCommand, S3Client } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const s3Client = new S3Client({
@@ -192,11 +192,48 @@ router.post('/stop', async (req, res) => {
       console.error(`[S3 ACL]  Failed after max attempts: ${key}`);
       return false;
     }
-    
-    // Start polling in background (don't await)
-    const m3u8Key = 'livestreams/' + fileName;
-    pollAndMakePublic(process.env.S3_BUCKET_NAME, m3u8Key);
 
+    // Download and re-upload to change ownership from Agora to server
+    async function downloadAndReupload(bucket, key, maxAttempts = 15) {
+      for (let i = 1; i <= maxAttempts; i++) {
+        try {
+          // Download the file using GetObject
+          const getCommand = new GetObjectCommand({ Bucket: bucket, Key: key });
+          const response = await s3Client.send(getCommand);
+          
+          // Collect stream data into buffer
+          const chunks = [];
+          for await (const chunk of response.Body) {
+            chunks.push(chunk);
+          }
+          const buffer = Buffer.concat(chunks);
+          
+          // Re-upload with public-read ACL (server now owns it)
+          await s3Client.send(new PutObjectCommand({
+            Bucket: bucket,
+            Key: key,
+            Body: buffer,
+            ContentType: 'application/vnd.apple.mpegurl',
+            ACL: 'public-read'
+          }));
+          
+          console.log(`[S3 REUPLOAD]  Fixed ownership for: ${key}`);
+          return true;
+        } catch (error) {
+          if (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) {
+            const delay = Math.min(1000 * Math.pow(2, i - 1), 30000);
+            console.log(`[S3 Poll] Attempt ${i}/${maxAttempts}: File not ready, waiting ${delay}ms`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          console.error(`[S3 REUPLOAD] Error attempt ${i}:`, error.message);
+          return false;
+        }
+      }
+      console.error(`[S3 REUPLOAD]  Failed after ${maxAttempts} attempts: ${key}`);
+      return false;
+    }
+    
     const fileList = [videoUrl];
 
     console.log('[RECORDING] Stop response:', JSON.stringify(serverResponse));
@@ -312,6 +349,92 @@ router.get('/livestreams/:id/play', async (req, res) => {
       error: 'Failed to generate signed URL', 
       details: err.message 
     });
+  }
+});
+
+// Webhook endpoint for Agora recording callback
+router.post('/webhook', async (req, res) => {
+  try {
+    console.log('[WEBHOOK] Raw body:', JSON.stringify(req.body, null, 2));
+    
+    // Agora payload structure: body.payload.details.fileList
+    const payload = req.body.payload || req.body;
+    const details = payload.details || {};
+    
+    const fileName = details.fileList || payload.fileList || payload.fileName;
+    const channelName = payload.cname || payload.channelName;
+    const sid = payload.sid;
+    
+    console.log('[WEBHOOK] Parsed:', { fileName, channelName, sid });
+    
+    // Always return 200 for health check
+    if (!fileName) {
+      console.log('[WEBHOOK] Health check or empty payload - returning 200');
+      return res.status(200).json({ success: true, message: 'Webhook received' });
+    }
+    
+    const s3Key = 'livestreams/' + fileName;
+    const bucket = process.env.S3_BUCKET_NAME;
+    
+    console.log('[WEBHOOK] Processing file:', s3Key);
+    
+    // Download from S3
+    const getCommand = new GetObjectCommand({ Bucket: bucket, Key: s3Key });
+    const response = await s3Client.send(getCommand);
+    
+    const chunks = [];
+    for await (const chunk of response.Body) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+    console.log('[WEBHOOK] Downloaded:', buffer.length, 'bytes');
+    
+    // Upload to Supabase Storage
+    const supabaseKey = 'livestreams/' + fileName;
+    
+    console.log('[WEBHOOK] Uploading to Supabase:', supabaseKey);
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('videos')
+      .upload(supabaseKey, buffer, {
+        contentType: 'application/vnd.apple.mpegurl',
+        upsert: true
+      });
+    
+    if (uploadError) {
+      throw uploadError;
+    }
+    
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('videos')
+      .getPublicUrl(supabaseKey);
+    
+    console.log('[WEBHOOK] Supabase URL:', publicUrl);
+    
+    // Find and update database using sid (session ID)
+    const { error: dbError } = await supabase
+      .from('livestreams')
+      .update({ video_url: publicUrl })
+      .like('video_url', '%' + sid + '%');
+    
+    if (dbError) {
+      console.error('[WEBHOOK] DB Error:', dbError);
+    }
+    
+    // Delete from S3
+    const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
+    await s3Client.send(new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: s3Key
+    }));
+    console.log('[WEBHOOK] Deleted from S3');
+    console.log('[WEBHOOK]  Complete');
+    
+    res.json({ success: true, url: publicUrl });
+  } catch (error) {
+    console.error('[WEBHOOK] Error:', error.message);
+    // Still return 200 so Agora doesn't retry
+    res.status(200).json({ success: false, error: error.message });
   }
 });
 

@@ -15,7 +15,7 @@ import ProfileScreen from './screens/ProfileScreen';
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import ProfileVideosScreen from './screens/ProfileVideosScreen';
-import LiveStreamScreen from './screens/LiveStreamScreen';
+import LiveStreamScreen from './screens/LiveStreamScreenLiveKit';
 import WatchLiveScreen from './screens/WatchLiveScreen';
 import { homeRefreshRef } from './utils/refs';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';

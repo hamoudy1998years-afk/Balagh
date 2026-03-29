@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { AccessToken } = require('livekit-server-sdk');
+const jwt = require('jsonwebtoken');
 
 // Generate LiveKit token for streaming
 router.post('/token', async (req, res) => {
@@ -18,22 +18,29 @@ router.post('/token', async (req, res) => {
       return res.status(500).json({ error: 'LiveKit credentials not configured' });
     }
     
-    const at = new AccessToken(apiKey, apiSecret, {
-      identity: userId,
-      name: userId,
-    });
+    console.log('[LIVEKIT] Generating token for:', userId, 'room:', roomName);
     
-    at.addGrant({
-      room: roomName,
-      roomJoin: true,
-      canPublish: isHost,
-      canSubscribe: true,
-      canPublishData: true,
-    });
+    // Create JWT payload exactly as LiveKit expects
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: apiKey,
+      sub: userId,
+      iat: now,
+      exp: now + (2 * 60 * 60),
+      nbf: now,
+      video: {
+        room: roomName,
+        roomJoin: true,
+        canPublish: isHost === true,
+        canSubscribe: true,
+        canPublishData: true,
+      }
+    };
     
-    const token = at.toJwt();
+    // Sign with HS256
+    const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
     
-    console.log('[LIVEKIT] Token generated for:', userId, 'room:', roomName, 'host:', isHost);
+    console.log('[LIVEKIT] Token generated successfully');
     
     res.json({
       token,

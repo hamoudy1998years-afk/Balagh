@@ -51,9 +51,51 @@ function VideoCard({
   const [isLiking, setIsLiking] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
-  const [videoUri, setVideoUri] = useState(item.video_url);
+  const [videoUri, setVideoUri] = useState(null);
+  const [isLoadingSignedUrl, setIsLoadingSignedUrl] = useState(false);
+
+  // Fetch signed URL for livestream videos
+  useEffect(() => {
+    const fetchSignedUrl = async () => {
+      console.log('[VideoCard] Fetching signed URL for:', item.id, item.video_url);
+      // Only fetch signed URL for livestream videos (m3u8 files)
+      if (item.video_url && item.video_url.includes('.m3u8')) {
+        setIsLoadingSignedUrl(true);
+        try {
+          const response = await fetch(
+            `https://balagh-server-production.up.railway.app/api/recording/livestreams/${item.id}/play`
+          );
+          const data = await response.json();
+          console.log('[VideoCard] Signed URL response:', data);
+          if (data.signedUrl) {
+            console.log('[VideoCard] Setting videoUri to signed URL');
+            setVideoUri(data.signedUrl);
+            console.log('[VideoCard] Got signed URL for livestream:', item.id);
+          } else {
+            // Fallback to original URL
+            setVideoUri(item.video_url);
+          }
+        } catch (error) {
+          console.log('[VideoCard] Error fetching signed URL:', error.message);
+          console.error('[VideoCard] Failed to get signed URL:', error);
+          // Fallback to original URL
+          setVideoUri(item.video_url);
+        } finally {
+          setIsLoadingSignedUrl(false);
+        }
+      } else {
+        // For regular videos, use original URL
+        setVideoUri(item.video_url);
+      }
+    };
+
+    if (item.id && item.video_url) {
+      fetchSignedUrl();
+    }
+  }, [item.id, item.video_url]);
+
   console.log('[VIDEO_PLAYER] Received item:', item);
-  console.log('[VIDEO_PLAYER] Video URI being used:', item.video_url);
+  console.log('[VIDEO_PLAYER] Video URI being used:', videoUri);
   console.log('[VIDEO_PLAYER] Item keys:', Object.keys(item));
   const { user: authUser, loading: authLoading } = useUser();
   const currentUserId = authUser?.id ?? null;
