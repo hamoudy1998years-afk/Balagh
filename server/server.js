@@ -9,6 +9,7 @@ app.set('trust proxy', true);
 
 // Import routes
 const recordingRoutes = require('./routes/recording');
+const livekitRoutes = require('./routes/livekit');
 
 // Force HTTPS in production
 if (process.env.NODE_ENV === 'production') {
@@ -120,6 +121,7 @@ app.get('/token', rateLimit, (req, res) => {
 
 // Mount recording routes
 app.use('/api/recording', recordingRoutes);
+app.use('/api/livekit', livekitRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
