@@ -1,5 +1,5 @@
 const express = require('express');
-const { GetObjectCommand, PutObjectAclCommand, S3Client } = require('@aws-sdk/client-s3');
+const { GetObjectCommand, PutObjectAclCommand, HeadObjectCommand, S3Client } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const s3Client = new S3Client({
@@ -142,19 +142,60 @@ router.post('/stop', async (req, res) => {
     console.log('[S3 UPLOAD] Filename:', fileName);
     console.log('[RECORDING] Full S3 URL:', videoUrl);
     
-    // Make the S3 object public after Agora upload
-    try {
-      const m3u8Key = 'livestreams/' + fileName;
-      await s3Client.send(new PutObjectAclCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: m3u8Key,
-        ACL: 'public-read'
-      }));
-      console.log('[S3 ACL] Made file public:', m3u8Key);
-    } catch (aclError) {
-      console.error('[S3 ACL] Failed to make file public:', aclError.message);
-      // Don't fail the request if ACL update fails - file might already be public
+    // Poll for object existence then make public (Agora uploads asynchronously)
+    async function pollAndMakePublic(bucket, key, maxAttempts = 15) {
+      for (let i = 1; i <= maxAttempts; i++) {
+        try {
+          await s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+          // If HeadObject succeeds, file exists - make it public
+          await s3Client.send(new PutObjectAclCommand({
+            Bucket: bucket,
+            Key: key,
+            ACL: 'public-read'
+          }));
+          console.log(`[S3 ACL]  Made file public: ${key} on attempt ${i}`);
+          return true;
+        } catch (error) {
+          const statusCode = error.$metadata?.httpStatusCode;
+          const errorName = error.name;
+          
+          // If 403, file exists but is private - try to set ACL immediately
+          if (statusCode === 403 || errorName === 'Forbidden') {
+            console.log(`[S3 Poll] Attempt ${i}: File exists (403), trying ACL...`);
+            try {
+              await s3Client.send(new PutObjectAclCommand({
+                Bucket: bucket,
+                Key: key,
+                ACL: 'public-read'
+              }));
+              console.log(`[S3 ACL]  Made file public: ${key} on attempt ${i}`);
+              return true;
+            } catch (aclError) {
+              console.log(`[S3 Poll] ACL failed, will retry...`);
+            }
+          }
+          
+          // If 404, file doesn't exist yet - wait and retry
+          if (statusCode === 404 || errorName === 'NotFound') {
+            const delay = Math.min(1000 * Math.pow(2, i - 1), 30000);
+            console.log(`[S3 Poll] Attempt ${i}/${maxAttempts}: File not ready, waiting ${delay}ms`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          
+          // For other errors, log and retry
+          console.error(`[S3 Poll] Attempt ${i} error:`, errorName, statusCode, error.message);
+          const delay = Math.min(1000 * Math.pow(2, i - 1), 30000);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+      console.error(`[S3 ACL]  Failed after max attempts: ${key}`);
+      return false;
     }
+    
+    // Start polling in background (don't await)
+    const m3u8Key = 'livestreams/' + fileName;
+    pollAndMakePublic(process.env.S3_BUCKET_NAME, m3u8Key);
 
     const fileList = [videoUrl];
 
@@ -217,15 +258,13 @@ router.post('/stop', async (req, res) => {
   }
 });
 
-// Generate signed URL for secure video playback
+// Generate pre-signed URL for video playback (temporary fix until CloudFront is ready)
+// This works even if the S3 object is private - no ACL changes needed
 router.get('/livestreams/:id/play', async (req, res) => {
   try {
-    console.log('[DEBUG] AWS_KEY exists:', !!process.env.AWS_ACCESS_KEY_ID);
-    console.log('[DEBUG] AWS_SECRET exists:', !!process.env.AWS_SECRET_ACCESS_KEY);
-    console.log('[DEBUG] BUCKET:', process.env.S3_BUCKET_NAME);
-    console.log('[DEBUG] REGION:', process.env.S3_REGION);
-    console.log('[DEBUG] Livestream ID:', req.params.id);
+    console.log('[SIGNED URL] Request for livestream:', req.params.id);
     
+    // Get the livestream record from database
     const { data: livestream, error } = await supabase
       .from('livestreams')
       .select('video_url')
@@ -233,25 +272,46 @@ router.get('/livestreams/:id/play', async (req, res) => {
       .single();
     
     if (error || !livestream) {
+      console.error('[SIGNED URL] Livestream not found:', req.params.id);
       return res.status(404).json({ error: 'Livestream not found' });
     }
     
-    const urlParts = livestream.video_url.split('/');
-    const key = 'livestreams/' + urlParts[urlParts.length - 1];
+    // Extract the S3 key from the stored URL
+    // URL format: https://bucket.s3.region.amazonaws.com/livestreams/filename.m3u8
+    const urlParts = livestream.video_url.split('/livestreams/');
+    if (urlParts.length !== 2) {
+      console.error('[SIGNED URL] Invalid URL format:', livestream.video_url);
+      return res.status(500).json({ error: 'Invalid video URL format' });
+    }
     
+    const fileName = urlParts[1];
+    const s3Key = `livestreams/${fileName}`;
+    
+    console.log('[SIGNED URL] Generating signed URL for key:', s3Key);
+    
+    // Generate pre-signed URL valid for 1 hour (3600 seconds)
     const command = new GetObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
-      Key: key
+      Key: s3Key
     });
     
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     
-    res.json({ signedUrl, expiresIn: 3600 });
+    console.log('[SIGNED URL] Generated successfully');
+    
+    res.json({ 
+      signedUrl, 
+      expiresIn: 3600,
+      // Also return the original URL for reference (optional)
+      originalUrl: livestream.video_url 
+    });
     
   } catch (err) {
-    console.error('[SIGNED URL] Full error:', err);
-    console.error('[SIGNED URL] Error message:', err.message);
-    res.status(500).json({ error: 'Failed to generate signed URL', details: err.message });
+    console.error('[SIGNED URL] Error:', err);
+    res.status(500).json({ 
+      error: 'Failed to generate signed URL', 
+      details: err.message 
+    });
   }
 });
 
