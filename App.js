@@ -45,6 +45,10 @@ import { loadBannedWords } from './utils/moderation';
 import { UserProvider } from './context/UserContext';
 import { DownloadProvider } from './context/DownloadContext';
 import GlobalVideoOptionsSheet from './components/GlobalVideoOptionsSheet';
+import * as SplashScreen from 'expo-splash-screen';
+
+// Prevent splash screen from hiding automatically
+SplashScreen.preventAutoHideAsync();
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -239,9 +243,24 @@ function App() {
   const [session, setSession] = useState(undefined);
   const [ageVerified, setAgeVerified] = useState(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState(null);
+  const [jsSplashVisible, setJsSplashVisible] = useState(true);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
   const navigationRef = useRef(null);
+
+  // Splash screen hide effect
+  useEffect(() => {
+    async function prepare() {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        setJsSplashVisible(false);
+      }
+    }
+    prepare();
+  }, []);
 
   useEffect(() => {
     async function checkAge() {
@@ -397,11 +416,17 @@ function App() {
     }
   }
 
-  if (ageVerified === null || onboardingCompleted === null) {
+  if (jsSplashVisible || ageVerified === null || onboardingCompleted === null) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: '#0d1b6e' }}>
         <SystemBars style="light" />
-        <ActivityIndicator size="large" color="#FFD700" />
+        <Image
+          source={require('./assets/splash-icon.png')}
+          style={{ flex: 1, width: '100%', height: '100%' }}
+          resizeMode="cover"
+          fadeDuration={0}
+          onLoadEnd={() => SplashScreen.hideAsync()}
+        />
       </View>
     );
   }

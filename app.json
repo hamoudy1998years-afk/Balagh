@@ -12,7 +12,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "cover",
-      "backgroundColor": "#0a1172"
+      "backgroundColor": "#0d1b6e"
     },
     "ios": {
       "supportsTablet": false,
@@ -28,6 +28,11 @@
     "android": {
       "minSdkVersion": 24,
       "largeHeap": true,
+      "statusBar": {
+        "translucent": true,
+        "barStyle": "light-content",
+        "backgroundColor": "#00000000"
+      },
       "navigationBar": {
         "backgroundColor": "#000000",
         "barStyle": "light-content"
@@ -56,6 +61,7 @@
     },
     "plugins": [
       "./plugins/withForceLightStatusBar.js",
+      "./plugins/withAndroidSplashIcon.js",
       [
         "react-native-edge-to-edge",
         {
