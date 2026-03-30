@@ -358,7 +358,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   };
 
   const confirmEndStream = useCallback(async () => {
-    console.log('[END] Starting cleanup');
+    console.log('[END] Starting cleanup - deleting stream to save storage');
     console.log('[END] currentStreamIdRef.current =', currentStreamIdRef.current);
 
     setShowEndModal(false);
@@ -366,22 +366,19 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
     try {
       if (currentStreamIdRef.current) {
-        console.log('[END] Updating Supabase for stream:', currentStreamIdRef.current);
-        const { error: updateError } = await supabase
+        console.log('[END] Deleting stream from Supabase:', currentStreamIdRef.current);
+        const { error: deleteError } = await supabase
           .from('live_streams')
-          .update({
-            is_live: false,
-            ended_at: new Date().toISOString(),
-          })
+          .delete()
           .eq('id', currentStreamIdRef.current);
 
-        if (updateError) {
-          console.error('[END] Supabase update error:', updateError);
+        if (deleteError) {
+          console.error('[END] Supabase delete error:', deleteError);
         } else {
-          console.log('[END] Supabase updated successfully');
+          console.log('[END] Stream deleted successfully - storage saved');
         }
       } else {
-        console.warn('[END] No stream ID found — skipping Supabase update');
+        console.warn('[END] No stream ID found — nothing to delete');
       }
     } catch (e) {
       console.error('[END] Supabase cleanup error:', e);
@@ -563,14 +560,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
               trackColor={{ false: '#767577', true: COLORS.gold }}
               thumbColor={allowQuestions ? '#fff' : '#f4f3f4'}
             />
-          </View>
-
-          {/* No recording notice */}
-          <View style={styles.noticeBox}>
-            <Text style={styles.noticeIcon}>📢</Text>
-            <Text style={styles.noticeText}>
-              Live streams are not saved or recorded. Viewers can only watch while you are live.
-            </Text>
           </View>
 
           <AnimatedButton style={styles.goLiveBtn} onPress={startStream}>
