@@ -358,18 +358,30 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   };
 
   const confirmEndStream = useCallback(async () => {
+    console.log('[END] Starting cleanup');
+    console.log('[END] currentStreamIdRef.current =', currentStreamIdRef.current);
+
     setShowEndModal(false);
     setIsEnding(true);
 
     try {
       if (currentStreamIdRef.current) {
-        await supabase
+        console.log('[END] Updating Supabase for stream:', currentStreamIdRef.current);
+        const { error: updateError } = await supabase
           .from('live_streams')
           .update({
             is_live: false,
             ended_at: new Date().toISOString(),
           })
           .eq('id', currentStreamIdRef.current);
+
+        if (updateError) {
+          console.error('[END] Supabase update error:', updateError);
+        } else {
+          console.log('[END] Supabase updated successfully');
+        }
+      } else {
+        console.warn('[END] No stream ID found — skipping Supabase update');
       }
     } catch (e) {
       console.error('[END] Supabase cleanup error:', e);
