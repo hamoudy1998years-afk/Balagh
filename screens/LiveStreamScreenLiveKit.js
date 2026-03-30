@@ -46,7 +46,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const [roomName, setRoomName] = useState('');
   const [error, setError] = useState(null);
   const [localVideoTrack, setLocalVideoTrack] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState('connected'); // 'connected' | 'reconnecting' | 'failed'
+  const [connectionStatus, setConnectionStatus] = useState('connected');
 
   // --- Stream state ---
   const [streamId, setStreamId] = useState(null);
@@ -56,7 +56,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
   // --- Pre-stream settings ---
   const [allowQuestions, setAllowQuestions] = useState(true);
-  const [saveToProfile, setSaveToProfile] = useState(true);
+  // NOTE: saveToProfile removed — recording not available on free LiveKit plan
 
   // --- UI state ---
   const [showEndModal, setShowEndModal] = useState(false);
@@ -96,7 +96,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Camera permission
     (async () => {
       const { status } = await Camera.requestCameraPermissionsAsync();
       setHasPermission(status === 'granted');
@@ -105,11 +104,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       }
     })();
 
-    // Room name based on user ID
     const name = `bushrann_${currentUser?.id ?? Date.now()}_${Date.now()}`;
     setRoomName(name);
 
-    // Keyboard listeners
     const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
       setKeyboardHeight(e.endCoordinates.height);
     });
@@ -117,7 +114,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       setKeyboardHeight(0);
     });
 
-    // AppState listener – detect long background time
     appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
         backgroundTimeRef.current = Date.now();
@@ -125,7 +121,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         const timeInBackground = Date.now() - backgroundTimeRef.current;
         backgroundTimeRef.current = null;
         if (timeInBackground > 30000 && isConnectedRef.current) {
-          // LiveKit handles reconnection automatically; just log it
           console.log('[LIVEKIT] App returned after long background, checking connection...');
         }
       }
@@ -208,14 +203,12 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     setError(null);
 
     try {
-      // Remove any existing live stream record for this user
       await supabase
         .from('live_streams')
         .delete()
         .eq('user_id', currentUser.id)
         .eq('is_live', true);
 
-      // Fetch user profile for username / avatar
       const { data: profile } = await supabase
         .from('profiles')
         .select('username, avatar_url')
@@ -223,7 +216,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         .single();
       setUsername(profile?.username ?? 'Scholar');
 
-      // Fetch LiveKit JWT token from server
       const response = await fetch(`${SERVER_URL}/api/livekit/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -240,7 +232,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
       const { token, url } = await response.json();
 
-      // Insert live stream record into Supabase
       const { data: stream, error: streamError } = await supabase
         .from('live_streams')
         .insert({
@@ -263,14 +254,12 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       setStreamId(currentStreamId);
       currentStreamIdRef.current = currentStreamId;
 
-      // Create LiveKit Room
       const room = new Room({
         adaptiveStream: true,
         dynacast: true,
       });
       roomRef.current = room;
 
-      // ── LiveKit event handlers ──────────────────────────────────────────────
       room.on(RoomEvent.Connected, () => {
         console.log('[LIVEKIT] Connected');
         setIsConnected(true);
@@ -302,11 +291,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           setLocalVideoTrack(publication.track);
         }
       });
-      // ───────────────────────────────────────────────────────────────────────
 
       await room.connect(url, token);
 
-      // Enable camera + mic after a short delay to fix Android "No current Activity" error
       setTimeout(async () => {
         const tryEnableCamera = async (attempt = 1) => {
           try {
@@ -316,7 +303,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           } catch (e) {
             console.error(`[LIVEKIT] Camera error (attempt ${attempt}):`, e.message);
             if (attempt < 4) {
-              const delay = attempt * 3000; // 3s, 6s, 9s
+              const delay = attempt * 3000;
               console.log(`[LIVEKIT] Retrying in ${delay}ms...`);
               setTimeout(() => tryEnableCamera(attempt + 1), delay);
             } else {
@@ -327,12 +314,10 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         tryEnableCamera();
       }, 5000);
 
-      // Stream duration timer
       durationIntervalRef.current = setInterval(() => {
         setStreamDuration(prev => prev + 1);
       }, 1000);
 
-      // Ping interval to keep stream record alive
       pingInterval.current = setInterval(async () => {
         if (currentStreamIdRef.current) {
           await supabase
@@ -342,7 +327,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         }
       }, 5000);
 
-      // Supabase realtime subscriptions
       subscribeToChat(currentStreamId);
       subscribeToQuestions(currentStreamId);
 
@@ -381,7 +365,10 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       if (currentStreamIdRef.current) {
         await supabase
           .from('live_streams')
-          .delete()
+          .update({
+            is_live: false,
+            ended_at: new Date().toISOString(),
+          })
           .eq('id', currentStreamIdRef.current);
       }
     } catch (e) {
@@ -566,19 +553,12 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
             />
           </View>
 
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Save to Profile</Text>
-              <Text style={styles.settingDescription}>
-                Save this stream to your profile after it ends
-              </Text>
-            </View>
-            <Switch
-              value={saveToProfile}
-              onValueChange={setSaveToProfile}
-              trackColor={{ false: '#767577', true: COLORS.gold }}
-              thumbColor={saveToProfile ? '#fff' : '#f4f3f4'}
-            />
+          {/* No recording notice */}
+          <View style={styles.noticeBox}>
+            <Text style={styles.noticeIcon}>📢</Text>
+            <Text style={styles.noticeText}>
+              Live streams are not saved or recorded. Viewers can only watch while you are live.
+            </Text>
           </View>
 
           <AnimatedButton style={styles.goLiveBtn} onPress={startStream}>
@@ -601,7 +581,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     <View style={styles.container}>
       <SystemBars style="light" />
 
-      {/* Camera feed – full screen */}
       {localVideoTrack ? (
         <VideoView
           style={StyleSheet.absoluteFill}
@@ -615,7 +594,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         </View>
       )}
 
-      {/* Network Reconnection Overlay */}
       {connectionStatus !== 'connected' && (
         <View style={styles.reconnectOverlay}>
           {connectionStatus === 'reconnecting' ? (
@@ -634,7 +612,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
       {/* TOP BAR */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        {/* LIVE badge + duration */}
         <View style={styles.liveBadge}>
           <View style={styles.liveDot} />
           <Text style={styles.liveText}>LIVE</Text>
@@ -645,17 +622,14 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           </Text>
         </View>
 
-        {/* Viewer count – tappable to open viewer list */}
         <AnimatedButton style={styles.viewerBadge} onPress={() => setShowViewerList(!showViewerList)}>
           <Text style={styles.viewerText}>👁️ {viewerCount}</Text>
         </AnimatedButton>
 
-        {/* End button */}
         <AnimatedButton style={styles.endBtn} onPress={endStream}>
           <Text style={styles.endBtnText}>End</Text>
         </AnimatedButton>
 
-        {/* Viewer List Panel */}
         {showViewerList && (
           <View style={styles.viewerListPanel}>
             <View style={styles.viewerListHeader}>
@@ -741,9 +715,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         </View>
       )}
 
-      {/* BOTTOM PANEL – Chat / Questions tabs */}
+      {/* BOTTOM PANEL */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
-        {/* Tabs */}
         <View style={styles.tabs}>
           <AnimatedButton
             style={[styles.tab, activeTab === 'chat' && styles.tabActive]}
@@ -761,7 +734,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           </AnimatedButton>
         </View>
 
-        {/* Chat Tab */}
         {activeTab === 'chat' && (
           <>
             <FlatList
@@ -794,7 +766,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           </>
         )}
 
-        {/* Questions Tab */}
         {activeTab === 'questions' && (
           <FlatList
             data={questions}
@@ -823,7 +794,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           />
         )}
 
-        {/* Camera Controls */}
         <View style={styles.cameraControls}>
           <AnimatedButton style={styles.flipBtnBottom} onPress={switchCamera}>
             <Text style={styles.flipBtnBottomText}>🔄 Flip Camera</Text>
@@ -865,7 +835,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  // Base
   container: { flex: 1, backgroundColor: '#000' },
   loadingContainer: {
     flex: 1,
@@ -902,6 +871,28 @@ const styles = StyleSheet.create({
   settingInfo: { flex: 1, marginRight: 12 },
   settingLabel: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
   settingDescription: { color: 'rgba(255,255,255,0.6)', fontSize: 13 },
+
+  // No recording notice
+  noticeBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 12,
+    padding: 14,
+    width: '100%',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    gap: 10,
+  },
+  noticeIcon: { fontSize: 18 },
+  noticeText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+
   goLiveBtn: {
     backgroundColor: '#ef4444',
     borderRadius: 12,
@@ -909,7 +900,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     width: '100%',
     alignItems: 'center',
-    marginTop: 14,
+    marginTop: 4,
   },
   goLiveBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   cancelBtn: {

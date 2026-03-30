@@ -20,7 +20,6 @@ router.post('/token', async (req, res) => {
     
     console.log('[LIVEKIT] Generating token for:', userId, 'room:', roomName);
     
-    // Create JWT payload exactly as LiveKit expects
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: apiKey,
@@ -37,7 +36,6 @@ router.post('/token', async (req, res) => {
       }
     };
     
-    // Sign with HS256
     const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
     
     console.log('[LIVEKIT] Token generated successfully');
