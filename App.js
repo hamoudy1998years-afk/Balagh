@@ -1,4 +1,4 @@
-import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert } from 'react-native';
+﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -108,19 +108,16 @@ function MainTabs({ session }) {
   const [homeKey, setHomeKey] = useState(0);
   const navigation = useNavigation();
 
-  // FIX: Removed !activeTab condition — was causing refresh instead of navigate
   const handleHomePress = () => {
     const state = navigation.getState();
     const mainRoute = state?.routes?.find(r => r.name === 'Main');
     const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
 
     if (activeTab === 'Home') {
-      // Already on Home tab — refresh the feed
       if (homeRefreshRef.current) {
         homeRefreshRef.current();
       }
     } else {
-      // On another tab or screen — navigate to Home
       navigation.navigate(ROUTES.MAIN, { screen: 'Home' });
     }
   };
@@ -248,11 +245,11 @@ function App() {
   usePushNotifications();
   const navigationRef = useRef(null);
 
-  // Splash screen hide effect
+  // Splash screen prepare effect
   useEffect(() => {
     async function prepare() {
       try {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Add any pre-load tasks here if needed
       } catch (e) {
         console.warn(e);
       } finally {
@@ -261,6 +258,17 @@ function App() {
     }
     prepare();
   }, []);
+
+  // ✅ FIX: Hide native splash only when ALL conditions are ready
+  useEffect(() => {
+    if (!jsSplashVisible && ageVerified !== null && onboardingCompleted !== null) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          SplashScreen.hideAsync();
+        });
+      });
+    }
+  }, [jsSplashVisible, ageVerified, onboardingCompleted]);
 
   useEffect(() => {
     async function checkAge() {
@@ -416,6 +424,7 @@ function App() {
     }
   }
 
+  // Show JS splash while any condition is still loading
   if (jsSplashVisible || ageVerified === null || onboardingCompleted === null) {
     return (
       <View style={{ flex: 1, backgroundColor: '#0d1b6e' }}>
@@ -425,7 +434,6 @@ function App() {
           style={{ flex: 1, width: '100%', height: '100%' }}
           resizeMode="cover"
           fadeDuration={0}
-          onLoadEnd={() => SplashScreen.hideAsync()}
         />
       </View>
     );
