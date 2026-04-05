@@ -297,39 +297,9 @@ export default function NotificationsScreen({ navigation }) {
       
       {/* Offline floating pill */}
       {showOffline && (
-        <View style={{
-          position: 'absolute',
-          top: 88,
-          alignSelf: 'center',
-          backgroundColor: '#1a2e44',
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingHorizontal: 16,
-          paddingVertical: 8,
-          borderRadius: 20,
-          borderWidth: 1,
-          borderColor: '#ff4757',
-          zIndex: 999,
-          elevation: 5,
-          shadowColor: '#000',
-          shadowOffset: {width: 0, height: 2},
-          shadowOpacity: 0.25,
-          shadowRadius: 3.84,
-        }}>
-          <View style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: '#ff4757',
-            marginRight: 8
-          }} />
-          <Text style={{
-            color: '#fff',
-            fontSize: 13,
-            fontWeight: '600'
-          }}>
-            No internet connection
-          </Text>
+        <View style={styles.offlinePill}>
+          <View style={styles.offlineDot} />
+          <Text style={styles.offlinePillText}>No internet connection</Text>
         </View>
       )}
       
@@ -390,20 +360,20 @@ const styles = StyleSheet.create({
   container:         { flex: 1, backgroundColor: '#ffffff' },
   loadingContainer:  { flex: 1, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', gap: 12 },
   centered:          { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  header:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: '#e5e5e5' },
-  headerTitle:       { fontSize: 20, fontWeight: '800', color: '#1a2e44' },
-  unreadBadge:       { fontSize: 14, fontWeight: '700', color: COLORS.gold },
+  header:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 0.5, borderBottomColor: '#e5e5e5', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, elevation: 2 },
+  headerTitle:       { fontSize: 22, fontWeight: '800', color: '#1a2e44' },
+  unreadBadge:       { fontSize: 15, fontWeight: '700', color: COLORS.gold },
   headerActions:     { flexDirection: 'row', gap: 12 },
-  headerBtn:         { paddingVertical: 10, paddingHorizontal: 8, minHeight: 36, justifyContent: 'center' },
+  headerBtn:         { paddingVertical: 10, paddingHorizontal: 8, minHeight: 36, justifyContent: 'center', backgroundColor: '#f5f5f5', borderRadius: 10 },
   headerBtnText:     { fontSize: 13, color: '#888888', fontWeight: '600' },
-  hintBanner:        { backgroundColor: '#f5f5f5', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: '#e5e5e5' },
-  hintBannerText:    { fontSize: 12, color: '#aaaaaa', textAlign: 'center' },
+  hintBanner:        { backgroundColor: '#fff8ec', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: '#f0e0c0' },
+  hintBannerText:    { fontSize: 12, color: '#c8a04a', textAlign: 'center' },
   deleteBackground:  { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.live, justifyContent: 'center', alignItems: 'center' },
   deleteBackgroundText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  notificationRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#ffffff' },
-  unreadRow:         { backgroundColor: `${COLORS.gold}10` },
+  notificationRow:   { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#ffffff', borderRadius: 12, marginHorizontal: 8, marginVertical: 2 },
+  unreadRow:         { backgroundColor: `${COLORS.gold}15` },
   unreadDot:         { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.gold, marginRight: 8 },
-  iconContainer:     { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  iconContainer:     { width: 44, height: 44, borderRadius: 22, backgroundColor: '#fff3e0', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   icon:              { fontSize: 20 },
   textContent:       { flex: 1 },
   message:           { fontSize: 14, color: '#888888', fontWeight: '500', lineHeight: 20 },
@@ -413,9 +383,40 @@ const styles = StyleSheet.create({
   swipeHintText:     { fontSize: 12, color: '#cccccc' },
   separator:         { height: 0.5, backgroundColor: '#e5e5e5', marginLeft: 72 },
   emptyIcon:         { fontSize: 52 },
-  emptyText:         { fontSize: 17, fontWeight: '700', color: '#1a2e44' },
+  emptyText:         { fontSize: 18, fontWeight: '800', color: '#1a2e44' },
   emptySubtext:      { fontSize: 14, color: '#888888', textAlign: 'center', paddingHorizontal: 40, lineHeight: 20 },
   loadingText:       { fontSize: 14, color: '#888888' },
   offlineBanner:     { backgroundColor: '#B76E79', paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center' },
   offlineBannerText: { color: '#ffffff', fontSize: 13, fontWeight: '600' },
+  offlinePill: {
+    position: 'absolute',
+    top: 88,
+    alignSelf: 'center',
+    backgroundColor: '#1a2e44',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#ff4757',
+    zIndex: 999,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  offlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ff4757',
+    marginRight: 8,
+  },
+  offlinePillText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });
