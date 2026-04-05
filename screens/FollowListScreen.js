@@ -84,7 +84,7 @@ export default function FollowListScreen({ route, navigation }) {
   useFocusEffect(
     useCallback(() => {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      const entry = SystemBars.pushStackEntry({ style: 'light' });
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
       return () => SystemBars.popStackEntry(entry);
     }, [])
   );
@@ -157,7 +157,7 @@ export default function FollowListScreen({ route, navigation }) {
 
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity onPress={navigation.goBack} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>←</Text>
+          <Text style={styles.backBtnText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
           {username ? `@${username}'s ${type === 'followers' ? 'Followers' : 'Following'}` : (type === 'followers' ? 'Followers' : 'Following')}
@@ -213,7 +213,7 @@ export default function FollowListScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#ffffff',
   },
   centered: {
     flex: 1,
@@ -226,30 +226,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e1e1e',
+    borderBottomColor: '#f1f5f9',
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
-  backBtn: { padding: 4, width: 40 },
-  backBtnText: { color: '#fff', fontSize: 24, fontWeight: '700' },
+  backBtn: {
+    padding: 4,
+    width: 60,
+  },
+  backBtnText: {
+    color: '#1a2e44',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   headerTitle: {
-    color: '#fff',
-    fontSize: 18,
+    color: '#1a2e44',
+    fontSize: 17,
     fontWeight: '800',
     textAlign: 'center',
+    letterSpacing: -0.3,
   },
   userRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: '#ffffff',
   },
   avatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#f1f5f9',
   },
   avatarFallback: {
     width: 50,
@@ -260,54 +275,64 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarLetter: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 20,
     fontWeight: '700',
   },
   userInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 14,
   },
   displayName: {
-    color: '#fff',
+    color: '#1a2e44',
     fontSize: 15,
     fontWeight: '700',
   },
   username: {
-    color: '#64748b',
+    color: '#94a3b8',
     fontSize: 13,
     marginTop: 2,
+    fontWeight: '500',
   },
   followBtn: {
     backgroundColor: COLORS.gold,
-    borderRadius: 8,
-    paddingVertical: 7,
-    paddingHorizontal: 16,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
     alignItems: 'center',
     minHeight: 36,
     justifyContent: 'center',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   followingBtn: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: COLORS.gold,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   followBtnText: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 13,
     fontWeight: '700',
   },
   followingBtnText: {
-    color: COLORS.goldDark,
+    color: COLORS.gold,
   },
   separator: {
     height: 1,
-    backgroundColor: '#1e1e1e',
-    marginLeft: 78,
+    backgroundColor: '#f1f5f9',
+    marginLeft: 84,
   },
-  emptyIcon: { fontSize: 48 },
+  emptyIcon: {
+    fontSize: 52,
+  },
   emptyText: {
-    color: '#64748b',
+    color: '#94a3b8',
     fontSize: 15,
     fontWeight: '600',
   },
