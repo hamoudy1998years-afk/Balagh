@@ -106,6 +106,7 @@ export default function VideoDetailScreen({ navigation }) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={COLORS.gold} size="large" />
+        <Text style={styles.loadingText}>Loading video...</Text>
       </View>
     );
   }
@@ -113,7 +114,7 @@ export default function VideoDetailScreen({ navigation }) {
   if (error || !video) {
     return (
       <View style={styles.center}>
-        <Text style={{ color: '#fff', fontSize: 16 }}>Video not found.</Text>
+        <Text style={styles.errorText}>Video not found.</Text>
       </View>
     );
   }
@@ -148,7 +149,29 @@ export default function VideoDetailScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  center: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  backBtn: { position: 'absolute', top: 48, left: 16, zIndex: 99 }, // top overridden inline with insets
-  backText: { color: '#fff', fontSize: 28, fontWeight: '700' },
+  center: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  backBtn: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 99,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  backText: { color: '#ffffff', fontSize: 22, fontWeight: '700' },
+  errorText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  loadingText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    marginTop: 8,
+  },
 });
