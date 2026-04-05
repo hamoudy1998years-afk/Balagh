@@ -107,7 +107,7 @@ export default function EditProfileScreen({ navigation }) {
         const { error: profileError } = await supabase.from('profiles').update({ username: username.trim() }).eq('id', user.id);
         if (profileError) throw profileError;
         if (scholarId) {
-          const stripHtml = (s: string) => s.replace(/<[^>]*>/g, '').trim();
+          const stripHtml = (s) => s.replace(/<[^>]*>/g, '').trim();
           const { error: scholarError } = await supabase.from('scholar_applications').update({
             full_name: stripHtml(realName),
             age: age ? parseInt(age) : null,
@@ -148,8 +148,8 @@ export default function EditProfileScreen({ navigation }) {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
-      <SystemBars style="light" />
+    <View style={{ flex: 1, backgroundColor: '#ffffff' }}>
+      <SystemBars style="dark" />
       <ScrollView
         ref={scrollRef}
         style={epStyles.container}
@@ -182,7 +182,7 @@ export default function EditProfileScreen({ navigation }) {
           placeholder="@username"
           onFocus={() => scrollToField(0)}
         />
-        <Text style={{ color: '#4b5563', fontSize: 12, marginTop: -10, marginBottom: 14 }}>
+        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: -10, marginBottom: 14 }}>
           No spaces allowed. Use letters, numbers, dots (.) or underscores (_) only.
         </Text>
 
@@ -266,7 +266,7 @@ export default function EditProfileScreen({ navigation }) {
               maxLength={150}
               onFocus={() => scrollToField(200)}
             />
-            <Text style={{ color: COLORS.textGray, fontSize: 12, textAlign: 'right', marginTop: -10, marginBottom: 14 }}>{bio.length}/150</Text>
+            <Text style={{ color: '#94a3b8', fontSize: 12, textAlign: 'right', marginTop: -10, marginBottom: 14 }}>{bio.length}/150</Text>
           </>
         )}
 
@@ -292,20 +292,118 @@ export default function EditProfileScreen({ navigation }) {
 }
 
 const epStyles = StyleSheet.create({
-  loadingContainer: { flex: 1, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center' },
-  container: { flex: 1, backgroundColor: COLORS.bgDark, paddingHorizontal: 24 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  backBtn: { padding: 4 },
-  backBtnText: { color: COLORS.textWhite, fontSize: 24, fontWeight: '700' },
-  title: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite },
-  scholarNotice: { backgroundColor: `${COLORS.gold}22`, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 16, marginBottom: 16, alignItems: 'center' },
-  scholarNoticeText: { color: COLORS.gold, fontSize: 14, fontWeight: '700' },
-  sectionTitle: { color: COLORS.gold, fontSize: 13, fontWeight: '700', marginBottom: 10, marginTop: 4, textTransform: 'uppercase', letterSpacing: 1 },
-  label: { color: COLORS.textGray, fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  input: { width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 14, color: COLORS.textWhite, fontSize: 15, marginBottom: 14 },
-  multilineInput: { height: 80, textAlignVertical: 'top' },
-  saveBtn: { width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 10, marginTop: 6 },
-  saveBtnText: { color: COLORS.navy, fontSize: 16, fontWeight: '700' },
-  cancelBtn: { width: '100%', borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 14, alignItems: 'center', marginBottom: 20 },
-  cancelBtnText: { color: COLORS.textGray, fontSize: 16 },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  container: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 24,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  backBtn: {
+    padding: 4,
+  },
+  backBtnText: {
+    color: '#1a2e44',
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1a2e44',
+    letterSpacing: -0.3,
+  },
+  scholarNotice: {
+    backgroundColor: 'rgba(212,175,55,0.1)',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.2)',
+  },
+  scholarNoticeText: {
+    color: COLORS.gold,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  sectionTitle: {
+    color: COLORS.gold,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 12,
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  label: {
+    color: '#1a2e44',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 6,
+    marginLeft: 2,
+  },
+  input: {
+    width: '100%',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 14,
+    color: '#1a2e44',
+    fontSize: 15,
+    marginBottom: 14,
+  },
+  multilineInput: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  saveBtn: {
+    width: '100%',
+    backgroundColor: COLORS.gold,
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 10,
+    marginTop: 6,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  saveBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  cancelBtn: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 20,
+    backgroundColor: '#f8fafc',
+  },
+  cancelBtnText: {
+    color: '#94a3b8',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
