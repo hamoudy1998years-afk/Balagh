@@ -125,7 +125,7 @@ export default function AvatarCropScreen({ route, navigation }) {
       {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={navigation.goBack} style={styles.topBtn}>
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>✕ Cancel</Text>
         </TouchableOpacity>
         <Text style={styles.topTitle}>Move and Scale</Text>
         <TouchableOpacity onPress={handleCrop} style={styles.doneBtn} disabled={processing}>
@@ -136,7 +136,11 @@ export default function AvatarCropScreen({ route, navigation }) {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.hint}>Pinch to zoom • Drag to reposition</Text>
+      <View style={styles.hintContainer}>
+        <Text style={styles.hintIcon}>◆</Text>
+        <Text style={styles.hint}>Pinch to zoom    Drag to reposition</Text>
+        <Text style={styles.hintIcon}>◆</Text>
+      </View>
 
       {/* Crop area */}
       <View style={styles.cropArea}>
@@ -163,27 +167,103 @@ export default function AvatarCropScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
   topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: '#1a2e44',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
-  topTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  topBtn: { minWidth: 70 },
-  cancelText: { color: '#a0a0b0', fontSize: 15, fontWeight: '600' },
+  topTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+  },
+  topBtn: {
+    minWidth: 80,
+  },
+  cancelText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   doneBtn: {
-    backgroundColor: COLORS.gold, borderRadius: 20,
-    paddingHorizontal: 18, paddingVertical: 7, minWidth: 70, alignItems: 'center',
+    backgroundColor: COLORS.gold,
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    minWidth: 80,
+    alignItems: 'center',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
-  doneText: { color: COLORS.navy, fontSize: 15, fontWeight: '700' },
-  hint: { color: '#505070', fontSize: 12, textAlign: 'center', marginTop: 10, fontStyle: 'italic' },
-  cropArea: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  gestureLayer: { width, height, alignItems: 'center', justifyContent: 'center' },
-  image: { width: CROP_SIZE, height: CROP_SIZE },
-  overlay: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.75)' },
+  doneText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  hintContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  hintIcon: {
+    color: COLORS.gold,
+    fontSize: 8,
+    opacity: 0.6,
+  },
+  hint: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: '500',
+    letterSpacing: 0.3,
+  },
+  cropArea: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  gestureLayer: {
+    width: width,
+    height: height,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  image: {
+    width: CROP_SIZE,
+    height: CROP_SIZE,
+  },
+  overlay: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0,0,0,0.78)',
+  },
   circleBorder: {
-    position: 'absolute', width: CROP_SIZE, height: CROP_SIZE,
-    borderRadius: CROP_SIZE / 2, borderWidth: 2, borderColor: COLORS.gold,
+    position: 'absolute',
+    width: CROP_SIZE,
+    height: CROP_SIZE,
+    borderRadius: CROP_SIZE / 2,
+    borderWidth: 2,
+    borderColor: COLORS.gold,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
   },
 });
