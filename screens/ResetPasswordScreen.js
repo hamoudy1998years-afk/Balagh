@@ -81,7 +81,7 @@ export default function ResetPasswordScreen({ navigation }) {
         <TextInput
           style={styles.input}
           placeholder="New Password"
-          placeholderTextColor="#4b5563"
+          placeholderTextColor="rgba(255,255,255,0.3)"
           value={password}
           onChangeText={setPassword}
           secureTextEntry={!showPassword}
@@ -110,7 +110,7 @@ export default function ResetPasswordScreen({ navigation }) {
         <TextInput
           style={styles.input}
           placeholder="Confirm New Password"
-          placeholderTextColor="#4b5563"
+          placeholderTextColor="rgba(255,255,255,0.3)"
           value={confirm}
           onChangeText={setConfirm}
           secureTextEntry={!showConfirm}
@@ -153,28 +153,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: { 
-    fontSize: 28, 
-    fontWeight: '700', 
-    color: '#fff', 
-    marginBottom: 8 
+    fontSize: 32, 
+    fontWeight: '800', 
+    color: '#ffffff', 
+    marginBottom: 8,
+    letterSpacing: -0.5,
   },
   subtitle: { 
-    fontSize: 14, 
-    color: '#64748b', 
-    marginBottom: 32 
+    fontSize: 15, 
+    color: 'rgba(255,255,255,0.45)', 
+    marginBottom: 36,
   },
   inputContainer: {
     position: 'relative',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   input: {
-    backgroundColor: '#1a2e44', 
-    borderWidth: 1, 
-    borderColor: '#2a3a5c',
-    borderRadius: 12, 
-    padding: 16, 
-    paddingRight: 50, // Space for eye icon
-    color: '#fff', 
+    backgroundColor: '#0d1b2a',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 14,
+    padding: 16,
+    paddingRight: 50,
+    color: '#ffffff',
     fontSize: 15,
   },
   eyeButton: {
@@ -187,15 +188,20 @@ const styles = StyleSheet.create({
     width: 40,
   },
   button: {
-    backgroundColor: COLORS.gold, 
-    borderRadius: 12, 
-    padding: 16,
-    alignItems: 'center', 
-    marginTop: 6,
+    backgroundColor: COLORS.gold,
+    borderRadius: 14,
+    padding: 17,
+    alignItems: 'center',
+    marginTop: 8,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
   buttonText: { 
     color: '#1a2e44', 
     fontSize: 16, 
-    fontWeight: '700' 
+    fontWeight: '800',
   },
 });
