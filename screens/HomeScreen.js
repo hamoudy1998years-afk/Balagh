@@ -708,8 +708,18 @@ export default function HomeScreen({ navigation }) {
               );
             })}
           </View>
-          <AnimatedButton onPress={() => navigation.navigate(ROUTES.SEARCH)}>
-            <Text style={{ fontSize: 22 }}>🔍</Text>
+          <AnimatedButton 
+            onPress={() => navigation.navigate(ROUTES.SEARCH)}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: 'rgba(255,255,255,0.15)',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 18 }}>🔍</Text>
           </AnimatedButton>
         </View>
       </View>
@@ -722,22 +732,18 @@ export default function HomeScreen({ navigation }) {
       {showOffline && (
         <View style={{
           position: 'absolute',
-          top: 100,
+          top: insets.top + 50,
           alignSelf: 'center',
-          backgroundColor: '#1a2e44',
+          backgroundColor: 'rgba(0,0,0,0.85)',
           flexDirection: 'row',
           alignItems: 'center',
           paddingHorizontal: 16,
           paddingVertical: 8,
           borderRadius: 20,
           borderWidth: 1,
-          borderColor: isReconnecting ? '#4CAF50' : '#ff4757',
+          borderColor: isReconnecting ? '#22c55e' : '#ef4444',
           zIndex: 999,
           elevation: 5,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.25,
-          shadowRadius: 3.84,
         }}>
           {isReconnecting ? (
             <ActivityIndicator size="small" color="#4CAF50" style={{ marginRight: 8 }} />
@@ -775,10 +781,45 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: { flex: 1, backgroundColor: COLORS.bgDark, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  loadingText: { color: COLORS.textWhite, fontSize: 16, fontWeight: '600' },
-  emptyIcon: { fontSize: 48 },
-  emptySubtext: { color: '#64748b', fontSize: 14, textAlign: 'center', paddingHorizontal: 40 },
-  retryBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 32, paddingVertical: 12, marginTop: 4 },
-  retryBtnText: { color: '#1a2e44', fontSize: 15, fontWeight: '700' },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyIcon: {
+    fontSize: 52,
+  },
+  emptySubtext: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 40,
+    lineHeight: 22,
+  },
+  retryBtn: {
+    backgroundColor: COLORS.gold,
+    borderRadius: 20,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    marginTop: 8,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  retryBtnText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
 });
