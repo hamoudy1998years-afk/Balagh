@@ -17,6 +17,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import AnimatedButton from './AnimatedButton';
 import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
+import { COLORS } from '../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 
 const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress }) {
   if (!visible) return null;
@@ -396,11 +398,11 @@ function VideoCard({
         <View style={styles.heartOverlay}><Text style={styles.heartIcon}>{paused ? '⏸️' : '▶️'}</Text></View>
       )}
 
-      <View style={[styles.overlay, { bottom: insets.bottom + s(80) }]}>
+      <View style={[styles.overlay, { bottom: insets.bottom + s(120) }]}>
         <AnimatedButton onPress={handleNavigateUserProfile}>
           <Text style={styles.username}>@{username}</Text>
         </AnimatedButton>
-        {captionText ? <Text style={styles.caption}>{captionText}</Text> : null}
+        {captionText ? <Text style={styles.caption} numberOfLines={3} ellipsizeMode="tail">{captionText}</Text> : null}
         {hashtags.length > 0 && (
           <View style={styles.hashtagsRow}>
             {hashtags.map((tag, i) => <Text key={i} style={styles.hashtag}>{tag}</Text>)}
@@ -433,7 +435,9 @@ function VideoCard({
           accessibilityRole="button"
           accessibilityState={{ selected: liked }}
         >
-          <Text style={styles.actionIcon}>{liked ? '❤️' : '🤍'}</Text>
+          <View style={{ shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } }}>
+            <Ionicons name={liked ? 'heart' : 'heart-outline'} size={28} color={liked ? '#ef4444' : '#ffffff'} />
+          </View>
           <Text style={styles.actionCount}>{likeCount}</Text>
         </AnimatedButton>
         <AnimatedButton 
@@ -443,7 +447,9 @@ function VideoCard({
           accessibilityRole="button"
           accessibilityHint="Opens comments section"
         >
-          <Text style={styles.actionIcon}>💬</Text>
+          <View style={{ shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } }}>
+            <Ionicons name="chatbubble-outline" size={26} color="#ffffff" />
+          </View>
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>
         <AnimatedButton 
@@ -452,7 +458,9 @@ function VideoCard({
           accessibilityLabel="Share video"
           accessibilityRole="button"
         >
-          <Text style={styles.actionIcon}>↗️</Text>
+          <View style={{ shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } }}>
+            <Ionicons name="arrow-redo-outline" size={26} color="#ffffff" />
+          </View>
           <Text style={styles.actionCount}>Share</Text>
         </AnimatedButton>
         {currentUserId && currentUserId !== item.user_id && (
@@ -462,7 +470,9 @@ function VideoCard({
             accessibilityLabel="Report video"
             accessibilityRole="button"
           >
-            <Text style={styles.actionIcon}>🚩</Text>
+            <View style={{ shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } }}>
+              <Ionicons name="flag-outline" size={24} color="#ffffff" />
+            </View>
             <Text style={styles.actionCount}>Report</Text>
           </AnimatedButton>
         )}
@@ -511,27 +521,78 @@ const styles = StyleSheet.create({
   heartOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' },
   heartIcon: { fontSize: ms(80), opacity: 0.9 },
   overlay: { position: 'absolute', left: s(16), right: s(80), zIndex: 3 },
-  username: { color: '#ffffff', fontWeight: '700', fontSize: ms(15), marginBottom: 4 },
-  caption: { color: '#e2e8f0', fontSize: ms(13), lineHeight: ms(18), marginBottom: 4 },
+  username: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: ms(15),
+    marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  caption: {
+    color: '#ffffff',
+    fontSize: ms(13),
+    lineHeight: ms(18),
+    marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   hashtagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
-  hashtag: { color: '#B76E79', fontSize: ms(13), fontWeight: '600' },
+  hashtag: {
+    color: COLORS.gold,
+    fontSize: ms(13),
+    fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   actions: { position: 'absolute', right: s(12), alignItems: 'center', width: s(56), zIndex: 10 },
   actionBtn: { alignItems: 'center', marginBottom: 20 },
   actionIcon: { fontSize: ms(32) },
-  actionCount: { color: '#fff', fontSize: ms(11), textAlign: 'center', marginTop: 2 },
+  actionCount: {
+    color: '#ffffff',
+    fontSize: ms(11),
+    textAlign: 'center',
+    marginTop: 4,
+    fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   creatorContainer: { alignItems: 'center', marginBottom: 24 },
-  creatorAvatar: { width: s(52), height: s(52), borderRadius: s(26), backgroundColor: '#B76E79', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
-  creatorAvatarFollowed: { borderColor: '#B76E79', borderWidth: 2 },
+  creatorAvatar: {
+    width: s(52),
+    height: s(52),
+    borderRadius: s(26),
+    backgroundColor: COLORS.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  creatorAvatarFollowed: { borderColor: COLORS.gold, borderWidth: 2 },
   creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: ms(20) },
-  followBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#B76E79', alignItems: 'center', justifyContent: 'center', marginTop: -11, borderWidth: 1.5, borderColor: '#0f0f0f' },
+  followBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: COLORS.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -11,
+    borderWidth: 1.5,
+    borderColor: '#0f0f0f',
+  },
   followedBadge: { backgroundColor: '#10b981' },
   followBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800', lineHeight: 14 },
   dlOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', pointerEvents: 'none' },
   dlBox: { backgroundColor: '#1a2e44', borderRadius: 20, padding: 28, width: '75%', alignItems: 'center', gap: 14 },
   dlTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
   dlBarBg: { width: '100%', height: 8, backgroundColor: '#2a3a5c', borderRadius: 4, overflow: 'hidden' },
-  dlBarFill: { height: '100%', backgroundColor: '#B76E79', borderRadius: 4 },
-  dlPercent: { color: '#B76E79', fontSize: 22, fontWeight: '800' },
+  dlBarFill: { height: '100%', backgroundColor: COLORS.gold, borderRadius: 4 },
+  dlPercent: { color: COLORS.gold, fontSize: 22, fontWeight: '800' },
 });
 
 function areEqual(prevProps, nextProps) {
