@@ -862,7 +862,7 @@ export default function ProfileScreen({ route, navigation }) {
           size={90}
           onPress={handleAvatarPress}
         />
-        {isScholar && <View style={styles.scholarBadge}><Text style={styles.scholarBadgeText}>✓ Scholar</Text></View>}
+        {isScholar && <View style={styles.scholarBadge} accessibilityLabel="Verified scholar badge" accessibilityRole="image" accessible={true}><Text style={styles.scholarBadgeText}>✓ Scholar</Text></View>}
       </View>
 
       {isScholar ? (
@@ -926,7 +926,7 @@ export default function ProfileScreen({ route, navigation }) {
       )}
 
       <View style={styles.statsRow}>
-        <View style={styles.statItem}>
+        <View style={styles.statItem} accessibilityLabel={`${formatCount((publicVideos || []).length)} videos`} accessibilityRole="text" accessible={true}>
           <Text style={styles.statNum}>{formatCount((publicVideos || []).length)}</Text>
           <Text style={styles.statLabel}>Videos</Text>
         </View>
@@ -941,7 +941,7 @@ export default function ProfileScreen({ route, navigation }) {
           <Text style={styles.statLabel}>Following</Text>
         </AnimatedButton>
         <View style={styles.statDivider} />
-        <View style={styles.statItem}>
+        <View style={styles.statItem} accessibilityLabel={`${formatCount(totalLikes)} likes`} accessibilityRole="text" accessible={true}>
           <Text style={styles.statNum}>{formatCount(totalLikes)}</Text>
           <Text style={styles.statLabel}>Likes</Text>
         </View>
@@ -1137,7 +1137,7 @@ export default function ProfileScreen({ route, navigation }) {
             <Text style={styles.emptyGridText}>{activeTab === 'videos' ? 'No videos yet' : activeTab === 'private' ? 'No private videos' : activeTab === 'livestreams' ? 'No live replays' : 'No liked videos'}</Text>
           </View>
         }
-        contentContainerStyle={{ paddingBottom: insets.bottom + 20, paddingTop: insets.top + 50 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 80, paddingTop: insets.top + 50 }}
         showsVerticalScrollIndicator={false}
       />
 
@@ -1223,15 +1223,65 @@ const styles = StyleSheet.create({
   },
   topBarBtn: { padding: 8 },
   topBarBtnText: { color: '#1a2e44', fontSize: 22, fontWeight: '700' },
-  headerSection: { backgroundColor: '#ffffff', paddingBottom: 4 },
-  avatarSection: { alignItems: 'center', paddingTop: 8, paddingBottom: 12 },
-  scholarBadge: { marginTop: 8, backgroundColor: COLORS.gold, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
-  scholarBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  regularInfo: { alignItems: 'center', paddingHorizontal: 24, marginBottom: 10 },
-  displayName: { fontSize: 20, fontWeight: '800', color: '#1a2e44', marginBottom: 2 },
-  usernameText: { fontSize: 14, color: '#888', marginBottom: 8 },
-  bioText: { fontSize: 14, color: '#444', textAlign: 'center', lineHeight: 20 },
-  addBioText: { fontSize: 14, color: COLORS.gold, fontWeight: '600' },
+  headerSection: {
+    backgroundColor: '#ffffff',
+    paddingBottom: 0,
+  },
+  avatarSection: {
+    alignItems: 'center',
+    paddingTop: 16,
+    paddingBottom: 16,
+  },
+  scholarBadge: {
+    marginTop: 8,
+    backgroundColor: COLORS.gold,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  scholarBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  regularInfo: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    marginBottom: 16,
+  },
+  displayName: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1a2e44',
+    marginBottom: 3,
+    letterSpacing: -0.3,
+  },
+  usernameText: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginBottom: 10,
+    fontWeight: '500',
+  },
+  bioText: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  addBioText: {
+    fontSize: 14,
+    color: COLORS.gold,
+    fontWeight: '600',
+  },
   scholarCard: { marginHorizontal: 16, marginBottom: 14, backgroundColor: '#f9f9f9', borderRadius: 16, borderWidth: 1, borderColor: `${COLORS.gold}44`, overflow: 'hidden' },
   scholarCardHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: `${COLORS.gold}18`, gap: 8 },
   scholarCardIcon: { fontSize: 18 },
@@ -1243,23 +1293,118 @@ const styles = StyleSheet.create({
   scholarRowValue: { fontSize: 13, color: '#222', fontWeight: '500', flex: 2, textAlign: 'right' },
   scholarBioRow: { gap: 4 },
   scholarBioValue: { fontSize: 13, color: '#444', lineHeight: 20 },
-  statsRow: { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 16, marginHorizontal: 16, marginBottom: 10, paddingVertical: 8, justifyContent: 'space-around', alignItems: 'center' },
-  statItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, minWidth: 70 },
-  statNum: { fontSize: 18, fontWeight: '800', color: '#1a2e44' },
-  statLabel: { fontSize: 11, color: '#888', marginTop: 2 },
-  statDivider: { width: 1, height: 28, backgroundColor: '#ddd' },
-  actionButtons: { paddingHorizontal: 16, marginBottom: 10 },
-  scholarApplyBtn: { backgroundColor: COLORS.gold, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
-  scholarApplyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  followBtn: { backgroundColor: COLORS.gold, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  followingBtn: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: COLORS.gold },
-  followBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  followingBtnText: { color: COLORS.goldDark },
-  tabs: { flexDirection: 'row', borderTopWidth: 0.5, borderTopColor: '#e5e5e5' },
-  tab: { flex: 1, paddingVertical: 4, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  activeTab: { borderBottomColor: COLORS.gold },
-  tabText: { fontSize: 20, opacity: 0.35 },
-  activeTabText: { opacity: 1 },
+  statsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#f8fafc',
+    borderRadius: 20,
+    marginHorizontal: 16,
+    marginBottom: 14,
+    paddingVertical: 14,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  statNum: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1a2e44',
+    letterSpacing: -0.5,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 3,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  statDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: '#e2e8f0',
+  },
+  actionButtons: {
+    paddingHorizontal: 16,
+    marginBottom: 14,
+  },
+  scholarApplyBtn: {
+    backgroundColor: COLORS.gold,
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  scholarApplyBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  followBtn: {
+    backgroundColor: COLORS.gold,
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  followingBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: COLORS.gold,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  followBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  followingBtnText: {
+    color: COLORS.gold,
+  },
+  tabs: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    marginTop: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
+  },
+  activeTab: {
+    borderBottomColor: COLORS.gold,
+  },
+  tabText: {
+    fontSize: 20,
+    opacity: 0.3,
+  },
+  activeTabText: {
+    opacity: 1,
+  },
   gridItem: { flex: 1, aspectRatio: 0.8, margin: 0.5, backgroundColor: '#f0f0f0' },
   gridThumb: { width: '100%', height: '100%' },
   gridOverlay: { position: 'absolute', bottom: 4, left: 4 },
@@ -1288,8 +1433,21 @@ const styles = StyleSheet.create({
   dlBarBg: { width: '100%', height: 8, backgroundColor: '#eee', borderRadius: 4, overflow: 'hidden' },
   dlBarFill: { height: '100%', backgroundColor: COLORS.gold, borderRadius: 4 },
   dlPercent: { color: COLORS.goldDark, fontSize: 22, fontWeight: '800' },
-  blockBtn: { backgroundColor: '#f3f4f6', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
-  blockBtnText: { color: '#ef4444', fontSize: 14, fontWeight: '700' },
+  blockBtn: {
+    backgroundColor: '#fff1f2',
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+  },
+  blockBtnText: {
+    color: '#ef4444',
+    fontSize: 14,
+    fontWeight: '700',
+  },
   offlineIndicator: { 
     backgroundColor: 'rgba(0,0,0,0.7)', 
     borderRadius: 12, 
