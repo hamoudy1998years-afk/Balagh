@@ -101,7 +101,17 @@ export default function AdminScreen({ navigation }) {
 
   const handleDismiss = async (reportId) => {
     try {
-      await supabase.from('reports').delete().eq('id', reportId);
+      const { error } = await supabase
+        .from('reports')
+        .delete()
+        .eq('id', reportId);
+
+      if (error) {
+        console.error('Dismiss error:', error);
+        Alert.alert('Error', 'Failed to dismiss report: ' + error.message);
+        return;
+      }
+
       setReports(prev => prev.filter(r => r.id !== reportId));
       Alert.alert('Success', 'Report dismissed');
     } catch (error) {
@@ -206,14 +216,14 @@ export default function AdminScreen({ navigation }) {
           style={[styles.button, styles.dismissButton]}
           onPress={() => handleDismiss(item.id)}
         >
-          <Text style={styles.buttonText}>Dismiss</Text>
+          <Text style={styles.dismissText}>Dismiss</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
           style={[styles.button, styles.banButton]}
           onPress={() => handleBanUser(item.reported_user_id, item.id)}
         >
-          <Text style={styles.buttonText}>Ban User</Text>
+          <Text style={styles.banText}>Ban User</Text>
         </TouchableOpacity>
 
         {item.video_id && (
@@ -221,7 +231,7 @@ export default function AdminScreen({ navigation }) {
             style={[styles.button, styles.deleteButton]}
             onPress={() => handleDeleteVideo(item.video_id, item.id)}
           >
-            <Text style={styles.buttonText}>Delete Video</Text>
+            <Text style={styles.deleteText}>Delete Video</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -270,116 +280,171 @@ export default function AdminScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.bgDark,
+    backgroundColor: '#ffffff',
   },
   center: {
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: {
-    fontSize: ms(24),
-    fontWeight: 'bold',
-    color: COLORS.textWhite,
-    padding: s(16),
-    paddingBottom: s(8),
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1a2e44',
+    padding: 20,
+    paddingBottom: 4,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: ms(14),
-    color: '#ffffff',
-    paddingHorizontal: s(16),
-    marginBottom: s(16),
+    fontSize: 13,
+    color: '#94a3b8',
+    fontWeight: '600',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   list: {
-    padding: s(16),
+    padding: 16,
+    paddingBottom: 40,
   },
   reportCard: {
-    backgroundColor: '#1a2e44',
-    borderRadius: 12,
-    padding: s(16),
-    marginBottom: s(12),
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#2a3a5c',
+    borderColor: '#f1f5f9',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
   reportHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: s(12),
+    alignItems: 'flex-start',
+    marginBottom: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
   userInfo: {
     flex: 1,
   },
   reportedUserInfo: {
-    marginBottom: s(12),
+    marginBottom: 12,
+    padding: 12,
+    backgroundColor: '#fff7ed',
+    borderRadius: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: '#f97316',
   },
   label: {
-    fontSize: ms(12),
-    color: COLORS.textSecondary,
-    marginBottom: 2,
+    fontSize: 11,
+    color: '#94a3b8',
+    marginBottom: 3,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   username: {
-    fontSize: ms(16),
-    fontWeight: '600',
-    color: COLORS.textWhite,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1a2e44',
   },
   date: {
-    fontSize: ms(12),
-    color: COLORS.textSecondary,
-  },
-  reasonContainer: {
-    backgroundColor: '#2a3a5c',
-    borderRadius: 8,
-    padding: s(12),
-    marginBottom: s(12),
-  },
-  reason: {
-    fontSize: ms(14),
-    color: COLORS.textWhite,
+    fontSize: 12,
+    color: '#94a3b8',
     fontWeight: '500',
   },
+  reasonContainer: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  reason: {
+    fontSize: 14,
+    color: '#475569',
+    fontWeight: '500',
+    lineHeight: 20,
+  },
   videoInfo: {
-    marginBottom: s(12),
+    marginBottom: 12,
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   thumbnail: {
     width: '100%',
-    height: s(150),
-    borderRadius: 8,
-    marginTop: s(8),
-    marginBottom: s(8),
-    backgroundColor: '#2d2d44',
+    height: 150,
+    borderRadius: 10,
+    marginTop: 8,
+    marginBottom: 8,
+    backgroundColor: '#e2e8f0',
   },
   caption: {
-    fontSize: ms(13),
-    color: COLORS.textSecondary,
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 18,
   },
   actions: {
     flexDirection: 'row',
-    gap: s(8),
-    marginTop: s(8),
+    gap: 8,
+    marginTop: 4,
   },
   button: {
     flex: 1,
-    paddingVertical: s(10),
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   dismissButton: {
-    backgroundColor: '#4a5568',
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
   },
   banButton: {
-    backgroundColor: '#dc2626',
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
   },
   deleteButton: {
-    backgroundColor: '#B76E79',
+    backgroundColor: '#fff7ed',
+    borderWidth: 1,
+    borderColor: '#fed7aa',
   },
   buttonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: ms(12),
+    fontWeight: '700',
+    fontSize: 12,
+    color: '#1a2e44',
   },
   empty: {
     textAlign: 'center',
-    color: '#ffffff',
-    fontSize: ms(16),
-    marginTop: s(40),
+    color: '#94a3b8',
+    fontSize: 16,
+    marginTop: 60,
+    fontWeight: '600',
+  },
+  dismissText: {
+    fontWeight: '700',
+    fontSize: 12,
+    color: '#64748b',
+  },
+  banText: {
+    fontWeight: '700',
+    fontSize: 12,
+    color: '#dc2626',
+  },
+  deleteText: {
+    fontWeight: '700',
+    fontSize: 12,
+    color: '#ea580c',
   },
 });
