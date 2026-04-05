@@ -58,7 +58,39 @@ export default function AgeGateScreen({ onVerified }) {
   const renderItem = useCallback(({ item, index }) => {
     const distance = Math.abs(item - selectedAge);
     const isSelected = item === selectedAge;
-    
+
+    let fontSize = 14;
+    let color = '#222';
+    let opacity = 0.15;
+    let fontWeight = '400';
+    let scale = 0.7;
+
+    if (distance === 0) {
+      fontSize = 38;
+      color = '#ffffff';
+      opacity = 1;
+      fontWeight = '800';
+      scale = 1;
+    } else if (distance === 1) {
+      fontSize = 26;
+      color = '#aaaaaa';
+      opacity = 0.7;
+      fontWeight = '600';
+      scale = 0.9;
+    } else if (distance === 2) {
+      fontSize = 19;
+      color = '#666666';
+      opacity = 0.4;
+      fontWeight = '400';
+      scale = 0.8;
+    } else {
+      fontSize = 14;
+      color = '#333333';
+      opacity = 0.15;
+      fontWeight = '400';
+      scale = 0.7;
+    }
+
     return (
       <TouchableOpacity
         style={styles.ageItem}
@@ -68,9 +100,13 @@ export default function AgeGateScreen({ onVerified }) {
         <Text
           style={[
             styles.ageText,
-            isSelected && styles.ageTextSelected,
-            distance === 1 && styles.ageTextNear,
-            distance > 1 && styles.ageTextFar,
+            {
+              fontSize,
+              color,
+              opacity,
+              fontWeight,
+              transform: [{ scale }],
+            },
           ]}
         >
           {item}
@@ -105,6 +141,7 @@ export default function AgeGateScreen({ onVerified }) {
         
         {/* Center selection line */}
         <View style={styles.centerLine} />
+        <View style={styles.centerLineBottom} />
         
         <FlatList
           ref={flatListRef}
@@ -158,8 +195,8 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    paddingTop: 60,
-    paddingBottom: 20,
+    paddingTop: 30,
+    paddingBottom: 12,
   },
   emoji: {
     fontSize: 48,
@@ -178,7 +215,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pickerContainer: {
-    height: height * 0.35,
+    height: height * 0.45,
     position: 'relative',
   },
   fadeTop: {
@@ -186,8 +223,8 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 40,
-    backgroundColor: 'rgba(10, 10, 10, 0.9)',
+    height: 80,
+    backgroundColor: 'rgba(10,10,10,0.95)',
     zIndex: 1,
   },
   fadeBottom: {
@@ -195,45 +232,54 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 25,
-    backgroundColor: 'rgba(10, 10, 10, 0.9)',
+    height: 40,
+    backgroundColor: 'rgba(10,10,10,0.95)',
     zIndex: 1,
   },
   centerLine: {
     position: 'absolute',
-    top: '57%',
-    left: '20%',
-    right: '20%',
+    top: '50%',
+    left: '10%',
+    right: '10%',
     height: 1,
-    backgroundColor: '#ffffff',
-    transform: [{ translateY: -1 }],
-    zIndex: 0,
-    opacity: 0.2,
+    backgroundColor: 'rgba(183,110,121,0.5)',
+    transform: [{ translateY: -20 }],
+    zIndex: 3,
+    borderRadius: 1,
+  },
+  centerLineBottom: {
+    position: 'absolute',
+    top: '50%',
+    left: '10%',
+    right: '10%',
+    height: 1,
+    backgroundColor: 'rgba(183,110,121,0.5)',
+    transform: [{ translateY: 62 }],
+    zIndex: 3,
     borderRadius: 1,
   },
   ageItem: {
-    height: ITEM_HEIGHT,
+    height: 80,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
   },
   ageText: {
-    fontSize: 28,
-    fontWeight: '600',
-    color: '#444',
+    textAlign: 'center',
+    letterSpacing: -0.5,
   },
   ageTextSelected: {
-    fontSize: 48,
+    fontSize: 38,
     fontWeight: '800',
     color: '#ffffff',
   },
   ageTextNear: {
-    fontSize: 32,
-    color: '#666',
+    fontSize: 26,
+    color: '#aaaaaa',
   },
   ageTextFar: {
-    fontSize: 24,
-    color: '#333',
+    fontSize: 14,
+    color: '#333333',
   },
   indicator: {
     position: 'absolute',
