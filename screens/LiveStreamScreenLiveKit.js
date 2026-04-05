@@ -624,11 +624,11 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         </View>
 
         <AnimatedButton style={styles.viewerBadge} onPress={() => setShowViewerList(!showViewerList)}>
-          <Text style={styles.viewerText}>👁️ {viewerCount}</Text>
+          <Text style={styles.viewerText}>👀 {viewerCount}</Text>
         </AnimatedButton>
 
         <AnimatedButton style={styles.endBtn} onPress={endStream}>
-          <Text style={styles.endBtnText}>End</Text>
+          <Text style={styles.endBtnText}>🛑</Text>
         </AnimatedButton>
 
         {showViewerList && (
@@ -703,7 +703,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       {/* Question Banner */}
       {selectedQuestion && (
         <View style={styles.questionBanner}>
-          <Text style={styles.questionBannerLabel}>❓ Question from @{selectedQuestion.username}</Text>
+          <Text style={styles.questionBannerLabel}>💬 Question from @{selectedQuestion.username}</Text>
           <Text style={styles.questionBannerText}>{selectedQuestion.question}</Text>
           <View style={styles.questionBannerActions}>
             <AnimatedButton style={styles.answeredBtn} onPress={markAnswered}>
@@ -788,7 +788,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
                 <Text style={styles.questionUsername}>@{item.username}</Text>
                 <Text style={styles.questionText}>{item.question}</Text>
                 {item.is_selected && (
-                  <Text style={styles.questionSelectedBadge}>📌 On screen</Text>
+                  <Text style={styles.questionSelectedBadge}>👀 On screen</Text>
                 )}
               </AnimatedButton>
             )}
@@ -797,7 +797,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
         <View style={styles.cameraControls}>
           <AnimatedButton style={styles.flipBtnBottom} onPress={switchCamera}>
-            <Text style={styles.flipBtnBottomText}>🔄 Flip Camera</Text>
+            <Text style={styles.flipBtnBottomText}>🔄 Flip</Text>
           </AnimatedButton>
         </View>
       </View>
@@ -836,94 +836,158 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
+  container: { 
+    flex: 1, 
+    backgroundColor: '#000' 
   },
-  loadingText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  errorText: { color: '#ef4444', fontSize: 16, marginBottom: 20, textAlign: 'center' },
+  loadingContainer: { 
+    flex: 1, 
+    backgroundColor: '#000', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: 16 
+  },
+  loadingText: { 
+    color: 'rgba(255,255,255,0.7)', 
+    fontSize: 15, 
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  errorText: { 
+    color: '#ef4444', 
+    fontSize: 15, 
+    marginBottom: 20, 
+    textAlign: 'center',
+    fontWeight: '600',
+  },
   actionButton: {
     backgroundColor: COLORS.gold,
     paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 25,
+    paddingVertical: 14,
+    borderRadius: 24,
     marginTop: 16,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
-  actionButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-
-  // Pre-stream screen
-  preStreamContainer: { width: '100%', padding: 20, alignItems: 'center' },
-  preStreamTitle: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginBottom: 8 },
-  preStreamSubtitle: { color: COLORS.gold, fontSize: 16, marginBottom: 30 },
+  actionButtonText: { 
+    color: '#fff', 
+    fontSize: 15, 
+    fontWeight: '700' 
+  },
+  preStreamContainer: { 
+    width: '100%', 
+    padding: 24, 
+    alignItems: 'center' 
+  },
+  preStreamTitle: { 
+    color: '#fff', 
+    fontSize: 32, 
+    fontWeight: '800', 
+    marginBottom: 6,
+    letterSpacing: -0.5,
+  },
+  preStreamSubtitle: { 
+    color: COLORS.gold, 
+    fontSize: 16, 
+    marginBottom: 36,
+    fontWeight: '500',
+  },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
-  settingInfo: { flex: 1, marginRight: 12 },
-  settingLabel: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  settingDescription: { color: 'rgba(255,255,255,0.6)', fontSize: 13 },
-
-  // No recording notice
+  settingInfo: { 
+    flex: 1, 
+    marginRight: 12 
+  },
+  settingLabel: { 
+    color: '#fff', 
+    fontSize: 15, 
+    fontWeight: '700', 
+    marginBottom: 4 
+  },
+  settingDescription: { 
+    color: 'rgba(255,255,255,0.4)', 
+    fontSize: 12,
+    lineHeight: 18,
+  },
   noticeBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     padding: 14,
     width: '100%',
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.08)',
     gap: 10,
   },
-  noticeIcon: { fontSize: 18 },
+  noticeIcon: { fontSize: 16 },
   noticeText: {
     flex: 1,
-    color: 'rgba(255,255,255,0.55)',
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 13,
     lineHeight: 19,
   },
-
   goLiveBtn: {
     backgroundColor: '#B76E79',
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 40,
     paddingVertical: 16,
     width: '100%',
     alignItems: 'center',
     marginTop: 4,
+    shadowColor: '#B76E79',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
-  goLiveBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  goLiveBtnText: { 
+    color: '#fff', 
+    fontSize: 17, 
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
   cancelBtn: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
     paddingHorizontal: 40,
     paddingVertical: 16,
     width: '100%',
     alignItems: 'center',
     marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
-  cancelBtnText: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '600' },
-
-  // Camera
+  cancelBtnText: { 
+    color: 'rgba(255,255,255,0.6)', 
+    fontSize: 15, 
+    fontWeight: '600' 
+  },
   cameraFeedPlaceholder: {
-    backgroundColor: '#1a2e44',
+    backgroundColor: '#0a0a0a',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  cameraWaitText: { color: '#fff', marginTop: 12, fontSize: 14 },
-
-  // Top bar
+  cameraWaitText: { 
+    color: 'rgba(255,255,255,0.5)', 
+    marginTop: 12, 
+    fontSize: 14,
+    fontWeight: '500',
+  },
   topBar: {
     position: 'absolute',
     top: 0,
@@ -939,141 +1003,274 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#ef4444',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     gap: 6,
+    shadowColor: '#ef4444',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' },
-  liveText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  liveDot: { 
+    width: 7, 
+    height: 7, 
+    borderRadius: 4, 
+    backgroundColor: '#fff' 
+  },
+  liveText: { 
+    color: '#fff', 
+    fontWeight: '800', 
+    fontSize: 12,
+    letterSpacing: 1,
+  },
   liveDuration: {
     color: 'rgba(255,255,255,0.85)',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     letterSpacing: 0.5,
   },
   viewerBadge: {
     backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  viewerText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  viewerText: { 
+    color: '#fff', 
+    fontSize: 13, 
+    fontWeight: '600' 
+  },
   endBtn: {
     marginLeft: 'auto',
-    backgroundColor: 'rgba(239,68,68,0.9)',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    backgroundColor: 'rgba(239,68,68,0.85)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.5)',
   },
-  endBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-
-  // Viewer list panel
+  endBtnText: { 
+    color: '#fff', 
+    fontWeight: '700', 
+    fontSize: 13 
+  },
   viewerListPanel: {
     position: 'absolute',
     top: 50,
     right: 16,
-    width: 250,
-    maxHeight: 300,
-    backgroundColor: 'rgba(0,0,0,0.9)',
-    borderRadius: 12,
-    padding: 12,
+    width: 260,
+    maxHeight: 320,
+    backgroundColor: 'rgba(10,10,10,0.95)',
+    borderRadius: 16,
+    padding: 14,
     zIndex: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   viewerListHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
-    paddingBottom: 8,
+    paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.2)',
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  viewerListTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  closeListText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  viewerListTitle: { 
+    color: '#fff', 
+    fontSize: 13, 
+    fontWeight: '700' 
+  },
+  closeListText: { 
+    color: 'rgba(255,255,255,0.5)', 
+    fontSize: 16, 
+    fontWeight: '700' 
+  },
   viewerList: { maxHeight: 250 },
-  viewerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, gap: 10 },
-  viewerAvatar: { width: 32, height: 32, borderRadius: 16 },
+  viewerItem: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 8, 
+    gap: 10 
+  },
+  viewerAvatar: { 
+    width: 34, 
+    height: 34, 
+    borderRadius: 17 
+  },
   viewerAvatarPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: COLORS.gold,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  viewerAvatarText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  viewerUsername: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  emptyViewerList: { color: '#64748b', fontSize: 13, textAlign: 'center', paddingVertical: 20 },
-  viewerListTabs: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  viewerAvatarText: { 
+    color: '#fff', 
+    fontSize: 14, 
+    fontWeight: '700' 
+  },
+  viewerUsername: { 
+    color: '#fff', 
+    fontSize: 13, 
+    fontWeight: '600' 
+  },
+  emptyViewerList: { 
+    color: 'rgba(255,255,255,0.3)', 
+    fontSize: 13, 
+    textAlign: 'center', 
+    paddingVertical: 20 
+  },
+  viewerListTabs: { 
+    flexDirection: 'row', 
+    gap: 8, 
+    marginBottom: 12 
+  },
   viewerListTab: {
     flex: 1,
-    paddingVertical: 6,
+    paddingVertical: 7,
     paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  viewerListTabActive: { backgroundColor: COLORS.gold },
-  viewerListTabText: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: '600' },
+  viewerListTabActive: { 
+    backgroundColor: COLORS.gold,
+    borderColor: COLORS.gold,
+  },
+  viewerListTabText: { 
+    color: 'rgba(255,255,255,0.5)', 
+    fontSize: 12, 
+    fontWeight: '600' 
+  },
   viewerListTabTextActive: { color: '#fff' },
-
-  // Question banner
   questionBanner: {
     position: 'absolute',
     top: 100,
     left: 16,
     right: 16,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    borderRadius: 14,
-    padding: 14,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    borderRadius: 16,
+    padding: 16,
     borderWidth: 1,
     borderColor: COLORS.gold,
     zIndex: 20,
   },
-  questionBannerLabel: { color: COLORS.gold, fontSize: 12, fontWeight: '700', marginBottom: 4 },
-  questionBannerText: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 10 },
-  questionBannerActions: { flexDirection: 'row', gap: 10 },
+  questionBannerLabel: {
+    color: COLORS.gold,
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  questionBannerText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 12,
+    lineHeight: 22,
+  },
+  questionBannerActions: { 
+    flexDirection: 'row', 
+    gap: 10 
+  },
   answeredBtn: {
     flex: 1,
     backgroundColor: '#10b981',
-    borderRadius: 8,
-    padding: 8,
+    borderRadius: 12,
+    padding: 10,
     alignItems: 'center',
   },
-  answeredBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  answeredBtnText: { 
+    color: '#fff', 
+    fontWeight: '700', 
+    fontSize: 13 
+  },
   dismissBtn: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 8,
-    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: 10,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  dismissBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-
-  // Bottom panel
-  bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12 },
-  tabs: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  dismissBtnText: { 
+    color: 'rgba(255,255,255,0.7)', 
+    fontWeight: '700', 
+    fontSize: 13 
+  },
+  bottomPanel: { 
+    position: 'absolute', 
+    bottom: 0, 
+    left: 0, 
+    right: 0, 
+    paddingHorizontal: 12 
+  },
+  tabs: { 
+    flexDirection: 'row', 
+    gap: 8, 
+    marginBottom: 10 
+  },
   tab: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
-  tabActive: { backgroundColor: COLORS.gold },
-  tabText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
+  tabActive: { 
+    backgroundColor: COLORS.gold,
+    borderColor: COLORS.gold,
+  },
+  tabText: { 
+    color: 'rgba(255,255,255,0.5)', 
+    fontSize: 13, 
+    fontWeight: '600' 
+  },
   tabTextActive: { color: '#fff' },
-  chatList: { maxHeight: height * 0.25, marginBottom: 8 },
-  chatMessage: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 4 },
-  chatUsername: { color: COLORS.gold, fontWeight: '700', fontSize: 13 },
-  chatText: { color: '#fff', fontSize: 13 },
-  chatInputRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  chatList: { 
+    maxHeight: height * 0.25, 
+    marginBottom: 10 
+  },
+  chatMessage: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 6,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  chatUsername: { 
+    color: COLORS.gold, 
+    fontWeight: '700', 
+    fontSize: 13 
+  },
+  chatText: { 
+    color: '#fff', 
+    fontSize: 13 
+  },
+  chatInputRow: { 
+    flexDirection: 'row', 
+    gap: 8, 
+    marginBottom: 8 
+  },
   chatInput: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     color: 'rgba(255,255,255,0.9)',
     fontSize: 14,
     borderWidth: 1,
@@ -1081,55 +1278,105 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     backgroundColor: COLORS.gold,
-    borderRadius: 20,
-    paddingHorizontal: 16,
+    borderRadius: 24,
+    paddingHorizontal: 18,
     justifyContent: 'center',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
-  sendBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  emptyQuestions: { padding: 20, alignItems: 'center' },
-  emptyQuestionsText: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 4 },
-  emptyQuestionsSubtext: { color: '#64748b', fontSize: 13, textAlign: 'center' },
+  sendBtnText: { 
+    color: '#fff', 
+    fontWeight: '700', 
+    fontSize: 13 
+  },
+  emptyQuestions: { 
+    padding: 24, 
+    alignItems: 'center' 
+  },
+  emptyQuestionsText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  emptyQuestionsSubtext: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 13,
+    textAlign: 'center',
+  },
   questionItem: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
   },
   questionItemSelected: {
     borderWidth: 1,
     borderColor: COLORS.gold,
-    backgroundColor: 'rgba(183,110,121,0.2)',
+    backgroundColor: 'rgba(183,110,121,0.15)',
   },
-  questionUsername: { color: COLORS.gold, fontSize: 12, fontWeight: '700', marginBottom: 3 },
-  questionText: { color: '#fff', fontSize: 14 },
-  questionSelectedBadge: { color: COLORS.gold, fontSize: 11, marginTop: 4, fontWeight: '600' },
-  cameraControls: { flexDirection: 'row', justifyContent: 'center', marginBottom: 8 },
+  questionUsername: {
+    color: COLORS.gold,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  questionText: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  questionSelectedBadge: {
+    color: COLORS.gold,
+    fontSize: 11,
+    marginTop: 6,
+    fontWeight: '600',
+  },
+  cameraControls: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
   flipBtnBottom: {
     backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 20,
+    borderRadius: 24,
     paddingHorizontal: 20,
     paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  flipBtnBottomText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-
-  // Reconnect overlay
+  flipBtnBottomText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   reconnectOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 100,
   },
-  reconnectText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16 },
+  reconnectText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: 16,
+  },
   reconnectIcon: { fontSize: 48 },
-
-  // End stream modal
   modalOverlay: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 999,
@@ -1138,24 +1385,29 @@ const styles = StyleSheet.create({
     width: 300,
     borderRadius: 24,
     overflow: 'hidden',
-    backgroundColor: 'rgba(239,68,68,0.12)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     padding: 30,
     alignItems: 'center',
   },
   glassModalIcon: {
     width: 60,
     height: 60,
-    borderRadius: 18,
-    backgroundColor: 'rgba(239,68,68,0.2)',
+    borderRadius: 30,
+    backgroundColor: 'rgba(239,68,68,0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.4)',
+    borderColor: 'rgba(239,68,68,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
   },
-  glassModalDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444' },
+  glassModalDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ef4444',
+  },
   glassModalTitle: {
     color: '#fff',
     fontSize: 20,
@@ -1164,29 +1416,46 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   glassModalSubtitle: {
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(255,255,255,0.4)',
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 20,
-    marginBottom: 26,
+    marginBottom: 28,
   },
-  glassModalButtons: { flexDirection: 'row', gap: 10, width: '100%' },
+  glassModalButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
   glassModalCancel: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  glassModalCancelText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
+  glassModalCancelText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   glassModalEnd: {
     flex: 1,
     backgroundColor: '#ef4444',
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
+    shadowColor: '#ef4444',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
-  glassModalEndText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  glassModalEndText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });
