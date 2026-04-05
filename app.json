@@ -61,7 +61,6 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "./plugins/withForceLightStatusBar.js",
       "./plugins/withAndroidSplashIcon.js",
       [
         "react-native-edge-to-edge",
@@ -104,7 +103,8 @@
       ],
       "expo-web-browser",
       "react-native-video",
-      "expo-asset"
+      "expo-asset",
+      "./plugins/withForceLightStatusBar.js"
     ],
     "extra": {
       "eas": {

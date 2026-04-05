@@ -81,11 +81,11 @@ export default function ApplyScholarScreen({ navigation }) {
 
   return (
     <>
-      <SystemBars style="light" />
+      <SystemBars style="dark" />
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
     <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
       <AnimatedButton onPress={navigation.goBack} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
-        <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
+        <Text style={{ color: '#1a2e44', fontSize: 15, fontWeight: '600' }}>← Back</Text>
       </AnimatedButton>
 
       <Text style={styles.title}>Apply as Scholar</Text>
@@ -123,15 +123,78 @@ export default function ApplyScholarScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bgDark },
-  content: { paddingHorizontal: 24 },
-  title: { fontSize: 24, fontWeight: '700', color: COLORS.textWhite, marginBottom: 8 },
-  subtitle: { fontSize: 14, color: COLORS.textGray, marginBottom: 32, lineHeight: 20 },
-  label: { color: COLORS.textLight, fontSize: 13, fontWeight: '600', marginBottom: 6 },
-  input: { width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 16, color: COLORS.textWhite, fontSize: 15, marginBottom: 20 },
-  multiline: { height: 100, textAlignVertical: 'top' },
-  submitBtn: { width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
-  submitBtnText: { color: COLORS.navy, fontSize: 16, fontWeight: '700' },
-  cancelBtn: { width: '100%', borderWidth: 1, borderColor: COLORS.borderDark, borderRadius: 12, padding: 16, alignItems: 'center' },
-  cancelBtnText: { color: COLORS.textGray, fontSize: 16 },
+  container: {
+    flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  content: {
+    paddingHorizontal: 24,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#1a2e44',
+    marginBottom: 6,
+    letterSpacing: -0.5,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginBottom: 32,
+    lineHeight: 22,
+  },
+  label: {
+    color: '#1a2e44',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 6,
+    marginLeft: 2,
+  },
+  input: {
+    width: '100%',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 16,
+    color: '#1a2e44',
+    fontSize: 15,
+    marginBottom: 20,
+  },
+  multiline: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  submitBtn: {
+    width: '100%',
+    backgroundColor: COLORS.gold,
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  submitBtnText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  cancelBtn: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+  },
+  cancelBtnText: {
+    color: '#94a3b8',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });

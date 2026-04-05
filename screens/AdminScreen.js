@@ -240,7 +240,7 @@ export default function AdminScreen({ navigation }) {
 
   useFocusEffect(
     useCallback(() => {
-      const entry = SystemBars.pushStackEntry({ style: 'light' });
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
       return () => SystemBars.popStackEntry(entry);
     }, [])
   );
