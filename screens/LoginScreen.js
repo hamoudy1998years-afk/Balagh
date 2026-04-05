@@ -4,6 +4,7 @@ import {
   TextInput,
   TouchableWithoutFeedback,
   StyleSheet,
+  ScrollView,
   FlatList,
   Platform,
   ActivityIndicator,
@@ -833,6 +834,8 @@ const handleClosePinModal = useCallback(() => {
                 importantForAutofill="no"
                 textContentType="none"
                 keyboardType="default"
+                accessibilityLabel="Email username or phone input"
+                accessibilityHint="Enter your email, username or phone number"
               />
 
               {showDropdown && savedAccounts.length > 0 && (
@@ -899,6 +902,8 @@ const handleClosePinModal = useCallback(() => {
                   autoCorrect={false}
                   autoCapitalize="none"
                   textContentType="none"
+                  accessibilityLabel="Password input field"
+                  accessibilityHint="Enter your password"
                 />
                 <TouchableOpacity 
                   style={styles.eyeButton} 
@@ -1071,20 +1076,60 @@ const styles = StyleSheet.create({
     padding: 16, color: '#1a2e44', fontSize: 15,
   },
   dropdown: {
-    width: '100%', height: 200,
-    backgroundColor: '#1a2e44',
-    borderWidth: 1, borderTopWidth: 0, borderColor: '#2a3a5c',
-    borderBottomLeftRadius: 12, borderBottomRightRadius: 12,
+    width: '100%',
+    backgroundColor: '#12151f',
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: 'rgba(212, 175, 55, 0.2)',
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
     overflow: 'hidden',
+    maxHeight: 220,
   },
-  dropdownItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14 },
-  dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: '#2a3a5c' },
-  dropdownAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#B76E79', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  dropdownAvatarGoogle: { backgroundColor: '#1a73e8' },
-  dropdownAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  dropdownInfo: { flex: 1 },
-  dropdownIdentifier: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
-  dropdownEmail: { color: '#64748b', fontSize: 12, marginTop: 2 },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: 'transparent',
+  },
+  dropdownItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  dropdownAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+  },
+  dropdownAvatarGoogle: {
+    backgroundColor: '#1a73e8',
+    borderColor: 'rgba(26, 115, 232, 0.4)',
+  },
+  dropdownAvatarText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  dropdownInfo: {
+    flex: 1,
+  },
+  dropdownIdentifier: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  dropdownEmail: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 12,
+  },
   dropdownAction: { fontSize: 18, marginLeft: 8 },
   passwordContainer: {
     width: '100%', flexDirection: 'row', alignItems: 'center',
@@ -1311,11 +1356,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   noMatchesContainer: {
-    paddingVertical: 20,
+    paddingVertical: 24,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   noMatchesText: {
-    color: '#64748b',
+    color: 'rgba(255,255,255,0.3)',
     fontSize: 14,
   },
 });
