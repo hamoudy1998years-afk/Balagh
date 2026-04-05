@@ -127,7 +127,7 @@ function MainTabs({ session }) {
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: 'rgba(17,24,39,0.95)',
+          backgroundColor: '#1a2e44',
           borderTopColor: 'rgba(255,255,255,0.06)',
           borderTopWidth: 1,
           marginHorizontal: 12,
@@ -392,6 +392,14 @@ function App() {
     if (__DEV__) console.log('[DEEP LINK] handleDeepLink called with:', url);
     if (!url || !url.startsWith('bushrann://')) return;
 
+    // Validate deep link route
+    const validRoutes = ['auth/callback', 'video', 'user', 'live', 'go-live'];
+    const path = url.replace('bushrann://', '').split('?')[0];
+    if (!validRoutes.some(route => path.startsWith(route))) {
+      console.warn('[DeepLink] Invalid route:', url);
+      return;
+    }
+
     if (url.includes('type=recovery')) {
       __DEV__ && console.log('✅ Recovery link detected!');
       const hashIndex = url.indexOf('#');
@@ -427,7 +435,7 @@ function App() {
   // Show JS splash while any condition is still loading
   if (jsSplashVisible || ageVerified === null || onboardingCompleted === null) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#0d1b6e' }}>
+      <View style={{ flex: 1, backgroundColor: '#1a2e44' }}>
         <SystemBars style="light" />
         <Image
           source={require('./assets/splash-icon.png')}
@@ -459,7 +467,7 @@ function App() {
 
   if (session === undefined) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#0f0f0f', alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }}>
         <SystemBars style="light" />
         <ActivityIndicator color={COLORS.gold} size="large" />
       </View>

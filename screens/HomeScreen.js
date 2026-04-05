@@ -106,7 +106,7 @@ function LiveFeed({ navigation }) {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#ef4444" size="large" />
+        <ActivityIndicator color={COLORS.gold} size="large" />
         <Text style={styles.loadingText}>Loading live streams...</Text>
       </View>
     );
@@ -130,7 +130,7 @@ function LiveFeed({ navigation }) {
         keyExtractor={(item) => item.id}
         estimatedItemSize={200}
         contentContainerStyle={{ padding: 4, paddingTop: insets.top + 60 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadStreams} tintColor="#ef4444" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadStreams} tintColor={COLORS.gold} />}
         renderItem={({ item }) => (
           <View style={{ width: width / 2 - 8, margin: 4 }}>
             <LiveVideoCard
@@ -724,7 +724,7 @@ export default function HomeScreen({ navigation }) {
           position: 'absolute',
           top: 100,
           alignSelf: 'center',
-          backgroundColor: '#1a1a1a',
+          backgroundColor: '#1a2e44',
           flexDirection: 'row',
           alignItems: 'center',
           paddingHorizontal: 16,
@@ -780,5 +780,5 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 48 },
   emptySubtext: { color: '#64748b', fontSize: 14, textAlign: 'center', paddingHorizontal: 40 },
   retryBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 32, paddingVertical: 12, marginTop: 4 },
-  retryBtnText: { color: '#0a0f1e', fontSize: 15, fontWeight: '700' },
+  retryBtnText: { color: '#1a2e44', fontSize: 15, fontWeight: '700' },
 });

@@ -895,7 +895,7 @@ const styles = StyleSheet.create({
   },
 
   goLiveBtn: {
-    backgroundColor: '#ef4444',
+    backgroundColor: '#B76E79',
     borderRadius: 12,
     paddingHorizontal: 40,
     paddingVertical: 16,
@@ -917,7 +917,7 @@ const styles = StyleSheet.create({
 
   // Camera
   cameraFeedPlaceholder: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1a2e44',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1098,7 +1098,7 @@ const styles = StyleSheet.create({
   questionItemSelected: {
     borderWidth: 1,
     borderColor: COLORS.gold,
-    backgroundColor: 'rgba(245,166,35,0.2)',
+    backgroundColor: 'rgba(183,110,121,0.2)',
   },
   questionUsername: { color: COLORS.gold, fontSize: 12, fontWeight: '700', marginBottom: 3 },
   questionText: { color: '#fff', fontSize: 14 },

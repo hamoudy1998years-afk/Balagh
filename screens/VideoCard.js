@@ -365,10 +365,10 @@ function VideoCard({
         ignoreSilentSwitch="ignore"
         progressUpdateInterval={250}
         bufferConfig={{
-          minBufferMs: 500,
-          maxBufferMs: 2000,
-          bufferForPlaybackMs: 250,
-          bufferForPlaybackAfterRebufferMs: 500,
+          minBufferMs: 15000,
+          maxBufferMs: 50000,
+          bufferForPlaybackMs: 2500,
+          bufferForPlaybackAfterRebufferMs: 5000,
         }}
         onError={(e) => {
           console.log('[VIDEO ERROR] Full error:', JSON.stringify(e));
@@ -426,20 +426,42 @@ function VideoCard({
             )}
           </AnimatedButton>
         </View>
-        <AnimatedButton onPress={handleLike} style={styles.actionBtn}>
+        <AnimatedButton 
+          onPress={handleLike} 
+          style={styles.actionBtn}
+          accessibilityLabel={liked ? "Unlike video" : "Like video"}
+          accessibilityRole="button"
+          accessibilityState={{ selected: liked }}
+        >
           <Text style={styles.actionIcon}>{liked ? '❤️' : '🤍'}</Text>
           <Text style={styles.actionCount}>{likeCount}</Text>
         </AnimatedButton>
-        <AnimatedButton onPress={handleOpenComments} style={styles.actionBtn}>
+        <AnimatedButton 
+          onPress={handleOpenComments} 
+          style={styles.actionBtn}
+          accessibilityLabel="View comments"
+          accessibilityRole="button"
+          accessibilityHint="Opens comments section"
+        >
           <Text style={styles.actionIcon}>💬</Text>
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>
-        <AnimatedButton onPress={handleShare} style={styles.actionBtn}>
+        <AnimatedButton 
+          onPress={handleShare} 
+          style={styles.actionBtn}
+          accessibilityLabel="Share video"
+          accessibilityRole="button"
+        >
           <Text style={styles.actionIcon}>↗️</Text>
           <Text style={styles.actionCount}>Share</Text>
         </AnimatedButton>
         {currentUserId && currentUserId !== item.user_id && (
-          <AnimatedButton onPress={handleOpenReportSheet} style={styles.actionBtn}>
+          <AnimatedButton 
+            onPress={handleOpenReportSheet} 
+            style={styles.actionBtn}
+            accessibilityLabel="Report video"
+            accessibilityRole="button"
+          >
             <Text style={styles.actionIcon}>🚩</Text>
             <Text style={styles.actionCount}>Report</Text>
           </AnimatedButton>
@@ -492,24 +514,24 @@ const styles = StyleSheet.create({
   username: { color: '#ffffff', fontWeight: '700', fontSize: ms(15), marginBottom: 4 },
   caption: { color: '#e2e8f0', fontSize: ms(13), lineHeight: ms(18), marginBottom: 4 },
   hashtagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
-  hashtag: { color: '#a78bfa', fontSize: ms(13), fontWeight: '600' },
+  hashtag: { color: '#B76E79', fontSize: ms(13), fontWeight: '600' },
   actions: { position: 'absolute', right: s(12), alignItems: 'center', width: s(56), zIndex: 10 },
   actionBtn: { alignItems: 'center', marginBottom: 20 },
   actionIcon: { fontSize: ms(32) },
   actionCount: { color: '#fff', fontSize: ms(11), textAlign: 'center', marginTop: 2 },
   creatorContainer: { alignItems: 'center', marginBottom: 24 },
-  creatorAvatar: { width: s(52), height: s(52), borderRadius: s(26), backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
-  creatorAvatarFollowed: { borderColor: '#a78bfa', borderWidth: 2 },
+  creatorAvatar: { width: s(52), height: s(52), borderRadius: s(26), backgroundColor: '#B76E79', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff' },
+  creatorAvatarFollowed: { borderColor: '#B76E79', borderWidth: 2 },
   creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: ms(20) },
-  followBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#ff2d55', alignItems: 'center', justifyContent: 'center', marginTop: -11, borderWidth: 1.5, borderColor: '#0f0f0f' },
+  followBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#B76E79', alignItems: 'center', justifyContent: 'center', marginTop: -11, borderWidth: 1.5, borderColor: '#0f0f0f' },
   followedBadge: { backgroundColor: '#10b981' },
   followBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800', lineHeight: 14 },
   dlOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', pointerEvents: 'none' },
-  dlBox: { backgroundColor: '#1a1d27', borderRadius: 20, padding: 28, width: '75%', alignItems: 'center', gap: 14 },
+  dlBox: { backgroundColor: '#1a2e44', borderRadius: 20, padding: 28, width: '75%', alignItems: 'center', gap: 14 },
   dlTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  dlBarBg: { width: '100%', height: 8, backgroundColor: '#2d3148', borderRadius: 4, overflow: 'hidden' },
-  dlBarFill: { height: '100%', backgroundColor: '#7c3aed', borderRadius: 4 },
-  dlPercent: { color: '#a78bfa', fontSize: 22, fontWeight: '800' },
+  dlBarBg: { width: '100%', height: 8, backgroundColor: '#2a3a5c', borderRadius: 4, overflow: 'hidden' },
+  dlBarFill: { height: '100%', backgroundColor: '#B76E79', borderRadius: 4 },
+  dlPercent: { color: '#B76E79', fontSize: 22, fontWeight: '800' },
 });
 
 function areEqual(prevProps, nextProps) {

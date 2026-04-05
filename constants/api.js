@@ -1,6 +1,6 @@
 // Hardcoded configuration (move to env vars in production)
 export const CONFIG = {
-  SUPABASE_URL: 'https://waurtjtnyinncbdhfydu.supabase.co',
+  SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
   PRIVACY_POLICY_URL: 'https://sites.google.com/view/bushrann',
   TERMS_URL: 'https://sites.google.com/view/bushrann/terms',
 };

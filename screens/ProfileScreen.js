@@ -232,6 +232,9 @@ export default function ProfileScreen({ route, navigation }) {
   // Track last user to prevent duplicate resets
   const lastUserIdRef = useRef(null);
 
+  // Track timeouts for cleanup
+  const timeoutsRef = useRef([]);
+
   useFocusEffect(
     useCallback(() => {
       // Don't fetch here - rely on listener which is more reliable
@@ -254,10 +257,16 @@ export default function ProfileScreen({ route, navigation }) {
       if (viewingId && !isOffline) {
         loadLivestreams(viewingId);
         // Poll a few times to catch processing → ready transition
-        setTimeout(() => loadLivestreams(viewingId), 3000);
-        setTimeout(() => loadLivestreams(viewingId), 6000);
-        setTimeout(() => loadLivestreams(viewingId), 12000);
-        setTimeout(() => loadLivestreams(viewingId), 20000);
+        // Clear any existing timeouts first
+        timeoutsRef.current.forEach(clearTimeout);
+        timeoutsRef.current = [];
+        // Set new timeouts
+        timeoutsRef.current = [
+          setTimeout(() => loadLivestreams(viewingId), 3000),
+          setTimeout(() => loadLivestreams(viewingId), 6000),
+          setTimeout(() => loadLivestreams(viewingId), 12000),
+          setTimeout(() => loadLivestreams(viewingId), 20000),
+        ];
       }
       
       // DEBUG: Log focus state
@@ -294,6 +303,9 @@ export default function ProfileScreen({ route, navigation }) {
         unsubscribe();
         SystemBars.popStackEntry(entry);
         if (initTimer) clearTimeout(initTimer);
+        // Clear all livestream polling timeouts
+        timeoutsRef.current.forEach(clearTimeout);
+        timeoutsRef.current = [];
       };
     }, [targetUserId, globalUser?.id, cachedUser?.id])
   );
@@ -956,12 +968,24 @@ export default function ProfileScreen({ route, navigation }) {
       ) : (
         <View style={styles.actionButtons}>
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <AnimatedButton style={[styles.followBtn, following && styles.followingBtn, { flex: 1 }]} onPress={handleFollow}>
+            <AnimatedButton 
+              style={[styles.followBtn, following && styles.followingBtn, { flex: 1 }]} 
+              onPress={handleFollow}
+              accessibilityLabel={following ? "Unfollow user" : "Follow user"}
+              accessibilityRole="button"
+              accessibilityState={{ selected: following }}
+            >
               <Text style={[styles.followBtnText, following && styles.followingBtnText]}>
                 {following ? '✓ Following' : '+ Follow'}
               </Text>
             </AnimatedButton>
-            <AnimatedButton style={styles.blockBtn} onPress={handleBlock}>
+            <AnimatedButton 
+              style={styles.blockBtn} 
+              onPress={handleBlock}
+              accessibilityLabel={blocked ? "Unblock user" : "Block user"}
+              accessibilityRole="button"
+              accessibilityState={{ selected: blocked }}
+            >
               <Text style={styles.blockBtnText}>{blocked ? '🚫 Blocked' : 'Block'}</Text>
             </AnimatedButton>
           </View>
@@ -973,14 +997,32 @@ export default function ProfileScreen({ route, navigation }) {
           <Text style={[styles.tabText, activeTab === 'videos' && styles.activeTabText]}>🎥</Text>
         </AnimatedButton>
         {isOwnProfile && (
-          <AnimatedButton style={[styles.tab, activeTab === 'private' && styles.activeTab]} onPress={handleTabPrivate}>
+          <AnimatedButton 
+            style={[styles.tab, activeTab === 'private' && styles.activeTab]} 
+            onPress={handleTabPrivate}
+            accessibilityLabel="Private videos tab"
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === 'private' }}
+          >
             <Text style={[styles.tabText, activeTab === 'private' && styles.activeTabText]}>🔒</Text>
           </AnimatedButton>
         )}
-        <AnimatedButton style={[styles.tab, activeTab === 'livestreams' && styles.activeTab]} onPress={handleTabLivestreams}>
+        <AnimatedButton 
+          style={[styles.tab, activeTab === 'livestreams' && styles.activeTab]} 
+          onPress={handleTabLivestreams}
+          accessibilityLabel="Livestreams tab"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'livestreams' }}
+        >
           <Text style={[styles.tabText, activeTab === 'livestreams' && styles.activeTabText]}>🔴</Text>
         </AnimatedButton>
-        <AnimatedButton style={[styles.tab, activeTab === 'liked' && styles.activeTab]} onPress={handleTabLiked}>
+        <AnimatedButton 
+          style={[styles.tab, activeTab === 'liked' && styles.activeTab]} 
+          onPress={handleTabLiked}
+          accessibilityLabel="Liked videos tab"
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'liked' }}
+        >
           <Text style={[styles.tabText, activeTab === 'liked' && styles.activeTabText]}>❤️</Text>
         </AnimatedButton>
       </View>
@@ -1051,7 +1093,12 @@ export default function ProfileScreen({ route, navigation }) {
 
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         {!isOwnProfile && (
-          <AnimatedButton onPress={navigation.goBack} style={styles.topBarBtn}>
+          <AnimatedButton 
+            onPress={navigation.goBack} 
+            style={styles.topBarBtn}
+            accessibilityLabel="Go back"
+            accessibilityRole="button"
+          >
             <Text style={styles.topBarBtnText}>←</Text>
           </AnimatedButton>
         )}
@@ -1175,13 +1222,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.9)', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
   },
   topBarBtn: { padding: 8 },
-  topBarBtnText: { color: '#111', fontSize: 22, fontWeight: '700' },
+  topBarBtnText: { color: '#1a2e44', fontSize: 22, fontWeight: '700' },
   headerSection: { backgroundColor: '#ffffff', paddingBottom: 4 },
   avatarSection: { alignItems: 'center', paddingTop: 8, paddingBottom: 12 },
   scholarBadge: { marginTop: 8, backgroundColor: COLORS.gold, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
   scholarBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   regularInfo: { alignItems: 'center', paddingHorizontal: 24, marginBottom: 10 },
-  displayName: { fontSize: 20, fontWeight: '800', color: '#111', marginBottom: 2 },
+  displayName: { fontSize: 20, fontWeight: '800', color: '#1a2e44', marginBottom: 2 },
   usernameText: { fontSize: 14, color: '#888', marginBottom: 8 },
   bioText: { fontSize: 14, color: '#444', textAlign: 'center', lineHeight: 20 },
   addBioText: { fontSize: 14, color: COLORS.gold, fontWeight: '600' },
@@ -1198,7 +1245,7 @@ const styles = StyleSheet.create({
   scholarBioValue: { fontSize: 13, color: '#444', lineHeight: 20 },
   statsRow: { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 16, marginHorizontal: 16, marginBottom: 10, paddingVertical: 8, justifyContent: 'space-around', alignItems: 'center' },
   statItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, minWidth: 70 },
-  statNum: { fontSize: 18, fontWeight: '800', color: '#111' },
+  statNum: { fontSize: 18, fontWeight: '800', color: '#1a2e44' },
   statLabel: { fontSize: 11, color: '#888', marginTop: 2 },
   statDivider: { width: 1, height: 28, backgroundColor: '#ddd' },
   actionButtons: { paddingHorizontal: 16, marginBottom: 10 },
@@ -1274,7 +1321,7 @@ const styles = StyleSheet.create({
   flexDirection: 'row',
   alignItems: 'center',
   gap: 8,
-  backgroundColor: '#1a1a1a',
+  backgroundColor: '#1a2e44',
   borderRadius: 100,
   paddingHorizontal: 18,
   paddingVertical: 10,

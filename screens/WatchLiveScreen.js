@@ -518,7 +518,7 @@ const styles = StyleSheet.create({
   viewerText:   { color: '#fff', fontSize: 13, fontWeight: '600' },
   closeBtn:     { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   closeBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  questionBanner:      { position: 'absolute', top: 100, left: 16, right: 16, backgroundColor: 'rgba(245,166,35,0.9)', borderRadius: 14, padding: 14, zIndex: 20 },
+  questionBanner:      { position: 'absolute', top: 100, left: 16, right: 16, backgroundColor: 'rgba(183,110,121,0.9)', borderRadius: 14, padding: 14, zIndex: 20 },
   questionBannerLabel: { color: '#fff', fontSize: 12, fontWeight: '700', marginBottom: 4 },
   questionBannerText:  { color: '#fff', fontSize: 15, fontWeight: '600' },
   bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 12 },

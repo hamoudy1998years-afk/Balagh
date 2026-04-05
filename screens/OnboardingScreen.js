@@ -169,7 +169,7 @@ export default function OnboardingScreen({ onComplete }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#000000',
   },
   slide: {
     width,
@@ -182,12 +182,12 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#1a2e44',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 40,
     borderWidth: 2,
-    borderColor: 'rgba(255, 215, 0, 0.2)',
+    borderColor: 'rgba(183, 110, 121, 0.2)',
   },
   emoji: {
     fontSize: 56,
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.gold || '#FFD700',
+    color: COLORS.gold || '#B76E79',
     marginBottom: 16,
   },
   description: {
@@ -221,7 +221,7 @@ const styles = StyleSheet.create({
   dot: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#FFD700',
+    backgroundColor: '#B76E79',
     marginHorizontal: 4,
   },
   footer: {
@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   buttonText: {
-    color: '#000000',
+    color: '#1a2e44',
     fontSize: 18,
     fontWeight: '700',
   },

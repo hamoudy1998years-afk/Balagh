@@ -1430,7 +1430,7 @@ const styles = StyleSheet.create({
   emptyQuestionsText: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 4 },
   emptyQuestionsSubtext: { color: '#64748b', fontSize: 13, textAlign: 'center' },
   questionItem: { backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 12, marginBottom: 8 },
-  questionItemSelected: { borderWidth: 1, borderColor: COLORS.gold, backgroundColor: 'rgba(245,166,35,0.2)' },
+  questionItemSelected: { borderWidth: 1, borderColor: COLORS.gold, backgroundColor: 'rgba(183,110,121,0.2)' },
   questionUsername: { color: COLORS.gold, fontSize: 12, fontWeight: '700', marginBottom: 3 },
   questionText: { color: '#fff', fontSize: 14 },
   questionSelectedBadge: { color: COLORS.gold, fontSize: 11, marginTop: 4, fontWeight: '600' },

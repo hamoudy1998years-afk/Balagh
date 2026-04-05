@@ -67,8 +67,8 @@ export default function ModernDialog({
     switch (type) {
       case 'success': return '#00C896';
       case 'error': return '#FF4458';
-      case 'warning': return '#F5A623';
-      case 'confirm': return '#F5A623';
+      case 'warning': return '#B76E79';
+      case 'confirm': return '#B76E79';
       default: return '#ffffff';
     }
   };
@@ -136,14 +136,14 @@ const styles = StyleSheet.create({
     padding: s(24),
   },
   container: {
-    backgroundColor: '#1a1d27',
+    backgroundColor: '#1a2e44',
     borderRadius: s(20),
     padding: s(28),
     width: '100%',
     maxWidth: s(320),
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#2d3148',
+    borderColor: '#2a3a5c',
   },
   icon: {
     fontSize: ms(48),
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#dc2626',
   },
   buttonText: {
-    color: '#0a0f1e',
+    color: '#1a2e44',
     fontSize: ms(15),
     fontWeight: '700',
   },

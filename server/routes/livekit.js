@@ -18,7 +18,9 @@ router.post('/token', async (req, res) => {
       return res.status(500).json({ error: 'LiveKit credentials not configured' });
     }
     
+    if (process.env.NODE_ENV !== 'production') {
     console.log('[LIVEKIT] Generating token for:', userId, 'room:', roomName);
+  }
     
     const now = Math.floor(Date.now() / 1000);
     const payload = {

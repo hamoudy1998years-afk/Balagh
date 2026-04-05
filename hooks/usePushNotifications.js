@@ -31,7 +31,7 @@ async function registerForPushNotifications() {
     if (finalStatus !== 'granted') return;
 
     const token = (await Notifications.getExpoPushTokenAsync({
-      projectId: '5804d13c-1244-4972-8b7a-083f99fbb885',
+      projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
     })).data;
 
     const { data: { user } } = await supabase.auth.getUser();

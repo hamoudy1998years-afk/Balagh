@@ -1,8 +1,8 @@
 import {
   View, Text, TextInput, StyleSheet,
-  ScrollView, KeyboardAvoidingView, Platform,
   TouchableOpacity, Animated,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
@@ -112,8 +112,15 @@ export default function SignupScreen({ navigation }) {
   return (
     <>
       <SystemBars style="light" />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView
+  style={{ flex: 1, backgroundColor: COLORS.bgDark }}
+  contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}
+  keyboardShouldPersistTaps="handled"
+  enableOnAndroid={true}
+  enableAutomaticScroll={true}
+  extraScrollHeight={20}
+  extraHeight={120}
+>
         <AnimatedButton onPress={navigation.goBack} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
           <Text style={{ color: COLORS.gold, fontSize: 16 }}>← Back</Text>
         </AnimatedButton>
@@ -125,7 +132,7 @@ export default function SignupScreen({ navigation }) {
         <TextInput
           style={styles.input}
           placeholder="Username *"
-          placeholderTextColor={COLORS.textGray}
+          placeholderTextColor="#8B92A8"
           value={username}
           onChangeText={setUsername}
           autoCapitalize="none"
@@ -135,7 +142,7 @@ export default function SignupScreen({ navigation }) {
         <TextInput
           style={styles.input}
           placeholder="Email *"
-          placeholderTextColor={COLORS.textGray}
+          placeholderTextColor="#8B92A8"
           value={email}
           onChangeText={setEmail}
           keyboardType="email-address"
@@ -146,7 +153,7 @@ export default function SignupScreen({ navigation }) {
         <TextInput
           style={styles.input}
           placeholder="Phone Number (optional)"
-          placeholderTextColor={COLORS.textGray}
+          placeholderTextColor="#8B92A8"
           value={phone}
           onChangeText={setPhone}
           keyboardType="phone-pad"
@@ -158,7 +165,7 @@ export default function SignupScreen({ navigation }) {
           <TextInput
             style={styles.passwordInput}
             placeholder="Password *"
-            placeholderTextColor={COLORS.textGray}
+            placeholderTextColor="#8B92A8"
             value={password}
             onChangeText={setPassword}
             secureTextEntry={!showPassword}
@@ -190,7 +197,7 @@ export default function SignupScreen({ navigation }) {
           <TextInput
             style={styles.passwordInput}
             placeholder="Confirm Password *"
-            placeholderTextColor={COLORS.textGray}
+            placeholderTextColor="#8B92A8"
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry={!showConfirmPassword}
@@ -232,8 +239,7 @@ export default function SignupScreen({ navigation }) {
             <Text style={styles.linkBold}>Login</Text>
           </Text>
         </AnimatedButton>
-      </ScrollView>
-    </KeyboardAvoidingView>
+</KeyboardAwareScrollView>
     </>
   );
 }
@@ -247,20 +253,20 @@ const styles = StyleSheet.create({
   title: { fontSize: 36, fontWeight: 'bold', color: COLORS.textWhite, marginBottom: 4 },
   subtitle: { fontSize: 14, color: COLORS.textGray, marginBottom: 36 },
   input: {
-    width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1,
-    borderColor: COLORS.borderDark, borderRadius: 12,
-    padding: 16, color: COLORS.textWhite, fontSize: 15, marginBottom: 14,
+    width: '100%', backgroundColor: '#FFFFFF', borderWidth: 1,
+    borderColor: '#E5E5E5', borderRadius: 8,
+    padding: 16, color: '#1a2e44', fontSize: 15, marginBottom: 14,
   },
   passwordContainer: {
     width: '100%', flexDirection: 'row', alignItems: 'center',
-    backgroundColor: COLORS.bgCard, borderWidth: 1, borderColor: COLORS.borderDark,
-    borderRadius: 12, paddingHorizontal: 16, marginBottom: 14,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E5E5',
+    borderRadius: 8, paddingHorizontal: 16, marginBottom: 14,
     position: 'relative',
   },
   passwordInput: { 
     flex: 1, 
     paddingVertical: 16, 
-    color: COLORS.textWhite, 
+    color: '#1a2e44', 
     fontSize: 15,
     paddingRight: 40, // Space for eye icon
   },

@@ -188,8 +188,8 @@ export default function FollowListScreen({ route, navigation }) {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#7c3aed"
-              colors={['#7c3aed']}
+              tintColor={COLORS.gold}
+              colors={[COLORS.gold]}
             />
           }
           ListEmptyComponent={
@@ -213,7 +213,7 @@ export default function FollowListScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#000000',
   },
   centered: {
     flex: 1,
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#7c3aed',
+    backgroundColor: '#B76E79',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -293,12 +293,12 @@ const styles = StyleSheet.create({
     padding: s(16),
   },
   reportCard: {
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#1a2e44',
     borderRadius: 12,
     padding: s(16),
     marginBottom: s(12),
     borderWidth: 1,
-    borderColor: '#2d2d44',
+    borderColor: '#2a3a5c',
   },
   reportHeader: {
     flexDirection: 'row',
@@ -326,7 +326,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   reasonContainer: {
-    backgroundColor: '#2d2d44',
+    backgroundColor: '#2a3a5c',
     borderRadius: 8,
     padding: s(12),
     marginBottom: s(12),
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#dc2626',
   },
   deleteButton: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: '#B76E79',
   },
   buttonText: {
     color: '#fff',

@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: '#1a1a1a',
+    borderBottomWidth: 1, borderBottomColor: '#1a2e44',
   },
   topTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
   topBtn: { minWidth: 70 },

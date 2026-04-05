@@ -168,9 +168,9 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   input: {
-    backgroundColor: '#1a1d27', 
+    backgroundColor: '#1a2e44', 
     borderWidth: 1, 
-    borderColor: '#2d3148',
+    borderColor: '#2a3a5c',
     borderRadius: 12, 
     padding: 16, 
     paddingRight: 50, // Space for eye icon
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   buttonText: { 
-    color: '#000', 
+    color: '#1a2e44', 
     fontSize: 16, 
     fontWeight: '700' 
   },

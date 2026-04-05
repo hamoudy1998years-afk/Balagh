@@ -46,7 +46,7 @@ export default class ErrorBoundary extends React.Component {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0f1e',
+    backgroundColor: '#1a2e44',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   retryBtnText: {
-    color: '#0a0f1e',
+    color: '#1a2e44',
     fontSize: 16,
     fontWeight: '700',
   },

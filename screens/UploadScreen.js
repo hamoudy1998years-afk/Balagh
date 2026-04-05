@@ -543,7 +543,7 @@ export default function UploadScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#ffffff' },
   content: { padding: 24 },
-  title: { fontSize: 24, fontWeight: '700', color: '#111111', marginBottom: 4 },
+  title: { fontSize: 24, fontWeight: '700', color: '#1a2e44', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#888888', marginBottom: 28 },
   hint: { color: '#888888', fontSize: 12, marginBottom: 10 },
   liveBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff5f5', borderWidth: 1, borderColor: COLORS.live, borderRadius: 14, padding: 16, marginBottom: 20, gap: 10 },
@@ -554,7 +554,7 @@ const styles = StyleSheet.create({
   videoPicker: { backgroundColor: '#f5f5f5', borderRadius: 16, borderWidth: 2, borderColor: '#e5e5e5', borderStyle: 'dashed', marginBottom: 24, overflow: 'hidden' },
   videoPlaceholder: { padding: 40, alignItems: 'center' },
   videoPlaceholderIcon: { fontSize: 48, marginBottom: 12 },
-  videoPlaceholderText: { color: '#111111', fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  videoPlaceholderText: { color: '#1a2e44', fontSize: 16, fontWeight: '600', marginBottom: 4 },
   videoPlaceholderSub: { color: '#888888', fontSize: 13 },
   videoSelected: { padding: 24, alignItems: 'center' },
   videoSelectedIcon: { fontSize: 40, marginBottom: 8 },
@@ -588,7 +588,7 @@ const styles = StyleSheet.create({
     fontWeight: '600' 
   },
   label: { color: '#888888', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
-  input: { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 12, padding: 16, color: '#111111', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  input: { backgroundColor: '#f5f5f5', borderWidth: 0.5, borderColor: '#e5e5e5', borderRadius: 12, padding: 16, color: '#1a2e44', fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
   inputWrapper: { marginBottom: 20 },
   charCount: { color: '#aaaaaa', fontSize: 12, textAlign: 'right', marginTop: 4 },
   categories: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 32 },

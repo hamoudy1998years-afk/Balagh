@@ -240,7 +240,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#FFD700',
+    backgroundColor: '#B76E79',
     right: '25%',
     top: '50%',
     marginTop: -4,
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   selectedValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#FFD700',
+    color: '#B76E79',
   },
   footer: {
     paddingHorizontal: 24,

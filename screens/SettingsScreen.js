@@ -21,7 +21,7 @@ const ACCENT_DIM = `${COLORS.gold}18`;
 const BG         = '#ffffff';
 const CARD       = '#f5f5f5';
 const BORDER     = '#e5e5e5';
-const TEXT       = '#111111';
+const TEXT       = '#1a2e44';
 const SUBTEXT    = '#888888';
 const MUTED      = '#dddddd';
 const DANGER     = COLORS.live;
@@ -33,7 +33,16 @@ function Row({ icon, label, sublabel, onPress, right, danger, last }) {
   return (
     <>
       <Animated.View style={{ transform: [{ scale }] }}>
-        <TouchableOpacity onPress={onPress} onPressIn={pi} onPressOut={po} activeOpacity={1} style={styles.row}>
+        <TouchableOpacity 
+          onPress={onPress} 
+          onPressIn={pi} 
+          onPressOut={po} 
+          activeOpacity={1} 
+          style={styles.row}
+          accessibilityLabel={label}
+          accessibilityRole="button"
+          accessibilityHint={sublabel}
+        >
           <View style={[styles.rowIcon, { backgroundColor: danger ? '#FF456018' : ACCENT_DIM }]}>
             <Text style={{ fontSize: 17 }}>{icon}</Text>
           </View>
@@ -56,7 +65,16 @@ function CategoryButton({ icon, label, sublabel, onPress, last }) {
   return (
     <>
       <Animated.View style={{ transform: [{ scale }] }}>
-        <TouchableOpacity onPress={onPress} onPressIn={pi} onPressOut={po} activeOpacity={1} style={styles.catRow}>
+        <TouchableOpacity 
+          onPress={onPress} 
+          onPressIn={pi} 
+          onPressOut={po} 
+          activeOpacity={1} 
+          style={styles.catRow}
+          accessibilityLabel={label}
+          accessibilityRole="button"
+          accessibilityHint={sublabel}
+        >
           <View style={[styles.catIcon, { backgroundColor: ACCENT_DIM }]}>
             <Text style={{ fontSize: 20 }}>{icon}</Text>
           </View>
@@ -72,13 +90,16 @@ function CategoryButton({ icon, label, sublabel, onPress, last }) {
   );
 }
 
-function ASwitch({ value, onValueChange }) {
+function ASwitch({ value, onValueChange, label }) {
   return (
     <Switch
       value={value} onValueChange={onValueChange}
       trackColor={{ false: MUTED, true: ACCENT + '50' }}
       thumbColor={value ? ACCENT : '#aaaaaa'}
       ios_backgroundColor={MUTED}
+      accessibilityLabel={label}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
     />
   );
 }
@@ -494,7 +515,7 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="CONTENT" />
       <Card>
         <Row icon="❤️" label="Show Like Count" sublabel="Let others see your video like counts"
-          right={<ASwitch value={showLikes} onValueChange={v => { setShowLikes(v); savePrivacy('show_likes', v); }} />} last />
+          right={<ASwitch value={showLikes} onValueChange={v => { setShowLikes(v); savePrivacy('show_likes', v); }} label="Show like counts on videos" />} last />
       </Card>
       <GroupLabel text="SAFETY" />
       <Card>
@@ -552,18 +573,18 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="GENERAL" />
       <Card>
         <Row icon="🔔" label="All Notifications" sublabel="Master toggle — turns everything on or off"
-          right={<ASwitch value={notifAll} onValueChange={v => { setNotifAll(v); saveNotif('notif_all', v); }} />} last />
+          right={<ASwitch value={notifAll} onValueChange={v => { setNotifAll(v); saveNotif('notif_all', v); }} label="Enable all notifications" />} last />
       </Card>
       <GroupLabel text="ACTIVITY" />
       <Card>
         <Row icon="💬" label="Comments" sublabel="When someone comments on your video"
-          right={<ASwitch value={notifComments} onValueChange={v => { setNotifComments(v); saveNotif('notif_comments', v); }} />} />
+          right={<ASwitch value={notifComments} onValueChange={v => { setNotifComments(v); saveNotif('notif_comments', v); }} label="Enable comment notifications" />} />
         <Row icon="❤️" label="Likes" sublabel="When someone likes your video"
-          right={<ASwitch value={notifLikes} onValueChange={v => { setNotifLikes(v); saveNotif('notif_likes', v); }} />} />
+          right={<ASwitch value={notifLikes} onValueChange={v => { setNotifLikes(v); saveNotif('notif_likes', v); }} label="Enable like notifications" />} />
         <Row icon="👥" label="New Followers" sublabel="When someone follows you"
-          right={<ASwitch value={notifFollowers} onValueChange={v => { setNotifFollowers(v); saveNotif('notif_followers', v); }} />} />
+          right={<ASwitch value={notifFollowers} onValueChange={v => { setNotifFollowers(v); saveNotif('notif_followers', v); }} label="Enable follower notifications" />} />
         <Row icon="✉️" label="Direct Messages" sublabel="When someone sends you a message"
-          right={<ASwitch value={notifMessages} onValueChange={v => { setNotifMessages(v); saveNotif('notif_messages', v); }} />} last />
+          right={<ASwitch value={notifMessages} onValueChange={v => { setNotifMessages(v); saveNotif('notif_messages', v); }} label="Enable message notifications" />} last />
       </Card>
     </SubScreen>
   );
@@ -768,7 +789,13 @@ export default function SettingsScreen({ navigation }) {
           <CategoryButton icon="🎨" label="Appearance"       sublabel="Dark mode & theme"                    onPress={handleNavigateAppearance} />
           <CategoryButton icon="💬" label="Help & Support"   sublabel="FAQ, contact us, terms, about"        onPress={handleNavigateHelp} last />
         </Card>
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+        <TouchableOpacity 
+          style={styles.logoutBtn} 
+          onPress={handleLogout}
+          accessibilityLabel="Log out"
+          accessibilityRole="button"
+          accessibilityHint="Ends your session"
+        >
           <Text style={styles.logoutIcon}>🚪</Text>
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
@@ -788,7 +815,7 @@ const styles = StyleSheet.create({
   profileCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: CARD, borderRadius: 20, padding: 16, marginBottom: 28, borderWidth: 0.5, borderColor: BORDER },
   profileAvatarWrap:     { position: 'relative', marginRight: 14 },
   profileAvatar:         { width: 58, height: 58, borderRadius: 29, borderWidth: 2, borderColor: ACCENT },
-  profileAvatarFallback: { width: 58, height: 58, borderRadius: 29, backgroundColor: COLORS.navyLight, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: ACCENT },
+  profileAvatarFallback: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#1a2e44', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: ACCENT },
   profileOnline:         { position: 'absolute', bottom: 1, right: 1, width: 13, height: 13, borderRadius: 7, backgroundColor: COLORS.success, borderWidth: 2, borderColor: CARD },
   profileInfo:           { flex: 1 },
   profileName:           { fontSize: 16, fontWeight: '700', color: TEXT },

@@ -4,8 +4,6 @@ import {
   TextInput,
   TouchableWithoutFeedback,
   StyleSheet,
-  KeyboardAvoidingView,
-  ScrollView,
   FlatList,
   Platform,
   ActivityIndicator,
@@ -14,6 +12,7 @@ import {
   Keyboard,
   Animated,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
@@ -803,17 +802,17 @@ const handleClosePinModal = useCallback(() => {
       <SystemBars style="light" />
       <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
       <TouchableWithoutFeedback onPress={closeDropdown}>
-        <KeyboardAvoidingView 
-          style={{ flex: 1, backgroundColor: COLORS.bgDark }} 
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        <KeyboardAwareScrollView
+          style={{ flex: 1, backgroundColor: COLORS.bgDark }}
+          contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={!showDropdown}
+          nestedScrollEnabled={true}
+          enableOnAndroid={true}
+          enableAutomaticScroll={true}
+          extraScrollHeight={20}
+          extraHeight={120}
         >
-          <ScrollView
-            style={{ flex: 1, backgroundColor: COLORS.bgDark }}
-            contentContainerStyle={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 }]}
-            keyboardShouldPersistTaps="handled"
-            scrollEnabled={!showDropdown}
-            nestedScrollEnabled={true}
-          >
             <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
             <Text style={styles.title}>Bushrann</Text>
             <Text style={styles.subtitle}>Welcome back</Text>
@@ -822,7 +821,7 @@ const handleClosePinModal = useCallback(() => {
               <TextInput
                 style={[styles.input, showDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
                 placeholder="Email, Username or Phone"
-                placeholderTextColor="#4b5563"
+                placeholderTextColor="#8B92A8"
                 value={identifier}
                 onChangeText={handleIdentifierChange}
                 onFocus={handleIdentifierFocus}
@@ -869,7 +868,7 @@ const handleClosePinModal = useCallback(() => {
                           <Text style={styles.dropdownEmail}>{account.email}</Text>
                         )}
                       </View>
-                      <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
+                      <MaterialCommunityIcons name={biometricIcon} size={22} color={COLORS.gold} />
                     </TouchableOpacity>
                   ))}
                                 {savedAccounts.filter(account => {
@@ -891,7 +890,7 @@ const handleClosePinModal = useCallback(() => {
                 <TextInput
                   style={styles.passwordInput}
                   placeholder="Password"
-                  placeholderTextColor="#4b5563"
+                  placeholderTextColor="#8B92A8"
                   value={password}
                   onChangeText={setPassword}
                   onFocus={closeDropdown}
@@ -1050,8 +1049,7 @@ const handleClosePinModal = useCallback(() => {
               buttons={dialog.buttons}
               onDismiss={() => setDialog({ ...dialog, visible: false })}
             />
-          </ScrollView>
-        </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
       </TouchableWithoutFeedback>
     </View>
     </>
@@ -1068,20 +1066,20 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, color: '#64748b', marginBottom: 36 },
   inputWrapper: { width: '100%', zIndex: 999, marginBottom: 14 },
   input: {
-    width: '100%', backgroundColor: COLORS.bgCard, borderWidth: 1,
-    borderColor: COLORS.borderDark, borderRadius: 12,
-    padding: 16, color: COLORS.textWhite, fontSize: 15,
+    width: '100%', backgroundColor: '#FFFFFF', borderWidth: 1,
+    borderColor: '#E5E5E5', borderRadius: 8,
+    padding: 16, color: '#1a2e44', fontSize: 15,
   },
   dropdown: {
     width: '100%', height: 200,
-    backgroundColor: '#1a1d27',
-    borderWidth: 1, borderTopWidth: 0, borderColor: '#2d3148',
+    backgroundColor: '#1a2e44',
+    borderWidth: 1, borderTopWidth: 0, borderColor: '#2a3a5c',
     borderBottomLeftRadius: 12, borderBottomRightRadius: 12,
     overflow: 'hidden',
   },
   dropdownItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14 },
-  dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: '#2d3148' },
-  dropdownAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: '#2a3a5c' },
+  dropdownAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#B76E79', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   dropdownAvatarGoogle: { backgroundColor: '#1a73e8' },
   dropdownAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   dropdownInfo: { flex: 1 },
@@ -1090,13 +1088,13 @@ const styles = StyleSheet.create({
   dropdownAction: { fontSize: 18, marginLeft: 8 },
   passwordContainer: {
     width: '100%', flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1a1d27', borderWidth: 1, borderColor: '#2d3148',
-    borderRadius: 12, paddingHorizontal: 16, marginBottom: 14, zIndex: 1,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E5E5',
+    borderRadius: 8, paddingHorizontal: 16, marginBottom: 14, zIndex: 1,
   },
   passwordInput: { 
     flex: 1, 
     paddingVertical: 16, 
-    color: '#ffffff', 
+    color: '#1a2e44', 
     fontSize: 15,
     paddingRight: 40,
   },
@@ -1196,7 +1194,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: COLORS.bgCard || '#1a1d27', 
+    backgroundColor: COLORS.bgCard || '#1a2e44', 
     borderRadius: 24,
     padding: 32, 
     width: '85%', 
@@ -1272,7 +1270,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.15 }],
   },
   pinNumber: {
-    color: '#1a1d27',
+    color: '#1a2e44',
     fontSize: 14,
     fontWeight: '800',
   },

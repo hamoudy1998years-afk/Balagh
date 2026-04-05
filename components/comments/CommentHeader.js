@@ -24,7 +24,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
   },
   spacer: { width: 30 },
-  title: { fontSize: 15, fontWeight: '700', color: '#000', textAlign: 'center', flex: 1 },
+  title: { fontSize: 15, fontWeight: '700', color: '#1a2e44', textAlign: 'center', flex: 1 },
   closeButton: { width: 30, alignItems: 'flex-end', justifyContent: 'center' },
   close: { fontSize: 18, color: '#666', fontWeight: '600' },
 });
