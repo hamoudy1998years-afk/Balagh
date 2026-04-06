@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   Alert,
   FlatList,
   Dimensions,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +21,15 @@ const VISIBLE_ITEMS = 5;
 
 export default function AgeGateScreen({ onVerified }) {
   const insets = useSafeAreaInsets();
+  
+  useEffect(() => {
+    StatusBar.setBarStyle('light-content', true);
+    if (Platform.OS === 'android') {
+      StatusBar.setTranslucent(true);
+      StatusBar.setBackgroundColor('transparent');
+    }
+  }, []);
+  
   const [selectedAge, setSelectedAge] = useState(18);
   const flatListRef = useRef(null);
   

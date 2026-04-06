@@ -97,6 +97,13 @@ export default function FollowListScreen({ route, navigation }) {
     try {
       let profileIds = [];
 
+      // Get blocked users list
+      const { data: blockedUsers } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', currentUserId);
+      const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
+
       if (type === 'followers') {
         const { data } = await supabase
           .from('follows')
@@ -109,6 +116,11 @@ export default function FollowListScreen({ route, navigation }) {
           .select('following_id')
           .eq('follower_id', userId);
         profileIds = (data ?? []).map(row => row.following_id);
+      }
+
+      // Exclude blocked users
+      if (blockedIds.length > 0) {
+        profileIds = profileIds.filter(id => !blockedIds.includes(id));
       }
 
       if (profileIds.length === 0) {

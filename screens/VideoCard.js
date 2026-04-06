@@ -53,6 +53,7 @@ function VideoCard({
   const [isLiking, setIsLiking] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
+  const [isBlocked, setIsBlocked] = useState(false);
   const [videoUri, setVideoUri] = useState(null);
   const [isLoadingSignedUrl, setIsLoadingSignedUrl] = useState(false);
 
@@ -95,6 +96,20 @@ function VideoCard({
       fetchSignedUrl();
     }
   }, [item.id, item.video_url]);
+
+  useEffect(() => {
+    async function checkBlocked() {
+      if (!currentUserId || !item.user_id) return;
+      const { data } = await supabase
+        .from('blocks')
+        .select('id')
+        .eq('blocker_id', currentUserId)
+        .eq('blocked_id', item.user_id)
+        .maybeSingle();
+      setIsBlocked(!!data);
+    }
+    checkBlocked();
+  }, [currentUserId, item.user_id]);
 
   console.log('[VIDEO_PLAYER] Received item:', item);
   console.log('[VIDEO_PLAYER] Video URI being used:', videoUri);
@@ -420,13 +435,14 @@ function VideoCard({
               }
             </View>
           </AnimatedButton>
-          <AnimatedButton onPress={handleFollow}>
-            {currentUserId && currentUserId !== item.user_id && (
-              !followed
+          {!isBlocked && currentUserId && currentUserId !== item.user_id && (
+            <AnimatedButton onPress={handleFollow}>
+              {!followed
                 ? <View style={styles.followBadge}><Text style={styles.followBadgeText}>+</Text></View>
                 : <View style={[styles.followBadge, styles.followedBadge]}><Text style={styles.followBadgeText}>✓</Text></View>
-            )}
-          </AnimatedButton>
+              }
+            </AnimatedButton>
+          )}
         </View>
         <AnimatedButton 
           onPress={handleLike} 
@@ -561,7 +577,7 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
-  creatorContainer: { alignItems: 'center', marginBottom: 24 },
+  creatorContainer: { alignItems: 'center', marginBottom: 16 },
   creatorAvatar: {
     width: s(52),
     height: s(52),
@@ -575,18 +591,23 @@ const styles = StyleSheet.create({
   creatorAvatarFollowed: { borderColor: COLORS.gold, borderWidth: 2 },
   creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: ms(20) },
   followBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 27,
+    height: 27,
+    borderRadius: 13.5,
     backgroundColor: COLORS.gold,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -11,
-    borderWidth: 1.5,
-    borderColor: '#0f0f0f',
+    marginTop: -13.5,
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
   followedBadge: { backgroundColor: '#10b981' },
-  followBadgeText: { color: '#fff', fontSize: 13, fontWeight: '800', lineHeight: 14 },
+  followBadgeText: { color: '#fff', fontSize: 16, fontWeight: '800' },
   dlOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 99, backgroundColor: 'rgba(0,0,0,0.55)', pointerEvents: 'none' },
   dlBox: { backgroundColor: '#1a2e44', borderRadius: 20, padding: 28, width: '75%', alignItems: 'center', gap: 14 },
   dlTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },

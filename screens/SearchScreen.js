@@ -97,16 +97,29 @@ export default function SearchScreen({ navigation }) {
       let captionQuery = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
       if (selectedCategory !== 'All') captionQuery = captionQuery.eq('category', selectedCategory);
 
+      // Get blocked users list
+      const { data: blockedUsers } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', currentUserId);
+      const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
+
+      let profileQuery = supabase
+        .from('profiles')
+        .select('id, username, avatar_url, full_name')
+        .or(`username.ilike.%${sanitized}%,full_name.ilike.%${sanitized}%`);
+      
+      // Exclude blocked users
+      if (blockedIds.length > 0) {
+        profileQuery = profileQuery.not('id', 'in', `(${blockedIds.join(',')})`);
+      }
+
       const [
         { data: captionVideos, error: captionError },
         { data: matchedProfiles, error: profileError },
       ] = await Promise.all([
         captionQuery.limit(30),
-        supabase
-          .from('profiles')
-          .select('id, username, avatar_url, full_name')
-          .or(`username.ilike.%${sanitized}%,full_name.ilike.%${sanitized}%`)
-          .limit(10),
+        profileQuery.limit(10),
       ]);
 
       if (captionError) {

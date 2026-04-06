@@ -176,6 +176,13 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     const user = authUser;
     if (!user) return;
 
+    // Get blocked users list
+    const { data: blockedUsers } = await supabase
+      .from('blocks')
+      .select('blocked_id')
+      .eq('blocker_id', user.id);
+    const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
+
     const { data: follows } = await supabase
       .from('follows')
       .select('following_id')
@@ -189,11 +196,18 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
     const followingIds = follows.map(f => f.following_id);
 
-    const { data } = await supabase
+    let query = supabase
       .from('videos')
       .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
       .in('user_id', followingIds)
-      .neq('user_id', user.id)
+      .neq('user_id', user.id);
+    
+    // Exclude blocked users
+    if (blockedIds.length > 0) {
+      query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
+    }
+    
+    const { data } = await query
       .order('created_at', { ascending: false })
       .limit(20);
 
@@ -267,6 +281,13 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   // The old effect was calling playerPool.pauseAll() which leaked audio across tabs
 
   useEffect(() => {
+    // Always fetch fresh Following data to respect block status
+    if (type === 'following') {
+      loadVideos();
+      loadMyInteractions();
+      return;
+    }
+    
     if (isCacheValid(type)) {
       setVideos(feedCache[type]);
       setMyLikes(feedCache.likes ?? []);
@@ -287,6 +308,13 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       const user = authUser;
       if (!user) { setVideos([]); setLoading(false); return; }
 
+      // Get blocked users list
+      const { data: blockedUsers } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', user.id);
+      const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
+
       const { data: follows } = await supabase
         .from('follows')
         .select('following_id')
@@ -300,11 +328,18 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
       const followingIds = follows.map(f => f.following_id);
 
-      const { data, error } = await supabase
+      let query = supabase
         .from('videos')
         .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
         .in('user_id', followingIds)
-        .neq('user_id', user.id)
+        .neq('user_id', user.id);
+      
+      // Exclude blocked users
+      if (blockedIds.length > 0) {
+        query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
+      }
+      
+      const { data, error } = await query
         .order('created_at', { ascending: false })
         .limit(20);
 
@@ -317,13 +352,37 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       }
 
     } else {
-      const { data, error } = await supabase
+      // Get current user (may be null for guests)
+      const currentUser = authUser;
+      
+      let blockedIds = [];
+      if (currentUser?.id) {
+        const { data: blockedUsers } = await supabase
+          .from('blocks')
+          .select('blocked_id')
+          .eq('blocker_id', currentUser.id);
+        blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
+      }
+
+      let query = supabase
         .from('videos')
-        .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+        .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)');
+      
+      // Exclude blocked users if any
+      if (blockedIds.length > 0) {
+        query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
+      }
+      
+      const { data, error } = await query
         .order('created_at', { ascending: false })
         .limit(20);
 
-      if (error) { __DEV__ && console.warn('ForYou feed error:', error.message); setFeedError('Could not load your feed.'); setLoading(false); return; }
+      if (error) { 
+        __DEV__ && console.warn('ForYou feed error:', error.message); 
+        setFeedError('Could not load your feed.'); 
+        setLoading(false); 
+        return; 
+      }
       const arr = [...(data ?? [])];
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -566,6 +625,13 @@ export default function HomeScreen({ navigation }) {
     if (!user) return;
 
     try {
+      // Get blocked users list
+      const { data: blockedUsers } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', user.id);
+      const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
+
       const { data: follows } = await supabase
         .from('follows')
         .select('following_id')
@@ -579,11 +645,18 @@ export default function HomeScreen({ navigation }) {
 
       const followingIds = follows.map(f => f.following_id);
 
-      const { data } = await supabase
+      let query = supabase
         .from('videos')
         .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
         .in('user_id', followingIds)
-        .neq('user_id', user.id)
+        .neq('user_id', user.id);
+      
+      // Exclude blocked users
+      if (blockedIds.length > 0) {
+        query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
+      }
+      
+      const { data } = await query
         .order('created_at', { ascending: false })
         .limit(20);
 

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   Dimensions,
   Animated,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SystemBars } from 'react-native-edge-to-edge';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -41,6 +43,15 @@ const slides = [
 
 export default function OnboardingScreen({ onComplete }) {
   const insets = useSafeAreaInsets();
+  
+  useEffect(() => {
+    StatusBar.setBarStyle('light-content', true);
+    if (Platform.OS === 'android') {
+      StatusBar.setTranslucent(true);
+      StatusBar.setBackgroundColor('transparent');
+    }
+  }, []);
+  
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef(null);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -124,7 +135,6 @@ export default function OnboardingScreen({ onComplete }) {
 
   return (
     <View style={styles.container}>
-      <SystemBars style="light" />
       <FlatList
         ref={flatListRef}
         data={slides}

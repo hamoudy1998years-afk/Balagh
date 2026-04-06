@@ -1,6 +1,6 @@
 ﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -107,6 +107,7 @@ function ProfileTabIcon({ color, size, focused }) {
 function MainTabs({ session }) {
   const [homeKey, setHomeKey] = useState(0);
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const handleHomePress = () => {
     const state = navigation.getState();
@@ -133,8 +134,8 @@ function MainTabs({ session }) {
           marginHorizontal: 12,
           marginBottom: 12,
           borderRadius: 22,
-          height: 60,
-          paddingBottom: 8,
+          height: 60 + (insets.bottom > 0 ? insets.bottom - 8 : 0),
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           position: 'absolute',
           elevation: 0,
         },

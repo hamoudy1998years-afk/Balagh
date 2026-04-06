@@ -67,10 +67,10 @@ export default function SignupScreen({ navigation }) {
 
     if (error) {
       setLoading(false);
-      if (error.message?.toLowerCase().includes('already')) {
-        Alert.alert('Account Exists', 'An account already exists. Try logging in instead.');
+      if (error.message?.includes('already registered') || error.message?.includes('already exists') || error.code === '23505') {
+        Alert.alert('Email Already Registered', 'This email is already in use. Please login instead.');
       } else {
-        Alert.alert('Signup Failed', error.message);
+        Alert.alert('Signup Failed', error.message || 'Please try again later.');
       }
       return;
     }
@@ -94,6 +94,7 @@ export default function SignupScreen({ navigation }) {
     Alert.alert('Account Created! 🎉', 'Your account is ready. You can now log in.', [
       { text: 'Go to Login', onPress: () => navigation.navigate(ROUTES.LOGIN) }
     ]);
+    navigation.navigate(ROUTES.LOGIN);
   }
 
   const handleNavigateLogin = useCallback(() => {
