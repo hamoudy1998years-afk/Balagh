@@ -163,22 +163,24 @@ const styles = StyleSheet.create({
     marginBottom: s(24),
   },
   buttonContainer: {
-    flexDirection: 'row',
-    gap: s(12),
+    flexDirection: 'column',
+    gap: s(10),
     width: '100%',
   },
   button: {
-    flex: 1,
+    width: '100%',
     backgroundColor: COLORS.gold,
     borderRadius: s(12),
     paddingVertical: s(14),
+    paddingHorizontal: s(20),
     alignItems: 'center',
+    justifyContent: 'center',
   },
   singleButton: {
-    flex: 1,
+    width: '100%',
   },
   halfButton: {
-    flex: 0.48,
+    width: '100%',
   },
   cancelButton: {
     backgroundColor: 'transparent',
@@ -190,8 +192,9 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#1a2e44',
-    fontSize: ms(15),
+    fontSize: ms(16),
     fontWeight: '700',
+    textAlign: 'center',
   },
   cancelButtonText: {
     color: '#94a3b8',

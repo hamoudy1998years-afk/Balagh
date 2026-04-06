@@ -17,6 +17,7 @@ export default function ApplyScholarScreen({ navigation }) {
   const [expertise,  setExpertise]  = useState('');
   const [bio,        setBio]        = useState('');
   const [loading,    setLoading]    = useState(false);
+  const [toast,      setToast]      = useState(null);
 
   async function handleApply() {
     const fn  = fullName.trim();
@@ -76,6 +77,9 @@ export default function ApplyScholarScreen({ navigation }) {
       Alert.alert('Application Submitted!', 'We will review your application and get back to you.', [
         { text: 'OK', onPress: () => navigation.goBack() }
       ]);
+      // Show toast confirmation
+      setToast({ message: 'Application submitted successfully!', type: 'success' });
+      setTimeout(() => setToast(null), 3000);
     }
   }
 
@@ -112,10 +116,11 @@ export default function ApplyScholarScreen({ navigation }) {
       <AnimatedButton style={styles.submitBtn} onPress={handleApply} disabled={loading}>
         <Text style={styles.submitBtnText}>{loading ? 'Submitting...' : 'Submit Application'}</Text>
       </AnimatedButton>
-
-      <AnimatedButton style={styles.cancelBtn} onPress={navigation.goBack}>
-        <Text style={styles.cancelBtnText}>Cancel</Text>
-      </AnimatedButton>
+    {toast && (
+      <View style={{ position: 'absolute', bottom: 100, alignSelf: 'center', backgroundColor: '#1a2e44', borderRadius: 100, paddingHorizontal: 18, paddingVertical: 10, zIndex: 9999 }}>
+        <Text style={{ color: '#fff', fontSize: 14, fontWeight: '500' }}>{toast.message}</Text>
+      </View>
+    )}
     </ScrollView>
     </KeyboardAvoidingView>
     </>
@@ -182,19 +187,5 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
-  },
-  cancelBtn: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-  },
-  cancelBtnText: {
-    color: '#94a3b8',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

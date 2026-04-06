@@ -4,6 +4,7 @@ import {
   TextInput,
   TouchableWithoutFeedback,
   StyleSheet,
+  KeyboardAvoidingView,
   ScrollView,
   FlatList,
   Platform,
@@ -12,25 +13,21 @@ import {
   TouchableOpacity,
   Keyboard,
   Animated,
-  StatusBar,
 } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri } from 'expo-auth-session';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import * as LocalAuthentication from 'expo-local-authentication';
 import AnimatedButton from './AnimatedButton';
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { SystemBars } from 'react-native-edge-to-edge';
 import * as SecureStore from 'expo-secure-store';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCredentialKey } from '../constants/storage';
 import { s, ms } from '../utils/responsive';
 import ModernDialog from './ModernDialog';
@@ -38,16 +35,6 @@ import ModernDialog from './ModernDialog';
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen({ navigation }) {
-  const insets = useSafeAreaInsets();
-  
-  useEffect(() => {
-    StatusBar.setBarStyle('light-content', true);
-    if (Platform.OS === 'android') {
-      StatusBar.setTranslucent(true);
-      StatusBar.setBackgroundColor('transparent');
-    }
-  }, []);
-  
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -67,12 +54,15 @@ export default function LoginScreen({ navigation }) {
   const [visiblePin, setVisiblePin] = useState('');
   const [visibleConfirmPin, setVisibleConfirmPin] = useState('');
 
-  const [dialog, setDialog] = useState({ 
-    visible: false, 
-    title: '', 
-    message: '', 
-    type: 'info', 
-    buttons: [] 
+  // FIX: track focused field so we can highlight border
+  const [focusedField, setFocusedField] = useState(null);
+
+  const [dialog, setDialog] = useState({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info',
+    buttons: [],
   });
 
   const eyeOpacity = useRef(new Animated.Value(0)).current;
@@ -129,7 +119,6 @@ export default function LoginScreen({ navigation }) {
     }).start();
   };
 
-  // ========== FIXED: handleAccountSelect ==========
   const handleAccountSelect = async (account) => {
     __DEV__ && console.log('[LOGIN] ========== Account Selected ==========');
     __DEV__ && console.log('[LOGIN] Account:', account.email);
@@ -140,7 +129,6 @@ export default function LoginScreen({ navigation }) {
     setSelectedAccount(account);
 
     try {
-      // EMAIL ACCOUNTS - existing logic
       if (account.provider === 'email') {
         const available = await isBiometricAvailable();
         const hasCreds = await hasCredentials(account.email);
@@ -163,13 +151,11 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      // GOOGLE ACCOUNTS - NEW FLOW
       if (account.provider === 'google') {
         const hasPin = await hasQuickPin(account.email);
         const credKey = getCredentialKey(account.email);
         const savedRaw = await SecureStore.getItemAsync(credKey);
-        
-        // NO PIN YET - Ask to create PIN
+
         if (!hasPin) {
           __DEV__ && console.log('[LOGIN] No PIN yet - showing create PIN modal');
           setLoading(false);
@@ -183,7 +169,6 @@ export default function LoginScreen({ navigation }) {
           return;
         }
 
-        // HAS PIN - Show biometric immediately (no dialog!)
         __DEV__ && console.log('[LOGIN] Has PIN - showing biometric immediately');
         const bioAvailable = await isBiometricAvailable();
 
@@ -195,33 +180,30 @@ export default function LoginScreen({ navigation }) {
 
           if (bioResult.success) {
             __DEV__ && console.log('[LOGIN] Biometric success - creating session with appPassword...');
-            
-            // Get stored credentials with appPassword
+
             if (!savedRaw) {
               __DEV__ && console.log('[LOGIN] No saved credentials found');
               setLoading(false);
               return;
             }
-            
+
             const creds = JSON.parse(savedRaw);
-            
-            // Create session with appPassword (NOT Google token!)
+
             const { data, error } = await supabase.auth.signInWithPassword({
               email: account.email,
               password: creds.appPassword,
             });
-            
+
             if (error) {
               __DEV__ && console.log('[LOGIN] Session failed:', error.message);
               setLoading(false);
-              // Fallback to PIN
               setPinModalVisible(true);
               setIsCreatingPin(false);
               setEnteredPin('');
               setPinError('');
               return;
             }
-            
+
             __DEV__ && console.log('[LOGIN] Session created successfully');
             if (data?.user) {
               const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
@@ -237,7 +219,6 @@ export default function LoginScreen({ navigation }) {
           }
         }
 
-        // Biometric failed/cancelled/no biometric - Show PIN
         __DEV__ && console.log('[LOGIN] Biometric failed or not available - showing PIN');
         setLoading(false);
         setPinModalVisible(true);
@@ -252,24 +233,24 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-const handleNavigateMain = useCallback(() => {
-  navigation.navigate(ROUTES.MAIN);
-}, [navigation]);
+  const handleNavigateMain = useCallback(() => {
+    navigation.navigate(ROUTES.MAIN);
+  }, [navigation]);
 
-const handleNavigateSignup = useCallback(() => {
-  navigation.navigate(ROUTES.SIGNUP);
-}, [navigation]);
+  const handleNavigateSignup = useCallback(() => {
+    navigation.navigate(ROUTES.SIGNUP);
+  }, [navigation]);
 
-const handleClosePinModal = useCallback(() => {
-  setPinModalVisible(false);
-  setEnteredPin('');
-  setNewPin('');
-  setConfirmPin('');
-  setPinError('');
-  setPinStep('create');
-  setVisiblePin('');
-  setVisibleConfirmPin('');
-}, []);
+  const handleClosePinModal = useCallback(() => {
+    setPinModalVisible(false);
+    setEnteredPin('');
+    setNewPin('');
+    setConfirmPin('');
+    setPinError('');
+    setPinStep('create');
+    setVisiblePin('');
+    setVisibleConfirmPin('');
+  }, []);
 
   const resolveEmail = async (raw) => {
     let email = raw.trim();
@@ -303,7 +284,7 @@ const handleClosePinModal = useCallback(() => {
         title: 'Missing Fields',
         message: 'Please enter your email/username and password.',
         type: 'warning',
-        buttons: [{ text: 'OK' }]
+        buttons: [{ text: 'OK' }],
       });
       return;
     }
@@ -320,7 +301,7 @@ const handleClosePinModal = useCallback(() => {
         title: 'Login Failed',
         message: e.message,
         type: 'error',
-        buttons: [{ text: 'OK' }]
+        buttons: [{ text: 'OK' }],
       });
       return;
     }
@@ -334,7 +315,7 @@ const handleClosePinModal = useCallback(() => {
         title: 'Login Failed',
         message: error.message,
         type: 'error',
-        buttons: [{ text: 'OK' }]
+        buttons: [{ text: 'OK' }],
       });
       return;
     }
@@ -383,7 +364,7 @@ const handleClosePinModal = useCallback(() => {
                 }
               },
             },
-          ]
+          ],
         });
       } else {
         try {
@@ -404,7 +385,6 @@ const handleClosePinModal = useCallback(() => {
     }
   }
 
-  // ========== FIXED: handleGoogleLogin - Store appPassword ==========
   async function handleGoogleLogin() {
     setGoogleLoading(true);
 
@@ -423,7 +403,7 @@ const handleClosePinModal = useCallback(() => {
         title: 'Google Login Failed',
         message: error.message,
         type: 'error',
-        buttons: [{ text: 'OK' }]
+        buttons: [{ text: 'OK' }],
       });
       return;
     }
@@ -450,7 +430,7 @@ const handleClosePinModal = useCallback(() => {
             title: 'Google Login Failed',
             message: 'Could not retrieve session. Please try again.',
             type: 'error',
-            buttons: [{ text: 'OK' }]
+            buttons: [{ text: 'OK' }],
           });
           return;
         }
@@ -467,8 +447,6 @@ const handleClosePinModal = useCallback(() => {
             const existingCredRaw = await SecureStore.getItemAsync(credKey);
             const existingCred = existingCredRaw ? JSON.parse(existingCredRaw) : null;
 
-            // Only set appPassword on first Google login — calling updateUser every time
-            // invalidates the OAuth session and signs the user out.
             if (!existingCred?.appPassword) {
               const appPassword = Array(32).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');
 
@@ -479,13 +457,10 @@ const handleClosePinModal = useCallback(() => {
                 hasPin: false,
               }));
 
-              // Set password in Supabase so signInWithPassword works later
               await supabase.auth.updateUser({ password: appPassword });
-
-              // updateUser invalidates the current OAuth session — restore it
               await supabase.auth.setSession({ access_token, refresh_token });
             }
-            
+
             const displayName = userMeta?.full_name || userMeta?.name || userEmail;
             await saveGoogleCredentials(displayName, userEmail, refresh_token);
             await refreshAccountsList();
@@ -509,11 +484,9 @@ const handleClosePinModal = useCallback(() => {
               await refreshUser();
             }
 
-            // Check if PIN already exists
             const hasPin = await hasQuickPin(userEmail);
-            
+
             if (!hasPin) {
-              // First time - suggest creating PIN
               setTimeout(() => {
                 setGoogleLoading(false);
                 setDialog({
@@ -531,21 +504,20 @@ const handleClosePinModal = useCallback(() => {
                         setPinStep('create');
                         setNewPin('');
                         setConfirmPin('');
-                      }
+                      },
                     },
                     {
                       text: 'Later',
                       style: 'cancel',
                       onPress: () => navigation.navigate(ROUTES.MAIN),
-                    }
-                  ]
+                    },
+                  ],
                 });
               }, 500);
-              return; // Don't navigate yet, wait for dialog
+              return;
             }
           } catch (e) {
             __DEV__ && console.error('[LoginScreen] Google login post-processing error:', e);
-            // Continue to Main even if post-processing fails
           }
         }
       } catch (e) {
@@ -557,7 +529,7 @@ const handleClosePinModal = useCallback(() => {
           title: 'Google Login Error',
           message: 'An unexpected error occurred. Please try again.',
           type: 'error',
-          buttons: [{ text: 'OK' }]
+          buttons: [{ text: 'OK' }],
         });
         return;
       }
@@ -567,11 +539,12 @@ const handleClosePinModal = useCallback(() => {
     } else {
       setGoogleLoading(false);
     }
-    
+
     silentReAuth.current = false;
   }
 
   const handleIdentifierFocus = () => {
+    setFocusedField('identifier');
     if (suppressDropdown.current) {
       suppressDropdown.current = false;
       return;
@@ -582,6 +555,7 @@ const handleClosePinModal = useCallback(() => {
   };
 
   const handleIdentifierBlur = () => {
+    setFocusedField(null);
   };
 
   const handleIdentifierChange = (text) => {
@@ -593,10 +567,8 @@ const handleClosePinModal = useCallback(() => {
 
   const biometricIcon = biometricType === 'face' ? 'face-recognition' : 'fingerprint';
 
-  // ========== FIXED: handlePinKeyPress - Create session with appPassword ==========
   const handlePinKeyPress = async (key) => {
     if (isCreatingPin) {
-      // ========== CREATING NEW PIN ==========
       if (pinStep === 'create') {
         if (key === 'back') {
           if (newPin.length > 0) {
@@ -604,16 +576,10 @@ const handleClosePinModal = useCallback(() => {
             const updated = newPin.slice(0, -1);
             setNewPin(updated);
             setVisiblePin(deletedDigit);
-            
-            setTimeout(() => {
-              setVisiblePin('');
-            }, 500);
+            setTimeout(() => { setVisiblePin(''); }, 500);
           }
         } else if (key === 'enter') {
-          if (newPin.length !== 4) {
-            setPinError('Enter 4 digits');
-            return;
-          }
+          if (newPin.length !== 4) { setPinError('Enter 4 digits'); return; }
           setPinStep('confirm');
           setPinError('');
           setVisiblePin('');
@@ -622,10 +588,7 @@ const handleClosePinModal = useCallback(() => {
             const updated = newPin + key;
             setNewPin(updated);
             setVisiblePin(key);
-            
-            setTimeout(() => {
-              setVisiblePin('');
-            }, 500);
+            setTimeout(() => { setVisiblePin(''); }, 500);
           }
         }
       } else if (pinStep === 'confirm') {
@@ -635,28 +598,19 @@ const handleClosePinModal = useCallback(() => {
             const updated = confirmPin.slice(0, -1);
             setConfirmPin(updated);
             setVisibleConfirmPin(deletedDigit);
-            
-            setTimeout(() => {
-              setVisibleConfirmPin('');
-            }, 500);
+            setTimeout(() => { setVisibleConfirmPin(''); }, 500);
           }
         } else if (key === 'enter') {
-          if (confirmPin.length !== 4) {
-            setPinError('Enter 4 digits');
-            return;
-          }
+          if (confirmPin.length !== 4) { setPinError('Enter 4 digits'); return; }
           if (newPin !== confirmPin) {
             setPinError('PINs do not match');
             setConfirmPin('');
             setVisibleConfirmPin('');
             return;
           }
-
-          // Save PIN
           try {
             const saved = await saveQuickPin(selectedAccount.email, newPin);
             if (saved) {
-              // Mark hasPin = true in credentials
               const credKey = getCredentialKey(selectedAccount.email);
               const savedRaw = await SecureStore.getItemAsync(credKey);
               if (savedRaw) {
@@ -664,7 +618,6 @@ const handleClosePinModal = useCallback(() => {
                 creds.hasPin = true;
                 await SecureStore.setItemAsync(credKey, JSON.stringify(creds));
               }
-              
               setPinModalVisible(false);
               setNewPin('');
               setConfirmPin('');
@@ -682,24 +635,16 @@ const handleClosePinModal = useCallback(() => {
             const updated = confirmPin + key;
             setConfirmPin(updated);
             setVisibleConfirmPin(key);
-            
-            setTimeout(() => {
-              setVisibleConfirmPin('');
-            }, 500);
+            setTimeout(() => { setVisibleConfirmPin(''); }, 500);
           }
         }
       }
     } else {
-      // ========== VALIDATING EXISTING PIN ==========
       if (key === 'back') {
         setEnteredPin(enteredPin.slice(0, -1));
         setPinError('');
       } else if (key === 'enter') {
-        if (enteredPin.length !== 4) {
-          setPinError('Enter 4 digits');
-          return;
-        }
-
+        if (enteredPin.length !== 4) { setPinError('Enter 4 digits'); return; }
         try {
           __DEV__ && console.log('[PIN] Validating PIN...');
           await validateQuickPin(selectedAccount.email, enteredPin);
@@ -707,28 +652,27 @@ const handleClosePinModal = useCallback(() => {
 
           const credKey = getCredentialKey(selectedAccount.email);
           const savedRaw = await SecureStore.getItemAsync(credKey);
-          
+
           if (!savedRaw) {
             setPinError('Account not found');
             setEnteredPin('');
             return;
           }
-          
+
           const creds = JSON.parse(savedRaw);
-          
-          // Create session with appPassword (NOT Google refresh token!)
+
           const { data, error } = await supabase.auth.signInWithPassword({
             email: selectedAccount.email,
             password: creds.appPassword,
           });
-          
+
           if (error) {
             __DEV__ && console.log('[PIN] Session failed:', error.message);
             setPinError('Login failed. Please try again.');
             setEnteredPin('');
             return;
           }
-          
+
           __DEV__ && console.log('[PIN] Session created successfully');
           if (data?.user) {
             const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
@@ -741,7 +685,6 @@ const handleClosePinModal = useCallback(() => {
           setEnteredPin('');
           setPinError('');
           navigation.navigate(ROUTES.MAIN);
-          
         } catch (e) {
           __DEV__ && console.log('[PIN] Invalid PIN:', e.message);
           if (e.message === 'INVALID_PIN') {
@@ -767,22 +710,19 @@ const handleClosePinModal = useCallback(() => {
       message: 'Enter your email to receive a reset link.',
       type: 'info',
       buttons: [
-        { 
-          text: 'Cancel', 
-          style: 'cancel'
-        },
-        { 
-          text: 'Send', 
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
           onPress: async () => {
-            if (!identifier.trim()) { 
+            if (!identifier.trim()) {
               setDialog({
                 visible: true,
                 title: 'Error',
                 message: 'Enter your email first',
                 type: 'warning',
-                buttons: [{ text: 'OK' }]
+                buttons: [{ text: 'OK' }],
               });
-              return; 
+              return;
             }
             const { error } = await supabase.auth.resetPasswordForEmail(identifier.trim());
             if (error) {
@@ -791,7 +731,7 @@ const handleClosePinModal = useCallback(() => {
                 title: 'Error',
                 message: error.message,
                 type: 'error',
-                buttons: [{ text: 'OK' }]
+                buttons: [{ text: 'OK' }],
               });
             } else {
               setDialog({
@@ -799,38 +739,41 @@ const handleClosePinModal = useCallback(() => {
                 title: 'Sent! ✉️',
                 message: 'Check your email for the reset link.',
                 type: 'success',
-                buttons: [{ text: 'OK' }]
+                buttons: [{ text: 'OK' }],
               });
             }
-          }
+          },
         },
-      ]
+      ],
     });
   };
 
   return (
-    <>
-      <SystemBars style="light" />
-      <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
+    <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
       <TouchableWithoutFeedback onPress={closeDropdown}>
-        <KeyboardAwareScrollView
+        <KeyboardAvoidingView
           style={{ flex: 1, backgroundColor: COLORS.bgDark }}
-          contentContainerStyle={[styles.container, { paddingTop: insets.top + 20 }]}
-          keyboardShouldPersistTaps="handled"
-          scrollEnabled={!showDropdown}
-          nestedScrollEnabled={true}
-          enableOnAndroid={true}
-          enableAutomaticScroll={true}
-          extraScrollHeight={20}
-          extraHeight={120}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
+          <ScrollView
+            style={{ flex: 1, backgroundColor: COLORS.bgDark }}
+            contentContainerStyle={styles.container}
+            keyboardShouldPersistTaps="handled"
+            scrollEnabled={!showDropdown}
+            nestedScrollEnabled={true}
+          >
             <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
             <Text style={styles.title}>Bushrann</Text>
             <Text style={styles.subtitle}>Welcome back</Text>
 
+            {/* Identifier input — FIX: inputFocused applied to wrapper for border */}
             <View style={styles.inputWrapper}>
               <TextInput
-                style={[styles.input, showDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
+                style={[
+                  styles.input,
+                  showDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
+                  focusedField === 'identifier' && styles.inputFocused,
+                ]}
                 placeholder="Email, Username or Phone"
                 placeholderTextColor="#8B92A8"
                 value={identifier}
@@ -844,8 +787,6 @@ const handleClosePinModal = useCallback(() => {
                 importantForAutofill="no"
                 textContentType="none"
                 keyboardType="default"
-                accessibilityLabel="Email username or phone input"
-                accessibilityHint="Enter your email, username or phone number"
               />
 
               {showDropdown && savedAccounts.length > 0 && (
@@ -857,77 +798,74 @@ const handleClosePinModal = useCallback(() => {
                   onStartShouldSetResponder={() => true}
                 >
                   {savedAccounts
-                  .filter(account => {
+                    .filter(account => {
+                      const searchText = identifier.toLowerCase();
+                      const email = (account.email || '').toLowerCase();
+                      const username = (account.identifier || '').toLowerCase();
+                      return email.includes(searchText) || username.includes(searchText);
+                    })
+                    .map((account, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={[styles.dropdownItem, idx < savedAccounts.length - 1 && styles.dropdownItemBorder]}
+                        onPress={() => { closeDropdown(); handleAccountSelect(account); }}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
+                          <Text style={styles.dropdownAvatarText}>
+                            {account.provider === 'google' ? 'G' : (account.identifier || account.email)[0].toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={styles.dropdownInfo}>
+                          <Text style={styles.dropdownIdentifier}>{account.identifier || account.email}</Text>
+                          {account.identifier && account.identifier !== account.email && (
+                            <Text style={styles.dropdownEmail}>{account.email}</Text>
+                          )}
+                        </View>
+                        <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
+                      </TouchableOpacity>
+                    ))}
+                  {savedAccounts.filter(account => {
                     const searchText = identifier.toLowerCase();
                     const email = (account.email || '').toLowerCase();
                     const username = (account.identifier || '').toLowerCase();
                     return email.includes(searchText) || username.includes(searchText);
-                  })
-                  .map((account, idx) => (
-                    <TouchableOpacity
-                      key={idx}
-                      style={[styles.dropdownItem, idx < savedAccounts.length - 1 && styles.dropdownItemBorder]}
-                      onPress={() => { closeDropdown(); handleAccountSelect(account); }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
-                        <Text style={styles.dropdownAvatarText}>
-                          {account.provider === 'google' ? 'G' : (account.identifier || account.email)[0].toUpperCase()}
-                        </Text>
-                      </View>
-                      <View style={styles.dropdownInfo}>
-                        <Text style={styles.dropdownIdentifier}>{account.identifier || account.email}</Text>
-                        {account.identifier && account.identifier !== account.email && (
-                          <Text style={styles.dropdownEmail}>{account.email}</Text>
-                        )}
-                      </View>
-                      <MaterialCommunityIcons name={biometricIcon} size={22} color={COLORS.gold} />
-                    </TouchableOpacity>
-                  ))}
-                                {savedAccounts.filter(account => {
-                  const searchText = identifier.toLowerCase();
-                  const email = (account.email || '').toLowerCase();
-                  const username = (account.identifier || '').toLowerCase();
-                  return email.includes(searchText) || username.includes(searchText);
-                }).length === 0 && identifier.length > 0 && (
-                  <View style={styles.noMatchesContainer}>
-                    <Text style={styles.noMatchesText}>No matching accounts</Text>
-                  </View>
-                )}
+                  }).length === 0 && identifier.length > 0 && (
+                    <View style={styles.noMatchesContainer}>
+                      <Text style={styles.noMatchesText}>No matching accounts</Text>
+                    </View>
+                  )}
                 </ScrollView>
               )}
             </View>
 
+            {/* Password input — FIX: inputFocused applied to container for border */}
             <TouchableWithoutFeedback onPress={closeDropdown}>
-              <View style={styles.passwordContainer}>
+              <View style={[styles.passwordContainer, focusedField === 'password' && styles.passwordContainerFocused]}>
                 <TextInput
                   style={styles.passwordInput}
                   placeholder="Password"
                   placeholderTextColor="#8B92A8"
                   value={password}
                   onChangeText={setPassword}
-                  onFocus={closeDropdown}
+                  onFocus={() => { closeDropdown(); setFocusedField('password'); }}
+                  onBlur={() => setFocusedField(null)}
                   secureTextEntry={!showPassword}
                   autoComplete="off"
                   autoCorrect={false}
                   autoCapitalize="none"
                   textContentType="none"
-                  accessibilityLabel="Password input field"
-                  accessibilityHint="Enter your password"
                 />
-                <TouchableOpacity 
-                  style={styles.eyeButton} 
+                <TouchableOpacity
+                  style={styles.eyeButton}
                   onPress={togglePassword}
                   activeOpacity={0.7}
                 >
-                  <Animated.View style={{ opacity: eyeOpacity.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.6, 1]
-                  })}}>
-                    <MaterialCommunityIcons 
-                      name={showPassword ? 'eye-off-outline' : 'eye-outline'} 
-                      size={22} 
-                      color={showPassword ? COLORS.gold : '#6b7280'} 
+                  <Animated.View style={{ opacity: eyeOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }}>
+                    <MaterialCommunityIcons
+                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                      size={22}
+                      color={showPassword ? COLORS.gold : '#6b7280'}
                     />
                   </Animated.View>
                 </TouchableOpacity>
@@ -937,6 +875,12 @@ const handleClosePinModal = useCallback(() => {
             <AnimatedButton style={styles.button} onPress={handleLogin} disabled={loading}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Login</Text>}
             </AnimatedButton>
+
+            <View style={styles.dividerContainer}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
 
             <AnimatedButton style={styles.googleButton} onPress={handleGoogleLogin} disabled={googleLoading}>
               {googleLoading ? <ActivityIndicator color="#4285F4" /> : (
@@ -975,10 +919,9 @@ const handleClosePinModal = useCallback(() => {
               <View style={styles.modalOverlay}>
                 <View style={styles.modalContent}>
                   <Text style={styles.modalTitle}>
-                    {isCreatingPin 
+                    {isCreatingPin
                       ? (pinStep === 'confirm' ? 'Confirm your PIN' : 'Create Quick PIN')
-                      : 'Enter PIN'
-                    }
+                      : 'Enter PIN'}
                   </Text>
 
                   {isCreatingPin && pinStep === 'confirm' ? (
@@ -989,16 +932,15 @@ const handleClosePinModal = useCallback(() => {
                     <Text style={styles.modalSubtitle}>
                       {isCreatingPin
                         ? 'This PIN is only stored on your device'
-                        : selectedAccount?.email
-                      }
+                        : selectedAccount?.email}
                     </Text>
                   )}
-                  
+
                   <View style={styles.pinDisplay}>
                     {[0, 1, 2, 3].map((index) => {
                       let isFilled = false;
                       let showNumber = null;
-                      
+
                       if (isCreatingPin) {
                         if (pinStep === 'create') {
                           isFilled = newPin.length > index;
@@ -1014,14 +956,14 @@ const handleClosePinModal = useCallback(() => {
                       } else {
                         isFilled = enteredPin.length > index;
                       }
-                      
+
                       return (
                         <View
                           key={index}
                           style={[
                             styles.pinDot,
                             isFilled && styles.pinDotFilled,
-                            showNumber && styles.pinDotWithNumber
+                            showNumber && styles.pinDotWithNumber,
                           ]}
                         >
                           {showNumber && <Text style={styles.pinNumber}>{showNumber}</Text>}
@@ -1046,10 +988,7 @@ const handleClosePinModal = useCallback(() => {
                     ))}
                   </View>
 
-                  <TouchableOpacity
-                    style={styles.cancelButton}
-                    onPress={handleClosePinModal}
-                  >
+                  <TouchableOpacity style={styles.cancelButton} onPress={handleClosePinModal}>
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
                 </View>
@@ -1064,92 +1003,85 @@ const handleClosePinModal = useCallback(() => {
               buttons={dialog.buttons}
               onDismiss={() => setDialog({ ...dialog, visible: false })}
             />
-        </KeyboardAwareScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
     </View>
-    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1, backgroundColor: COLORS.bgDark, alignItems: 'center',
-    justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 40,
-  }, // paddingTop and paddingBottom overridden inline
+    flexGrow: 1,
+    backgroundColor: COLORS.bgDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    paddingVertical: 40,
+  },
   arabic: { fontSize: 24, color: COLORS.gold, marginBottom: 8 },
   title: { fontSize: 36, fontWeight: 'bold', color: '#ffffff', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#64748b', marginBottom: 36 },
   inputWrapper: { width: '100%', zIndex: 999, marginBottom: 14 },
+
+  // FIX: base input style — border lives here, so inputFocused targets this directly
   input: {
-    width: '100%', backgroundColor: '#FFFFFF', borderWidth: 1,
-    borderColor: '#E5E5E5', borderRadius: 8,
-    padding: 16, color: '#1a2e44', fontSize: 15,
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 12,
+    padding: 16,
+    color: '#1a2e44',
+    fontSize: 15,
   },
+  // FIX: focused state overrides border color & width on the input
+  inputFocused: {
+    borderColor: COLORS.gold,
+    borderWidth: 2,
+  },
+
   dropdown: {
     width: '100%',
-    backgroundColor: '#12151f',
+    height: 200,
+    backgroundColor: '#1a1d27',
     borderWidth: 1,
     borderTopWidth: 0,
-    borderColor: 'rgba(212, 175, 55, 0.2)',
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    borderColor: '#2d3148',
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
     overflow: 'hidden',
-    maxHeight: 220,
   },
-  dropdownItem: {
+  dropdownItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14 },
+  dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: '#2d3148' },
+  dropdownAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  dropdownAvatarGoogle: { backgroundColor: '#1a73e8' },
+  dropdownAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  dropdownInfo: { flex: 1 },
+  dropdownIdentifier: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
+  dropdownEmail: { color: '#64748b', fontSize: 12, marginTop: 2 },
+
+  // FIX: password container — border here, focused style targets this
+  passwordContainer: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 12,
     paddingHorizontal: 16,
-    backgroundColor: 'transparent',
+    marginBottom: 14,
+    zIndex: 1,
   },
-  dropdownItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  dropdownAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#7c3aed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+  passwordContainerFocused: {
+    borderColor: COLORS.gold,
     borderWidth: 2,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
   },
-  dropdownAvatarGoogle: {
-    backgroundColor: '#1a73e8',
-    borderColor: 'rgba(26, 115, 232, 0.4)',
-  },
-  dropdownAvatarText: {
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 16,
-  },
-  dropdownInfo: {
+  passwordInput: {
     flex: 1,
-  },
-  dropdownIdentifier: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  dropdownEmail: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 12,
-  },
-  dropdownAction: { fontSize: 18, marginLeft: 8 },
-  passwordContainer: {
-    width: '100%', flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E5E5',
-    borderRadius: 8, paddingHorizontal: 16, marginBottom: 14, zIndex: 1,
-  },
-  passwordInput: { 
-    flex: 1, 
-    paddingVertical: 16, 
-    color: '#1a2e44', 
+    paddingVertical: 16,
+    color: '#1a2e44',
     fontSize: 15,
     paddingRight: 40,
   },
@@ -1163,52 +1095,21 @@ const styles = StyleSheet.create({
     width: 40,
     height: '100%',
   },
+
   button: {
-    width: '100%', backgroundColor: COLORS.gold, borderRadius: 12, padding: 16,
-    alignItems: 'center', marginTop: 6, marginBottom: 20, zIndex: 1, minHeight: 52, justifyContent: 'center',
+    width: '100%',
+    backgroundColor: COLORS.gold,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 20,
+    zIndex: 1,
+    minHeight: 52,
+    justifyContent: 'center',
   },
   buttonText: { color: COLORS.navy, fontSize: 16, fontWeight: '700' },
-  dividerContainer: { width: '100%', flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: COLORS.borderDark },
-  dividerText: { color: COLORS.navyLight, marginHorizontal: 12, fontSize: 13 },
-  googleButton: {
-    width: '100%', 
-    backgroundColor: '#ffffff', 
-    borderWidth: 1, 
-    borderColor: '#dadce0',
-    borderRadius: 12, 
-    padding: 14, 
-    alignItems: 'center', 
-    marginBottom: 20, 
-    minHeight: 52, 
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  googleButtonText: { 
-    color: '#3c4043', 
-    fontSize: 15, 
-    fontWeight: '600',
-    letterSpacing: 0.3,
-  },
-  googleIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  googleG: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#EA4335',
-  },
-  link: { color: COLORS.textGray, fontSize: 14, marginTop: 4 },
-  linkBold: { color: COLORS.gold, fontWeight: '700' },
+
   dividerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1225,6 +1126,43 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     fontSize: 14,
   },
+
+  googleButton: {
+    width: '100%',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#dadce0',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+    marginBottom: 20,
+    minHeight: 52,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  googleButtonText: {
+    color: '#3c4043',
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  googleIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleG: { fontSize: 18, fontWeight: 'bold', color: '#EA4335' },
+
+  link: { color: COLORS.textGray, fontSize: 14, marginTop: 4 },
+  linkBold: { color: COLORS.gold, fontWeight: '700' },
+
   guestButton: {
     width: '100%',
     padding: 18,
@@ -1234,25 +1172,20 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 20,
   },
-  guestButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  guestSubtext: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-    marginTop: 4,
-  },
+  guestButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  guestSubtext: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 4 },
+
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center', alignItems: 'center',
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: COLORS.bgCard || '#1a2e44', 
+    backgroundColor: COLORS.bgCard || '#1a1d27',
     borderRadius: 24,
-    padding: 32, 
-    width: '85%', 
+    padding: 32,
+    width: '85%',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(212, 175, 55, 0.2)',
@@ -1262,17 +1195,17 @@ const styles = StyleSheet.create({
     shadowRadius: 40,
     elevation: 10,
   },
-  modalTitle: { 
-    fontSize: 24, 
-    fontWeight: '800', 
-    marginBottom: 8, 
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    marginBottom: 8,
     color: '#ffffff',
     letterSpacing: -0.5,
   },
-  modalSubtitle: { 
-    fontSize: 14, 
-    color: 'rgba(255,255,255,0.6)', 
-    marginBottom: 32, 
+  modalSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
+    marginBottom: 32,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1288,23 +1221,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
-  pinDisplay: { 
-    flexDirection: 'row', 
-    marginBottom: 32, 
+  pinDisplay: {
+    flexDirection: 'row',
+    marginBottom: 32,
     gap: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pinDot: {
-    width: 20, 
-    height: 20, 
+    width: 20,
+    height: 20,
     borderRadius: 10,
-    borderWidth: 2, 
+    borderWidth: 2,
     borderColor: 'rgba(212, 175, 55, 0.4)',
     backgroundColor: 'transparent',
   },
-  pinDotFilled: { 
-    backgroundColor: COLORS.gold, 
+  pinDotFilled: {
+    backgroundColor: COLORS.gold,
     borderColor: COLORS.gold,
     shadowColor: COLORS.gold,
     shadowOffset: { width: 0, height: 0 },
@@ -1324,54 +1257,38 @@ const styles = StyleSheet.create({
     elevation: 6,
     transform: [{ scale: 1.15 }],
   },
-  pinNumber: {
-    color: '#1a2e44',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  pinError: { 
-    color: '#ef4444', 
-    marginBottom: 20, 
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  pinNumber: { color: '#1a1d27', fontSize: 14, fontWeight: '800' },
+  pinError: { color: '#ef4444', marginBottom: 20, fontSize: 14, fontWeight: '600' },
+
+  // FIX: s() and ms() calls are safe here — no Flow annotation confusion
   keypad: {
-    flexDirection: 'row', flexWrap: 'wrap',
-    justifyContent: 'center', width: s(240), gap: 10, marginBottom: 20,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    width: s(240),
+    gap: 10,
+    marginBottom: 20,
   },
   keypadButton: {
-    width: s(72), 
-    height: s(72), 
+    width: s(72),
+    height: s(72),
     borderRadius: s(36),
-    backgroundColor: 'rgba(255,255,255,0.05)', 
-    justifyContent: 'center', 
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(212, 175, 55, 0.3)',
   },
-  keypadButtonText: { 
-    fontSize: ms(26), 
-    color: '#ffffff', 
+  keypadButtonText: {
+    fontSize: ms(26),
+    color: '#ffffff',
     fontWeight: '600',
     letterSpacing: 0.5,
   },
-  cancelButton: { 
-    paddingVertical: 12, 
-    paddingHorizontal: 30,
-    marginTop: 8,
-  },
-  cancelButtonText: { 
-    color: 'rgba(255,255,255,0.6)', 
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  noMatchesContainer: {
-    paddingVertical: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  noMatchesText: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 14,
-  },
+
+  cancelButton: { paddingVertical: 12, paddingHorizontal: 30, marginTop: 8 },
+  cancelButtonText: { color: 'rgba(255,255,255,0.6)', fontSize: 16, fontWeight: '600' },
+
+  noMatchesContainer: { paddingVertical: 20, alignItems: 'center' },
+  noMatchesText: { color: '#64748b', fontSize: 14 },
 });

@@ -1117,7 +1117,7 @@ export default function ProfileScreen({ route, navigation }) {
         <View style={{ flex: 1 }} />
         {isOwnProfile && (
           <AnimatedButton onPress={handleNavigateSettings} style={styles.topBarBtn}>
-            <Text style={styles.topBarBtnText}>☰</Text>
+            <Text style={styles.topBarBtnText}>⚙️</Text>
           </AnimatedButton>
         )}
       </View>

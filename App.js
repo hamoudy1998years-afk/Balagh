@@ -160,7 +160,7 @@ function MainTabs({ session }) {
         initialParams={{ refreshKey: homeKey }}
       />
       <Tab.Screen
-        name="Upload/Live"
+        name="Upload"
         component={UploadScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
