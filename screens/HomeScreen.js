@@ -16,6 +16,7 @@ import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 import { SystemBars } from 'react-native-edge-to-edge';
+import { useFocusEffect } from '@react-navigation/native';
 
 
 // ── Simple in-memory feed cache ────────────────────────────────────────────────
@@ -55,12 +56,37 @@ function LiveFeed({ navigation }) {
     loadStreams();
     intervalRef.current = setInterval(loadStreams, 15000);
 
-    const channel = supabase
-      .channel('live_streams_home')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_streams' }, () => loadStreams())
-      .subscribe((status, err) => {
-        if (err) __DEV__ && console.error('Live streams subscription error:', err);
-      });
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    const subscribeToLiveStreams = () => {
+      const channel = supabase
+        .channel('live_streams_home')
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: 'live_streams' 
+        }, (payload) => {
+          console.log('[Live] Realtime update received:', payload.eventType);
+          loadStreams();
+        })
+        .subscribe((status, err) => {
+          if (err) {
+            console.warn(`[Live] Subscription error (attempt ${retryCount + 1}/${maxRetries}):`, err.message);
+            if (retryCount < maxRetries) {
+              retryCount++;
+              setTimeout(subscribeToLiveStreams, 2000 * retryCount);
+            } else {
+              console.log('[Live] Max retries reached, using polling only (15s interval)');
+            }
+          } else if (status === 'SUBSCRIBED') {
+            console.log('[Live] Realtime subscription active');
+            retryCount = 0;
+          }
+        });
+    };
+    
+    subscribeToLiveStreams();
 
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
@@ -105,25 +131,25 @@ function LiveFeed({ navigation }) {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: '#FFFFFF' }]}>
         <ActivityIndicator color={COLORS.gold} size="large" />
-        <Text style={styles.loadingText}>Loading live streams...</Text>
+        <Text style={[styles.loadingText, { color: '#1a2e44' }]}>Loading live streams...</Text>
       </View>
     );
   }
 
   if (streams.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: '#FFFFFF' }]}>
         <Text style={styles.emptyIcon}>🔴</Text>
-        <Text style={styles.loadingText}>No live streams right now</Text>
-        <Text style={styles.emptySubtext}>Check back later for live scholars!</Text>
+        <Text style={[styles.loadingText, { color: '#1a2e44' }]}>No live streams right now</Text>
+        <Text style={[styles.emptySubtext, { color: '#666666' }]}>Check back later for live scholars!</Text>
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
+    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
       <FlashList
         data={streams}
         numColumns={2}
@@ -801,7 +827,7 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
-      <SystemBars style="light" />
+      <SystemBars style={index === 2 ? 'dark' : 'light'} />
       {showOffline && (
         <View style={{
           position: 'absolute',

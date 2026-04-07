@@ -856,12 +856,35 @@ export default function ProfileScreen({ route, navigation }) {
   const renderHeader = useCallback(() => (
     <View style={styles.headerSection}>
       <View style={styles.avatarSection}>
-        <Avatar
-          uri={profile?.avatar_url}
-          username={profile?.username}
-          size={90}
-          onPress={handleAvatarPress}
-        />
+        <View style={{ position: 'relative' }}>
+          <Avatar
+            uri={profile?.avatar_url}
+            username={profile?.username}
+            size={90}
+            onPress={handleAvatarPress}
+          />
+          {isOwnProfile && (
+            <TouchableOpacity
+              style={{
+                position: 'absolute',
+                bottom: -2,
+                right: -2,
+                backgroundColor: COLORS.gold,
+                borderRadius: 16,
+                width: 32,
+                height: 32,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2,
+                borderColor: '#fff',
+              }}
+              onPress={handleAvatarPress}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: 16 }}>📷</Text>
+            </TouchableOpacity>
+          )}
+        </View>
         {isScholar && <View style={styles.scholarBadge} accessibilityLabel="Verified scholar badge" accessibilityRole="image" accessible={true}><Text style={styles.scholarBadgeText}>✓ Scholar</Text></View>}
       </View>
 

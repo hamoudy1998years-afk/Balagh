@@ -85,6 +85,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const durationIntervalRef = useRef(null);
   const backgroundTimeRef = useRef(null);
   const appStateSubscription = useRef(null);
+  const cameraRetryTimeoutRef = useRef(null);
 
   // --- Viewer hooks ---
   const { viewerCount } = useViewerCount(streamId);
@@ -163,6 +164,10 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
+    }
+    if (cameraRetryTimeoutRef.current) {
+      clearTimeout(cameraRetryTimeoutRef.current);
+      cameraRetryTimeoutRef.current = null;
     }
     if (chatChannelRef.current) {
       await supabase.removeChannel(chatChannelRef.current);
@@ -263,7 +268,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       room.on(RoomEvent.Connected, () => {
         console.log('[LIVEKIT] Connected');
         setIsConnected(true);
-        setIsConnecting(false);
+        // Don't setIsConnecting(false) here - wait for camera
         isConnectedRef.current = true;
         setConnectionStatus('connected');
       });
@@ -294,25 +299,33 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
       await room.connect(url, token);
 
-      setTimeout(async () => {
-        const tryEnableCamera = async (attempt = 1) => {
-          try {
-            console.log(`[LIVEKIT] Enabling camera (attempt ${attempt})...`);
-            await room.localParticipant.enableCameraAndMicrophone();
-            console.log('[LIVEKIT] Camera enabled successfully');
-          } catch (e) {
-            console.error(`[LIVEKIT] Camera error (attempt ${attempt}):`, e.message);
-            if (attempt < 4) {
-              const delay = attempt * 3000;
-              console.log(`[LIVEKIT] Retrying in ${delay}ms...`);
-              setTimeout(() => tryEnableCamera(attempt + 1), delay);
-            } else {
-              console.error('[LIVEKIT] Camera failed after 4 attempts');
-            }
+      // Enable camera immediately (no delay)
+      const tryEnableCamera = async (attempt = 1) => {
+        if (!isMountedRef.current || !isConnectedRef.current) {
+          console.log('[LIVEKIT] Stopping camera - stream ended');
+          return;
+        }
+        
+        try {
+          console.log(`[LIVEKIT] Enabling camera (attempt ${attempt})...`);
+          await room.localParticipant.enableCameraAndMicrophone();
+          console.log('[LIVEKIT] Camera enabled successfully');
+          // Only hide loading after camera is ready
+          setIsConnecting(false);
+        } catch (e) {
+          console.error(`[LIVEKIT] Camera error (attempt ${attempt}):`, e.message);
+          if (attempt < 4 && isMountedRef.current && isConnectedRef.current) {
+            const delay = attempt * 2000; // Faster retry (2s instead of 3s)
+            console.log(`[LIVEKIT] Retrying in ${delay}ms...`);
+            cameraRetryTimeoutRef.current = setTimeout(() => tryEnableCamera(attempt + 1), delay);
+          } else {
+            console.error('[LIVEKIT] Camera failed after 4 attempts');
+            setIsConnecting(false); // Hide loading even if failed
+            setError('Camera failed to start. Please check permissions and try again.');
           }
-        };
-        tryEnableCamera();
-      }, 5000);
+        }
+      };
+      tryEnableCamera();
 
       durationIntervalRef.current = setInterval(() => {
         setStreamDuration(prev => prev + 1);
