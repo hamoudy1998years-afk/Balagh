@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, Animated, Pressable, PanResponder, Image,
 } from 'react-native';
@@ -6,7 +6,7 @@ import { useDownload } from '../context/DownloadContext';
 import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const SHEET_HEIGHT = 400;
+const MIN_SHEET_HEIGHT = 280; // Minimum height when few items
 
 export default function GlobalDownloadSheet() {
   const insets = useSafeAreaInsets();
@@ -20,6 +20,14 @@ export default function GlobalDownloadSheet() {
   
   const { sheetState, hideVideoOptionsSheet } = context;
   
+  // DEBUG
+  console.log('[DEBUG SHEET] sheetState:', {
+    visible: sheetState?.visible,
+    hasOnBlock: !!sheetState?.onBlock,
+    hasOnDownload: !!sheetState?.onDownload,
+    videoId: sheetState?.video?.id
+  });
+  
   // Another safety check
   if (!sheetState) {
     return null;
@@ -27,24 +35,27 @@ export default function GlobalDownloadSheet() {
 
   const { visible, video, hasDownloaded } = sheetState;
   
-  const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const [sheetHeight, setSheetHeight] = useState(0);
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
-      translateY.setValue(SHEET_HEIGHT);
+      const height = sheetHeight || MIN_SHEET_HEIGHT;
+      translateY.setValue(height);
       backdropOpacity.setValue(0);
       Animated.parallel([
         Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
         Animated.spring(translateY, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }),
       ]).start();
     } else {
+      const height = sheetHeight || MIN_SHEET_HEIGHT;
       Animated.parallel([
         Animated.timing(backdropOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(translateY, { toValue: SHEET_HEIGHT, duration: 200, useNativeDriver: true }),
+        Animated.timing(translateY, { toValue: height, duration: 200, useNativeDriver: true }),
       ]).start();
     }
-  }, [visible]);
+  }, [visible, sheetHeight]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -55,7 +66,8 @@ export default function GlobalDownloadSheet() {
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 100 || gestureState.vy > 0.5) {
-          Animated.timing(translateY, { toValue: SHEET_HEIGHT, duration: 200, useNativeDriver: true }).start(() => hideVideoOptionsSheet());
+          const height = sheetHeight || MIN_SHEET_HEIGHT;
+          Animated.timing(translateY, { toValue: height, duration: 200, useNativeDriver: true }).start(() => hideVideoOptionsSheet());
         } else {
           Animated.spring(translateY, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
         }
@@ -72,6 +84,13 @@ export default function GlobalDownloadSheet() {
     }
   };
 
+  const handleBlock = () => {
+    if (sheetState.onBlock) {
+      hideVideoOptionsSheet();
+      setTimeout(() => sheetState.onBlock(video), 300);
+    }
+  };
+
   return (
     <View style={styles.overlayContainer} pointerEvents="box-none">
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} pointerEvents="auto">
@@ -82,6 +101,12 @@ export default function GlobalDownloadSheet() {
         style={[styles.sheet, { transform: [{ translateY }], paddingBottom: insets.bottom + 20 }]} 
         pointerEvents="auto"
         {...panResponder.panHandlers}
+        onLayout={(event) => {
+          const { height } = event.nativeEvent.layout;
+          if (height > 0 && height !== sheetHeight) {
+            setSheetHeight(height);
+          }
+        }}
       >
         <View style={styles.dragHandle} />
         
@@ -94,6 +119,13 @@ export default function GlobalDownloadSheet() {
           </View>
         )}
         
+        <Pressable style={styles.option} onPress={handleBlock}>
+          <View style={[styles.optionIcon, { backgroundColor: 'rgba(220,38,38,0.2)' }]}>
+            <Text style={styles.optionEmoji}>🚫</Text>
+          </View>
+          <Text style={[styles.optionText, { color: '#ef4444' }]}>Block User</Text>
+        </Pressable>
+
         <Pressable 
           style={[styles.option, hasDownloaded && styles.downloadedOption]} 
           onPress={handleDownload}

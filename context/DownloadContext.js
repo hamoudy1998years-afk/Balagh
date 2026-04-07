@@ -22,6 +22,7 @@ export function DownloadProvider({ children }) {
       onPin: callbacks.onPin,
       onDelete: callbacks.onDelete,
       onDownload: callbacks.onDownload,
+      onBlock: callbacks.onBlock,
     });
   }, []);
 

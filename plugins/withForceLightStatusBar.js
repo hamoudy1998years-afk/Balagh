@@ -8,10 +8,18 @@ const withForceLightStatusBar = (config) => {
       style => style.$.name === 'AppTheme'
     );
     if (appTheme) {
-      appTheme.item = [
-        ...(appTheme.item || []),
-        { $: { name: 'android:windowLightStatusBar' }, _: 'false' }
-      ];
+      if (!appTheme.item) appTheme.item = [];
+
+      // Remove existing entry first to avoid duplicates
+      appTheme.item = appTheme.item.filter(
+        i => i.$.name !== 'android:windowLightStatusBar'
+      );
+
+      // Then add fresh - false = WHITE icons on dark background
+      appTheme.item.push({
+        $: { name: 'android:windowLightStatusBar' },
+        _: 'false'
+      });
     }
     return config;
   });

@@ -4,10 +4,10 @@
     "slug": "Balagh",
     "scheme": "bushrann",
     "version": "1.1.0",
-    "privacyPolicyUrl": "https://sites.google.com/view/bushrann/privacy-policy ",
+    "privacyPolicyUrl": "https://sites.google.com/view/bushrann/privacy-policy",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -29,11 +29,6 @@
       "versionCode": 3,
       "minSdkVersion": 24,
       "largeHeap": true,
-      "statusBar": {
-        "translucent": true,
-        "barStyle": "light-content",
-        "backgroundColor": "#00000000"
-      },
       "navigationBar": {
         "backgroundColor": "#000000",
         "barStyle": "light-content"
@@ -62,12 +57,13 @@
     },
     "plugins": [
       "./plugins/withAndroidSplashIcon.js",
+      "./plugins/withForceLightStatusBar.js",
       [
         "react-native-edge-to-edge",
         {
           "android": {
-            "parentTheme": "Default",
-            "enforceNavigationBarContrast": false
+            "parentTheme": "Default.NoActionBar",
+            "enforceEdgeToEdge": true
           }
         }
       ],
@@ -103,14 +99,13 @@
       ],
       "expo-web-browser",
       "react-native-video",
-      "expo-asset",
-      "./plugins/withForceLightStatusBar.js"
+      "expo-asset"
     ],
     "extra": {
       "eas": {
         "projectId": "5804d13c-1244-4972-8b7a-083f99fbb885"
       }
     },
-    "termsOfServiceUrl": "https://sites.google.com/view/bushrann/terms "
+    "termsOfServiceUrl": "https://sites.google.com/view/bushrann/terms"
   }
 }

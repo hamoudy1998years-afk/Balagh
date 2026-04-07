@@ -8,7 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { videoCache } from '../utils/VideoCache';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
-  useWindowDimensions, Image,
+  useWindowDimensions, Image, PanResponder, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
@@ -119,6 +119,10 @@ function VideoCard({
   const [paused, setPaused] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [showPauseIcon, setShowPauseIcon] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [showProgress, setShowProgress] = useState(true);
+  const progressAnim = useRef(new Animated.Value(0)).current;
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
@@ -230,6 +234,41 @@ function VideoCard({
   const tapTimer = useRef(null);
   const insets = useSafeAreaInsets();
 
+  // Progress bar dragging
+  const progressBarWidth = useRef(0);
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const { locationX } = evt.nativeEvent;
+        seekToPosition(locationX);
+      },
+      onPanResponderMove: (evt) => {
+        const { locationX } = evt.nativeEvent;
+        seekToPosition(locationX);
+      },
+    })
+  ).current;
+
+  const seekToPosition = (x) => {
+    if (!duration || progressBarWidth.current === 0) return;
+    const percentage = Math.max(0, Math.min(1, x / progressBarWidth.current));
+    const newTime = percentage * duration;
+    if (player?.current) {
+      player.current.seek(newTime);
+      setCurrentTime(newTime);
+      progressAnim.setValue(percentage);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -281,6 +320,7 @@ function VideoCard({
   const handleTap = useCallback(() => {
     const now = Date.now();
     if (lastTap.current && now - lastTap.current < 300) {
+      // Double tap - like the video
       clearTimeout(tapTimer.current);
       lastTap.current = null;
       handleLike();
@@ -288,13 +328,23 @@ function VideoCard({
       setShowPauseIcon(false);
       setTimeout(() => setShowHeart(false), 800);
     } else {
+      // Single tap - toggle pause/play
       lastTap.current = now;
       tapTimer.current = setTimeout(() => {
         setPaused(prev => {
           const newPaused = !prev;
           manualPauseRef.current = newPaused;
+          
+          // Show icon when state changes, but don't auto-hide when pausing
           setShowPauseIcon(true);
-          setTimeout(() => setShowPauseIcon(false), 600);
+          
+          // Only auto-hide when resuming (unpausing), not when pausing
+          if (!newPaused) {
+            // Resuming - hide icon after delay
+            setTimeout(() => setShowPauseIcon(false), 800);
+          }
+          // When pausing (newPaused = true), icon stays visible
+          
           return newPaused;
         });
         lastTap.current = null;
@@ -303,13 +353,16 @@ function VideoCard({
   }, [handleLike]);
 
   const handleLongPress = useCallback(() => {
+    console.log('[DEBUG VideoCard] Long press triggered, handleBlockUser exists:', !!handleBlockUser);
     if (!showVideoOptionsSheet) return;
+    console.log('[DEBUG VideoCard] Calling showVideoOptionsSheet with onBlock');
     showVideoOptionsSheet(item, false, hasDownloaded, {
       onDownload: handleDownloadVideo,
       onPin: null,
       onDelete: null,
+      onBlock: handleBlockUser,
     });
-  }, [showVideoOptionsSheet, item, hasDownloaded]);
+  }, [showVideoOptionsSheet, item, hasDownloaded, handleBlockUser]);
 
   const handleDownloadVideo = useCallback(async () => {
     if (hasDownloaded) return;
@@ -348,6 +401,18 @@ function VideoCard({
     setShowReportSheet(false);
     setDialog({ visible: true, title: 'Report Submitted ✅', message: 'Thanks for reporting. We will review this video.', type: 'success', buttons: [{ text: 'OK' }] });
   }, [currentUserId, item]);
+
+  const handleBlockUser = useCallback(async () => {
+    if (!currentUserId || !item.user_id) return;
+    try {
+      await supabase.from('blocks').insert({ blocker_id: currentUserId, blocked_id: item.user_id });
+      setIsBlocked(true);
+      setDialog({ visible: true, title: 'Blocked 🚫', message: 'You have blocked this user. Their content will no longer appear in your feed.', type: 'success', buttons: [{ text: 'OK' }] });
+    } catch (error) {
+      console.error('Block error:', error);
+      setDialog({ visible: true, title: 'Error', message: 'Could not block user. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+    }
+  }, [currentUserId, item.user_id]);
 
   const handleShare = useCallback(async () => {
     await Share.share({ message: `Watch "${item.caption}" on Balagh! ☪️` });
@@ -392,8 +457,18 @@ function VideoCard({
           console.log('[VIDEO ERROR] Video URL:', videoUri);
           __DEV__ && console.log('Video error:', e);
         }}
-        onLoad={() => {
+        onLoad={(data) => {
           console.log('[VIDEO SUCCESS] Video loaded:', videoUri);
+          if (data?.duration) {
+            setDuration(data.duration);
+          }
+        }}
+        onProgress={(data) => {
+          if (data?.currentTime && data?.seekableDuration) {
+            setCurrentTime(data.currentTime);
+            const progress = data.currentTime / data.seekableDuration;
+            progressAnim.setValue(progress);
+          }
         }}
         useTextureView={false}
       />
@@ -409,8 +484,15 @@ function VideoCard({
       {showHeart && (
         <View style={styles.heartOverlay}><Text style={styles.heartIcon}>❤️</Text></View>
       )}
-      {showPauseIcon && (
-        <View style={styles.heartOverlay}><Text style={styles.heartIcon}>{paused ? '⏸️' : '▶️'}</Text></View>
+      {showPauseIcon && paused && (
+        <View style={styles.pauseOverlay}>
+          <Ionicons 
+            name="play" 
+            size={60} 
+            color="#ffffff" 
+            style={{ opacity: 0.9 }}
+          />
+        </View>
       )}
 
       <View style={[styles.overlay, { bottom: insets.bottom + s(120) }]}>
@@ -518,6 +600,45 @@ function VideoCard({
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
 
+      {/* Progress Bar - Only show when paused, positioned above bottom nav */}
+      {paused && (
+        <View 
+          style={[styles.progressContainer, { bottom: '10%' }]}
+          onLayout={(e) => { progressBarWidth.current = e.nativeEvent.layout.width; }}
+        >
+          <View style={styles.timeRow}>
+            <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+            <Text style={styles.timeText}>{formatTime(duration)}</Text>
+          </View>
+          <View 
+            style={styles.progressBarBg}
+            {...panResponder.panHandlers}
+          >
+            <Animated.View 
+              style={[
+                styles.progressBarFill,
+                { width: progressAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%']
+                })}
+              ]} 
+            />
+            <Animated.View 
+              style={[
+                styles.progressThumb,
+                { 
+                  left: progressAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['0%', '100%']
+                  }),
+                  marginLeft: -6,
+                }
+              ]}
+            />
+          </View>
+        </View>
+      )}
+
       <ModernDialog
         visible={dialog.visible}
         title={dialog.title}
@@ -536,6 +657,19 @@ const styles = StyleSheet.create({
   tapAreaFull: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
   heartOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' },
   heartIcon: { fontSize: ms(80), opacity: 0.9 },
+  pauseOverlay: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    zIndex: 2, 
+    pointerEvents: 'none',
+    // No background blur - transparent
+  },
+
   overlay: { position: 'absolute', left: s(16), right: s(80), zIndex: 3 },
   username: {
     color: '#ffffff',
@@ -614,6 +748,51 @@ const styles = StyleSheet.create({
   dlBarBg: { width: '100%', height: 8, backgroundColor: '#2a3a5c', borderRadius: 4, overflow: 'hidden' },
   dlBarFill: { height: '100%', backgroundColor: COLORS.gold, borderRadius: 4 },
   dlPercent: { color: COLORS.gold, fontSize: 22, fontWeight: '800' },
+  progressContainer: {
+    position: 'absolute',
+    left: s(16),
+    right: s(16),
+    zIndex: 5,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  timeText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: ms(11),
+    fontWeight: '600',
+  },
+  progressBarBg: {
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 2,
+    overflow: 'visible',
+    position: 'relative',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: COLORS.gold,
+    borderRadius: 2,
+    position: 'absolute',
+    left: 0,
+    top: 0,
+  },
+  progressThumb: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ffffff',
+    position: 'absolute',
+    top: -4,
+    marginLeft: -6,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
 });
 
 function areEqual(prevProps, nextProps) {

@@ -23,7 +23,7 @@ export default function GlobalVideoOptionsSheet() {
     return null;
   }
 
-  const { visible, video, isOwner, hasDownloaded, onPin, onDelete, onDownload } = sheetState;
+  const { visible, video, isOwner, hasDownloaded, onPin, onDelete, onDownload, onBlock } = sheetState;
   
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -80,6 +80,11 @@ export default function GlobalVideoOptionsSheet() {
     }
   };
 
+  const handleBlock = () => {
+    hideVideoOptionsSheet();
+    setTimeout(() => onBlock && onBlock(video), 300);
+  };
+
   return (
     <View style={styles.overlayContainer} pointerEvents="box-none">
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} pointerEvents="auto">
@@ -118,6 +123,16 @@ export default function GlobalVideoOptionsSheet() {
             {hasDownloaded ? 'Downloaded' : 'Download Video'}
           </Text>
         </Pressable>
+        
+        {/* Block User - Only for other people's videos */}
+        {!isOwner && (
+          <Pressable style={styles.option} onPress={handleBlock}>
+            <View style={[styles.optionIcon, { backgroundColor: 'rgba(220,38,38,0.2)' }]}>
+              <Text style={styles.optionEmoji}>🚫</Text>
+            </View>
+            <Text style={[styles.optionText, { color: '#ef4444' }]}>Block User</Text>
+          </Pressable>
+        )}
         
         {/* Delete - Only for owner */}
         {isOwner && (
