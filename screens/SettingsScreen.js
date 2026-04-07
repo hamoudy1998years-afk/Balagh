@@ -5,7 +5,9 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Switch, Animated, Alert, Image, Modal,
   TextInput, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform, BackHandler,
+  Pressable, Dimensions,
 } from 'react-native';
+// BlurView removed - using standard iOS blur effect
 import { supabase } from '../lib/supabase';
 import { userCache } from '../utils/userCache';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -201,6 +203,8 @@ export default function SettingsScreen({ navigation }) {
 
   const [blockedUsers,   setBlockedUsers]   = useState([]);
   const [blockedLoading, setBlockedLoading] = useState(false);
+  const [unblockModalVisible, setUnblockModalVisible] = useState(false);
+  const [userToUnblock, setUserToUnblock] = useState(null);
 
   const [isDark, setIsDark] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -273,27 +277,48 @@ export default function SettingsScreen({ navigation }) {
     Alert.alert('Saved ✓', 'Phone number updated successfully.');
   }
 
-  async function loadBlockedUsers() {
+  const loadBlockedUsers = React.useCallback(async () => {
     if (!currentUser) return;
     setBlockedLoading(true);
-    const { data } = await supabase
+
+    const { data: blocks, error } = await supabase
       .from('blocks')
-      .select('blocked_id, profiles!blocks_blocked_id_fkey(id, username, full_name, avatar_url)')
+      .select('blocked_id')
       .eq('blocker_id', currentUser.id)
       .order('created_at', { ascending: false });
-    setBlockedUsers(data?.map(d => d.profiles).filter(Boolean) ?? []);
-    setBlockedLoading(false);
-  }
 
-  async function unblockUser(userId, username) {
-    Alert.alert(`Unblock @${username}?`, 'They will be able to see your content and follow you again.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Unblock', onPress: async () => {
-        await supabase.from('blocks').delete().eq('blocker_id', currentUser.id).eq('blocked_id', userId);
-        setBlockedUsers(prev => prev.filter(u => u.id !== userId));
-      }},
-    ]);
-  }
+    if (error || !blocks?.length) {
+      setBlockedUsers([]);
+      setBlockedLoading(false);
+      return;
+    }
+
+    const ids = blocks.map(b => b.blocked_id);
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username, full_name, avatar_url')
+      .in('id', ids);
+
+    setBlockedUsers(profiles ?? []);
+    setBlockedLoading(false);
+  }, [currentUser]);
+
+  const handleUnblock = React.useCallback((user) => {
+    setUserToUnblock(user);
+    setUnblockModalVisible(true);
+  }, []);
+
+  const confirmUnblock = React.useCallback(async () => {
+    if (!userToUnblock) return;
+    setUnblockModalVisible(false);
+    
+    try {
+      await supabase.from('blocks').delete().eq('blocker_id', currentUser.id).eq('blocked_id', userToUnblock.id);
+      setBlockedUsers(prev => prev.filter(u => u.id !== userToUnblock.id));
+    } catch (err) {
+      Alert.alert('Error', 'Failed to unblock user');
+    }
+  }, [userToUnblock, currentUser?.id]);
 
   async function handleLogout() { setShowLogoutModal(true); }
 
@@ -343,15 +368,15 @@ export default function SettingsScreen({ navigation }) {
   const handleNavigateBlocked = React.useCallback(() => {
     setScreen('blocked');
     loadBlockedUsers();
-  }, []);
+  }, [loadBlockedUsers]);
 
   const handleNavigatePrivacy = React.useCallback(() => {
     setScreen('privacy');
   }, []);
 
-  const handleUnblockUser = React.useCallback((userId, username) => {
-    unblockUser(userId, username);
-  }, []);
+  const handleUnblockUser = React.useCallback((user) => {
+    handleUnblock(user);
+  }, [handleUnblock]);
 
   const handleNavigateFaq = React.useCallback(() => {
     setScreen('faq');
@@ -557,13 +582,57 @@ export default function SettingsScreen({ navigation }) {
                 <Text style={styles.blockedName}>{item.full_name || item.username}</Text>
                 <Text style={styles.blockedHandle}>@{item.username}</Text>
               </View>
-              <TouchableOpacity style={styles.unblockBtn} onPress={() => handleUnblockUser(item.id, item.username)}>
+              <TouchableOpacity style={styles.unblockBtn} onPress={() => handleUnblockUser(item)}>
                 <Text style={styles.unblockText}>Unblock</Text>
               </TouchableOpacity>
             </View>
           )}
         />
       )}
+
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={unblockModalVisible}
+        onRequestClose={() => setUnblockModalVisible(false)}
+      >
+        <View style={styles.unblockModalOverlay}>
+          <View style={styles.unblockBlurBackground}>
+            <View style={styles.unblockModalContainer}>
+              <View style={styles.unblockModalCard}>
+                <View style={styles.unblockModalHeader}>
+                  <Text style={styles.unblockModalTitle}>
+                    Unblock @{userToUnblock?.username || 'user'}?
+                  </Text>
+                  <Text style={styles.unblockModalMessage}>
+                    They will be able to see your content and follow you again.
+                  </Text>
+                </View>
+                <View style={styles.unblockModalDivider} />
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.unblockModalButton,
+                    styles.unblockModalButtonPrimary,
+                    pressed && styles.unblockModalButtonPressed
+                  ]}
+                  onPress={confirmUnblock}
+                >
+                  <Text style={styles.unblockModalButtonText}>Unblock</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.unblockModalCancelButton,
+                  pressed && styles.unblockModalButtonPressed
+                ]}
+                onPress={() => setUnblockModalVisible(false)}
+              >
+                <Text style={styles.unblockModalCancelText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 
@@ -800,6 +869,7 @@ export default function SettingsScreen({ navigation }) {
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
       </ScrollView>
+
     </View>
   );
 }
@@ -959,4 +1029,92 @@ const styles = StyleSheet.create({
   modalBtnText:        { fontSize: 15, fontWeight: '700', color: '#fff' },
   modalBtnTextDanger:  { color: '#fff' },
   modalBtnTextOutline: { color: SUBTEXT },
+  
+  // iOS Style Unblock Modal
+  unblockModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  unblockBlurBackground: {
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  unblockModalContainer: {
+    width: '100%',
+    maxWidth: 300,
+  },
+  unblockModalCard: {
+    backgroundColor: BG,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: BORDER,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  unblockModalHeader: {
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  unblockModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: TEXT,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  unblockModalMessage: {
+    fontSize: 13,
+    color: SUBTEXT,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  unblockModalDivider: {
+    height: 0.5,
+    backgroundColor: BORDER,
+    width: '100%',
+  },
+  unblockModalButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unblockModalButtonPrimary: {
+    backgroundColor: 'transparent',
+  },
+  unblockModalButtonPressed: {
+    backgroundColor: 'rgba(255, 59, 48, 0.15)',
+  },
+  unblockModalButtonText: {
+    color: '#B76E79',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  unblockModalCancelButton: {
+    backgroundColor: BG,
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 12,
+    borderWidth: 0.5,
+    borderColor: BORDER,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  unblockModalCancelText: {
+    color: TEXT,
+    fontSize: 15,
+    fontWeight: '600',
+  },
 });
