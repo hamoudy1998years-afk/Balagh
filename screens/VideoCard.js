@@ -48,6 +48,7 @@ function VideoCard({
 }) {
   const { width } = useWindowDimensions();
   const { showVideoOptionsSheet, showTikTokShare } = useDownload();
+  const { blockedUsers } = useUser();
 
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(item.likes_count ?? 0);
@@ -129,6 +130,27 @@ function VideoCard({
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
   const manualPauseRef = useRef(false);
+
+  // Check if video owner is blocked (from context)
+  const isUserBlocked = blockedUsers?.has(item.user_id);
+  
+  // Fade animation for blocked content
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  
+  useEffect(() => {
+    if (isUserBlocked) {
+      console.log('🚫 User blocked, fading out video:', item.id);
+      // Fade out animation
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Reset opacity if unblocked
+      fadeAnim.setValue(1);
+    }
+  }, [isUserBlocked, item.id, fadeAnim]);
 
   // ── PLAY/PAUSE LOGIC ──────────────────────────────────────────────────────
 
@@ -446,7 +468,7 @@ function VideoCard({
   const captionText = item.caption?.replace(/#\w+/g, '').trim() ?? '';
 
   return (
-    <View style={[styles.card, { height: cardHeight }]}>
+    <Animated.View style={[styles.card, { height: cardHeight, opacity: fadeAnim }]}>
       <Video
         ref={player}
         source={{ uri: videoUri }}
@@ -665,7 +687,7 @@ function VideoCard({
         buttons={dialog.buttons}
         onDismiss={() => setDialog({ ...dialog, visible: false })}
       />
-    </View>
+    </Animated.View>
   );
 }
 

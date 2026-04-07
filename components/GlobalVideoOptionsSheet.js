@@ -14,7 +14,7 @@ const SHEET_HEIGHT = 400;
 export default function GlobalVideoOptionsSheet() {
   const insets = useSafeAreaInsets();
   const context = useDownload();
-  const { currentUser } = useUser();
+  const { currentUser, blockUser } = useUser();
   const fallbackNavigation = useNavigation();
   const [loginDialogVisible, setLoginDialogVisible] = useState(false);
   const [loginDialogAction, setLoginDialogAction] = useState('');
@@ -223,6 +223,13 @@ export default function GlobalVideoOptionsSheet() {
       return;
     }
     hideVideoOptionsSheet();
+    
+    // Use context blockUser for instant UI update (triggers fade animation)
+    if (video?.user_id) {
+      blockUser(video.user_id);
+    }
+    
+    // Also call the callback if provided
     setTimeout(() => onBlock && onBlock(video), 300);
   };
 

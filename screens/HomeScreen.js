@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, Animated, RefreshControl, useWindowDimensions, AppState } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { FlashList } from '@shopify/flash-list';
-import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { TabView } from 'react-native-tab-view';
 import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -172,8 +172,13 @@ function LiveFeed({ navigation }) {
 
 // ── Video Feed ─────────────────────────────────────────────────────────────────
 const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFocusedRef }, ref) => {
-  const { user: authUser } = useUser();
+  const { user: authUser, blockedUsers } = useUser();
   const [videos, setVideos] = useState(() => feedCache[type] ?? []);
+  
+  // Filter out blocked users' videos
+  const visibleVideos = useMemo(() => {
+    return videos.filter(video => !blockedUsers?.has(video.user_id));
+  }, [videos, blockedUsers]);
   const [loading, setLoading] = useState(() => !feedCache[type]);
   const [refreshing, setRefreshing] = useState(false);
   const [feedError, setFeedError] = useState(null);
@@ -527,7 +532,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <FlatList
         ref={flatListRef}
-        data={videos}
+        data={visibleVideos}
         keyExtractor={(item) => item.id}
         style={{ backgroundColor: '#000' }}
         overScrollMode="never"
