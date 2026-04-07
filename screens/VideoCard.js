@@ -8,7 +8,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { videoCache } from '../utils/VideoCache';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
-  useWindowDimensions, Image, PanResponder, Animated,
+  useWindowDimensions, Image, PanResponder, Animated, Linking,
+  Pressable, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
@@ -46,7 +47,7 @@ function VideoCard({
   avatarUrl: avatarUrlProp,
 }) {
   const { width } = useWindowDimensions();
-  const { showVideoOptionsSheet } = useDownload();
+  const { showVideoOptionsSheet, showTikTokShare } = useDownload();
 
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(item.likes_count ?? 0);
@@ -354,6 +355,7 @@ function VideoCard({
 
   const handleLongPress = useCallback(() => {
     console.log('[DEBUG VideoCard] Long press triggered, handleBlockUser exists:', !!handleBlockUser);
+    console.log('[DEBUG VideoCard] Passing currentUserId:', currentUserId);
     if (!showVideoOptionsSheet) return;
     console.log('[DEBUG VideoCard] Calling showVideoOptionsSheet with onBlock');
     showVideoOptionsSheet(item, false, hasDownloaded, {
@@ -361,15 +363,28 @@ function VideoCard({
       onPin: null,
       onDelete: null,
       onBlock: handleBlockUser,
-    });
-  }, [showVideoOptionsSheet, item, hasDownloaded, handleBlockUser]);
+    }, currentUserId, navigation);
+  }, [showVideoOptionsSheet, item, hasDownloaded, handleBlockUser, currentUserId, navigation]);
 
   const handleDownloadVideo = useCallback(async () => {
     if (hasDownloaded) return;
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        setDialog({ visible: true, title: 'Permission Denied', message: 'Please allow access to your media library.', type: 'warning', buttons: [{ text: 'OK' }] });
+        setDialog({ 
+          visible: true, 
+          title: 'Permission Required', 
+          message: 'Please allow access to your media library to download videos.', 
+          type: 'warning', 
+          buttons: [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              onPress: () => Linking.openSettings(),
+              style: 'destructive'
+            },
+          ] 
+        });
         return;
       }
       setIsDownloading(true);
@@ -414,9 +429,7 @@ function VideoCard({
     }
   }, [currentUserId, item.user_id]);
 
-  const handleShare = useCallback(async () => {
-    await Share.share({ message: `Watch "${item.caption}" on Balagh! ☪️` });
-  }, [item]);
+
 
   const handleNavigateUserProfile = useCallback(() => {
     navigation.navigate(ROUTES.USER_PROFILE, { profileUserId: item.user_id });
@@ -551,7 +564,10 @@ function VideoCard({
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>
         <AnimatedButton 
-          onPress={handleShare} 
+          onPress={() => {
+            console.log('📤 SHARE BUTTON TAPPED - calling showTikTokShare with:', item?.id, currentUserId);
+            showTikTokShare(item, currentUserId);
+          }} 
           style={styles.actionBtn}
           accessibilityLabel="Share video"
           accessibilityRole="button"
@@ -589,6 +605,8 @@ function VideoCard({
         ]}
         onDismiss={() => setShowReportSheet(false)}
       />
+
+
 
       <CommentsModal
         visible={showComments}

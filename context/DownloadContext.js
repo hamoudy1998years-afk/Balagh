@@ -13,12 +13,14 @@ export function DownloadProvider({ children }) {
     onDownload: null,
   });
 
-  const showVideoOptionsSheet = useCallback((video, isOwner, hasDownloaded, callbacks) => {
+  const showVideoOptionsSheet = useCallback((video, isOwner, hasDownloaded, callbacks, currentUserId, navigation) => {
     setSheetState({
       visible: true,
       video,
       isOwner,
       hasDownloaded,
+      currentUserId,
+      navigation,
       onPin: callbacks.onPin,
       onDelete: callbacks.onDelete,
       onDownload: callbacks.onDownload,
@@ -30,11 +32,34 @@ export function DownloadProvider({ children }) {
     setSheetState(prev => ({ ...prev, visible: false }));
   }, []);
 
+  const showTikTokShare = useCallback((video, currentUserId) => {
+    console.log('🎯 showTikTokShare called, setting tiktokShareVisible: true');
+    setSheetState({
+      visible: false,
+      video,
+      isOwner: false,
+      hasDownloaded: false,
+      currentUserId,
+      navigation: null,
+      onPin: null,
+      onDelete: null,
+      onDownload: null,
+      onBlock: null,
+      tiktokShareVisible: true,
+    });
+  }, []);
+
+  const hideTikTokShare = useCallback(() => {
+    setSheetState(prev => ({ ...prev, tiktokShareVisible: false }));
+  }, []);
+
   return (
     <DownloadContext.Provider value={{ 
       sheetState, 
       showVideoOptionsSheet, 
-      hideVideoOptionsSheet 
+      hideVideoOptionsSheet,
+      showTikTokShare,
+      hideTikTokShare,
     }}>
       {children}
     </DownloadContext.Provider>

@@ -1,29 +1,156 @@
-import { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, Animated, Pressable, PanResponder, // Removed Image import
+  View, Text, StyleSheet, Animated, Pressable, PanResponder, Image,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useDownload } from '../context/DownloadContext';
+import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 
-const SHEET_HEIGHT = 400; // Reduced height since we removed preview
+const SHEET_HEIGHT = 400;
 
 export default function GlobalVideoOptionsSheet() {
   const insets = useSafeAreaInsets();
   const context = useDownload();
+  const { currentUser } = useUser();
+  const fallbackNavigation = useNavigation();
+  const [loginDialogVisible, setLoginDialogVisible] = useState(false);
+  const [loginDialogAction, setLoginDialogAction] = useState('');
+  
+  // TikTok sheet animation
+  const tikTokTranslateY = useRef(new Animated.Value(0)).current;
+  
+  useEffect(() => {
+    console.log('🔥 useEffect triggered, tiktokShareVisible:', tiktokShareVisible);
+    if (tiktokShareVisible) {
+      console.log('🎬 Animation starting - stopping any running animation');
+      // Stop any running animation and reset to off-screen position
+      tikTokTranslateY.stopAnimation(() => {
+        console.log('📍 Setting translateY to 400 (off-screen)');
+        tikTokTranslateY.setValue(400);
+        console.log('🚀 Starting spring animation to 0');
+        Animated.spring(tikTokTranslateY, {
+          toValue: 0,
+          tension: 65,
+          friction: 11,
+          useNativeDriver: true,
+        }).start(() => {
+          console.log('✅ Animation completed, current value should be 0');
+        });
+      });
+    } else {
+      console.log('⏸️ tiktokShareVisible is false, not animating');
+    }
+  }, [tiktokShareVisible]);
+
+  const tikTokPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          tikTokTranslateY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        console.log('👋 PanResponder release, dy:', gestureState.dy, 'vy:', gestureState.vy);
+        if (gestureState.dy > 100 || gestureState.vy > 0.5) {
+          console.log('📉 Closing sheet - animating to 400');
+          Animated.timing(tikTokTranslateY, {
+            toValue: 400,
+            duration: 200,
+            useNativeDriver: true,
+          }).start(() => {
+            console.log('✅ Close animation done, calling hideTikTokShare');
+            hideTikTokShare();
+          });
+        } else {
+          Animated.spring(tikTokTranslateY, {
+            toValue: 0,
+            tension: 65,
+            friction: 11,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
   
   if (!context) {
     __DEV__ && console.log('GlobalVideoOptionsSheet: context is undefined');
     return null;
   }
   
-  const { sheetState, hideVideoOptionsSheet } = context;
+  const { sheetState, hideVideoOptionsSheet, hideTikTokShare } = context;
   
   if (!sheetState) {
     return null;
   }
 
-  const { visible, video, isOwner, hasDownloaded, onPin, onDelete, onDownload, onBlock } = sheetState;
+  console.log('📱 GlobalVideoOptionsSheet rendering, visible:', visible);
+
+  const { visible, video, isOwner, hasDownloaded, currentUserId, onPin, onDelete, onDownload, onBlock, tiktokShareVisible } = sheetState;
+  // Force reset animation when tiktokShareVisible becomes true
+  if (tiktokShareVisible && tikTokTranslateY.__getValue() > 350) {
+    console.log('🔄 Force resetting animation to 400');
+    tikTokTranslateY.setValue(400);
+    Animated.spring(tikTokTranslateY, {
+      toValue: 0,
+      tension: 65,
+      friction: 11,
+      useNativeDriver: true,
+    }).start(() => {
+      console.log('✅ Animation completed');
+    });
+  }
+  
+  // Properly check if user is logged in
+  const isGuest = !currentUserId || currentUserId === null || currentUserId === undefined;
+  console.log('[DEBUG SHEET] currentUserId:', currentUserId, 'isGuest:', isGuest, 'type:', typeof currentUserId);
+  
+  // TikTok share handlers
+  const handleTikTokClose = () => {
+    hideTikTokShare();
+  };
+
+  const handleCopyLink = () => {
+    const { Clipboard } = require('react-native');
+    Clipboard.setString(`https://bushrann.app/video/${video?.id}`);
+    hideTikTokShare();
+    Alert.alert('Copied!', 'Link copied to clipboard');
+  };
+
+  const handleShareWhatsApp = () => {
+    const url = `whatsapp://send?text=Check out this video on Bushrann! ${video?.caption || ''} https://bushrann.app/video/${video?.id}`;
+    Linking.openURL(url).catch(() => Alert.alert('WhatsApp not installed'));
+    hideTikTokShare();
+  };
+
+  const handleShareFacebook = () => {
+    const url = `https://www.facebook.com/sharer/sharer.php?u=https://bushrann.app/video/${video?.id}`;
+    Linking.openURL(url);
+    hideTikTokShare();
+  };
+
+  const handleShareMessenger = () => {
+    const url = `fb-messenger://share/?link=https://bushrann.app/video/${video?.id}`;
+    Linking.openURL(url).catch(() => Alert.alert('Messenger not installed'));
+    hideTikTokShare();
+  };
+
+  const handleShareSMS = () => {
+    const url = `sms:?body=Check out this video on Bushrann! https://bushrann.app/video/${video?.id}`;
+    Linking.openURL(url);
+    hideTikTokShare();
+  };
+
+  const handleShareEmail = () => {
+    const url = `mailto:?subject=Check out this video on Bushrann&body=https://bushrann.app/video/${video?.id}`;
+    Linking.openURL(url);
+    hideTikTokShare();
+  };
   
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -61,7 +188,11 @@ export default function GlobalVideoOptionsSheet() {
     })
   ).current;
 
-  if (!visible) return null;
+  // Show if either main sheet or TikTok share is visible
+  if (!visible && !tiktokShareVisible) return null;
+
+  // Use navigation from sheetState or fallback to useNavigation
+  const navigation = sheetState.navigation || fallbackNavigation;
 
   const handlePin = () => {
     hideVideoOptionsSheet();
@@ -74,6 +205,11 @@ export default function GlobalVideoOptionsSheet() {
   };
 
   const handleDownload = () => {
+    if (isGuest) {
+      setLoginDialogAction('download videos');
+      setLoginDialogVisible(true);
+      return;
+    }
     if (!hasDownloaded) {
       hideVideoOptionsSheet();
       setTimeout(() => onDownload && onDownload(video), 300);
@@ -81,9 +217,16 @@ export default function GlobalVideoOptionsSheet() {
   };
 
   const handleBlock = () => {
+    if (isGuest) {
+      setLoginDialogAction('block users');
+      setLoginDialogVisible(true);
+      return;
+    }
     hideVideoOptionsSheet();
     setTimeout(() => onBlock && onBlock(video), 300);
   };
+
+
 
   return (
     <View style={styles.overlayContainer} pointerEvents="box-none">
@@ -92,63 +235,200 @@ export default function GlobalVideoOptionsSheet() {
       </Animated.View>
 
       <Animated.View 
-        style={[styles.sheet, { transform: [{ translateY }], paddingBottom: insets.bottom + 20 }]} 
+        style={[styles.sheet, { transform: [{ translateY }], paddingBottom: insets.bottom + 16 }]} 
         pointerEvents="auto"
         {...panResponder.panHandlers}
       >
+        {/* Drag Handle */}
         <View style={styles.dragHandle} />
         
-        {/* REMOVED: Video Preview Section */}
-        
-        {/* Pin/Unpin - Only for owner */}
-        {isOwner && (
-          <Pressable style={styles.option} onPress={handlePin}>
-            <View style={styles.optionIcon}>
-              <Text style={styles.optionEmoji}>{video?.is_pinned ? '📌' : '📍'}</Text>
+        {/* Video Preview Header */}
+        {(video?.thumbnail_url || video?.video_url) && (
+          <View style={styles.previewHeader}>
+            <Image 
+              source={{ uri: video.thumbnail_url || video.video_url }} 
+              style={styles.previewImage} 
+              resizeMode="cover"
+            />
+            <View style={styles.previewInfo}>
+              <Text style={styles.previewTitle} numberOfLines={1}>
+                {video?.caption || 'Video'}
+              </Text>
+              <Text style={styles.previewMeta}>
+                @{video?.profiles?.username || 'user'}
+              </Text>
             </View>
-            <Text style={styles.optionText}>{video?.is_pinned ? 'Unpin Video' : 'Pin Video'}</Text>
-          </Pressable>
-        )}
-        
-        {/* Download - For everyone */}
-        <Pressable 
-          style={[styles.option, hasDownloaded && styles.downloadedOption]} 
-          onPress={handleDownload}
-          disabled={hasDownloaded}
-        >
-          <View style={[styles.optionIcon, hasDownloaded && styles.downloadedIcon]}>
-            <Text style={styles.optionEmoji}>{hasDownloaded ? '✅' : '⬇️'}</Text>
           </View>
-          <Text style={[styles.optionText, hasDownloaded && styles.downloadedText]}>
-            {hasDownloaded ? 'Downloaded' : 'Download Video'}
-          </Text>
-        </Pressable>
-        
-        {/* Block User - Only for other people's videos */}
-        {!isOwner && (
-          <Pressable style={styles.option} onPress={handleBlock}>
-            <View style={[styles.optionIcon, { backgroundColor: 'rgba(220,38,38,0.2)' }]}>
-              <Text style={styles.optionEmoji}>🚫</Text>
-            </View>
-            <Text style={[styles.optionText, { color: '#ef4444' }]}>Block User</Text>
-          </Pressable>
         )}
         
-        {/* Delete - Only for owner */}
-        {isOwner && (
-          <Pressable style={styles.option} onPress={handleDelete}>
-            <View style={[styles.optionIcon, { backgroundColor: '#3d1111' }]}>
-              <Text style={styles.optionEmoji}>🗑️</Text>
+        {/* Action Grid - Modern Layout */}
+        <View style={styles.actionGrid}>
+          {/* Share removed - now on right side action bar */}
+
+          {/* Download */}
+          <Pressable 
+            style={[styles.gridItem, hasDownloaded && styles.gridItemDisabled]} 
+            onPress={handleDownload}
+            disabled={hasDownloaded}
+          >
+            <View style={[
+              styles.gridIcon, 
+              hasDownloaded ? { backgroundColor: 'rgba(34, 197, 94, 0.15)' } : { backgroundColor: 'rgba(16, 185, 129, 0.15)' }
+            ]}>
+              <Ionicons 
+                name={hasDownloaded ? 'checkmark-circle' : 'download-outline'} 
+                size={24} 
+                color={hasDownloaded ? '#22c55e' : '#10b981'} 
+              />
             </View>
-            <Text style={[styles.optionText, { color: '#ef4444' }]}>Delete Video</Text>
+            <Text style={[styles.gridLabel, hasDownloaded && { color: '#22c55e' }]}>
+              {hasDownloaded ? 'Saved' : 'Download'}
+            </Text>
           </Pressable>
+
+          {/* Pin - Owner only */}
+          {isOwner && (
+            <Pressable style={styles.gridItem} onPress={handlePin}>
+              <View style={[
+                styles.gridIcon, 
+                video?.is_pinned ? { backgroundColor: 'rgba(183, 110, 121, 0.2)' } : { backgroundColor: 'rgba(255, 255, 255, 0.1)' }
+              ]}>
+                <Ionicons 
+                  name={video?.is_pinned ? 'pin' : 'pin-outline'} 
+                  size={24} 
+                  color={video?.is_pinned ? '#B76E79' : '#ffffff'} 
+                />
+              </View>
+              <Text style={styles.gridLabel}>
+                {video?.is_pinned ? 'Unpin' : 'Pin'}
+              </Text>
+            </Pressable>
+          )}
+
+          {/* Block - Non-owner only */}
+          {!isOwner && (
+            <Pressable style={styles.gridItem} onPress={handleBlock}>
+              <View style={[styles.gridIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                <Ionicons name="ban-outline" size={24} color="#ef4444" />
+              </View>
+              <Text style={[styles.gridLabel, { color: '#ef4444' }]}>Block</Text>
+            </Pressable>
+          )}
+
+          {/* Delete - Owner only */}
+          {isOwner && (
+            <Pressable style={styles.gridItem} onPress={handleDelete}>
+              <View style={[styles.gridIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                <Ionicons name="trash-outline" size={24} color="#ef4444" />
+              </View>
+              <Text style={[styles.gridLabel, { color: '#ef4444' }]}>Delete</Text>
+            </Pressable>
+          )}
+        </View>
+        
+        {/* Cancel Button */}
+        <Pressable style={styles.cancelButton} onPress={hideVideoOptionsSheet}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </Pressable>
+        
+        {/* Modern Login Required Dialog */}
+        {loginDialogVisible && (
+          <View style={styles.loginDialogOverlay}>
+            <View style={styles.loginDialog}>
+              <View style={styles.loginDialogIcon}>
+                <Text style={{ fontSize: 48 }}>🔒</Text>
+              </View>
+              <Text style={styles.loginDialogTitle}>Login Required</Text>
+              <Text style={styles.loginDialogMessage}>
+                Please login or create an account to {loginDialogAction}.
+              </Text>
+              <View style={styles.loginDialogButtons}>
+                <Pressable 
+                  style={styles.loginDialogCancel} 
+                  onPress={() => setLoginDialogVisible(false)}
+                >
+                  <Text style={styles.loginDialogCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable 
+                  style={styles.loginDialogLogin}
+                  onPress={() => {
+                    setLoginDialogVisible(false);
+                    setTimeout(() => navigation?.navigate('Login'), 300);
+                  }}
+                >
+                  <Text style={styles.loginDialogLoginText}>Login</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         )}
         
-        {/* Cancel */}
-        <Pressable style={styles.cancelOption} onPress={hideVideoOptionsSheet}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </Pressable>
-      </Animated.View>
+        </Animated.View>
+      
+      {/* TikTok Style Share Modal - Renders at top level, outside Animated.View */}
+      {tiktokShareVisible && (
+        <View style={styles.tiktokOverlay}>
+          <Pressable style={styles.tiktokBackdrop} onPress={handleTikTokClose} />
+          <Animated.View 
+            style={[styles.tiktokContent, { transform: [{ translateY: tikTokTranslateY }] }]}
+            {...tikTokPanResponder.panHandlers}
+          >
+            {/* Drag Handle */}
+            <View style={styles.tiktokDragHandle} />
+            
+            <View style={styles.tiktokHeader}>
+              <Text style={styles.tiktokTitle}>Send to</Text>
+              <Pressable onPress={handleTikTokClose} style={styles.tiktokClose}>
+                <Ionicons name="close" size={24} color="#1a2e44" />
+              </Pressable>
+            </View>
+            
+            <View style={styles.tiktokGrid}>
+              <Pressable style={styles.tiktokItem} onPress={handleCopyLink}>
+                <View style={[styles.tiktokIcon, { backgroundColor: '#f1f5f9' }]}>
+                  <Ionicons name="link" size={28} color="#1a2e44" />
+                </View>
+                <Text style={styles.tiktokLabel}>Copy link</Text>
+              </Pressable>
+
+              <Pressable style={styles.tiktokItem} onPress={handleShareWhatsApp}>
+                <View style={[styles.tiktokIcon, { backgroundColor: '#25D366' }]}>
+                  <Ionicons name="logo-whatsapp" size={28} color="#ffffff" />
+                </View>
+                <Text style={styles.tiktokLabel}>WhatsApp</Text>
+              </Pressable>
+
+              <Pressable style={styles.tiktokItem} onPress={handleShareFacebook}>
+                <View style={[styles.tiktokIcon, { backgroundColor: '#1877F2' }]}>
+                  <Ionicons name="logo-facebook" size={28} color="#ffffff" />
+                </View>
+                <Text style={styles.tiktokLabel}>Facebook</Text>
+              </Pressable>
+
+              <Pressable style={styles.tiktokItem} onPress={handleShareMessenger}>
+                <View style={[styles.tiktokIcon, { backgroundColor: '#00B2FF' }]}>
+                  <Ionicons name="chatbubble-ellipses" size={28} color="#ffffff" />
+                </View>
+                <Text style={styles.tiktokLabel}>Messenger</Text>
+              </Pressable>
+
+              <Pressable style={styles.tiktokItem} onPress={handleShareSMS}>
+                <View style={[styles.tiktokIcon, { backgroundColor: '#34C759' }]}>
+                  <Ionicons name="chatbubble" size={28} color="#ffffff" />
+                </View>
+                <Text style={styles.tiktokLabel}>SMS</Text>
+              </Pressable>
+
+              <Pressable style={styles.tiktokItem} onPress={handleShareEmail}>
+                <View style={[styles.tiktokIcon, { backgroundColor: '#EA4335' }]}>
+                  <Ionicons name="mail" size={28} color="#ffffff" />
+                </View>
+                <Text style={styles.tiktokLabel}>Email</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </View>
+      )}
     </View>
   );
 }
@@ -158,16 +438,272 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     zIndex: 9999, elevation: 9999, justifyContent: 'flex-end',
   },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
-  sheet: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 }, // paddingBottom overridden inline
-  dragHandle: { width: 36, height: 5, backgroundColor: COLORS.textGray, borderRadius: 3, alignSelf: 'center', marginTop: 10, marginBottom: 8 },
-  option: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 20, gap: 16 },
-  optionIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.borderDark, alignItems: 'center', justifyContent: 'center' },
-  optionEmoji: { fontSize: 20 },
-  optionText: { color: COLORS.textWhite, fontSize: 16, fontWeight: '500' },
-  cancelOption: { marginTop: 8, borderTopWidth: 1, borderTopColor: COLORS.borderDark, paddingVertical: 16, alignItems: 'center' },
-  cancelText: { color: COLORS.textGray, fontSize: 16, fontWeight: '600' },
-  downloadedOption: { opacity: 0.8 },
-  downloadedIcon: { backgroundColor: COLORS.success },
-  downloadedText: { color: COLORS.success, fontWeight: '600' },
+  backdrop: { 
+    ...StyleSheet.absoluteFillObject, 
+    backgroundColor: 'rgba(0,0,0,0.5)' 
+  },
+  sheet: { 
+    backgroundColor: '#ffffff', 
+    borderTopLeftRadius: 28, 
+    borderTopRightRadius: 28, 
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 20,
+  },
+  dragHandle: { 
+    width: 40, 
+    height: 5, 
+    backgroundColor: 'rgba(0,0,0,0.2)', 
+    borderRadius: 3, 
+    alignSelf: 'center', 
+    marginTop: 8, 
+    marginBottom: 16 
+  },
+  
+  // Preview Header
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  previewImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#e2e8f0',
+  },
+  previewInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  previewTitle: {
+    color: '#1a2e44',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  previewMeta: {
+    color: '#64748b',
+    fontSize: 14,
+  },
+  
+  // Action Grid
+  actionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    gap: 16,
+    marginBottom: 24,
+  },
+  gridItem: {
+    alignItems: 'center',
+    width: '22%',
+    marginBottom: 8,
+  },
+  gridItemDisabled: {
+    opacity: 0.5,
+  },
+  gridIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  gridLabel: {
+    color: '#1a2e44',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  
+  // Cancel
+  cancelButton: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  cancelButtonText: {
+    color: '#1a2e44',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // Modern Login Dialog
+  loginDialogOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    zIndex: 10000,
+  },
+  loginDialog: {
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    padding: 28,
+    width: '100%',
+    maxWidth: 320,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  loginDialogIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  loginDialogTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a2e44',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  loginDialogMessage: {
+    fontSize: 15,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  loginDialogButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  loginDialogCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+  },
+  loginDialogCancelText: {
+    color: '#64748b',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  loginDialogLogin: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    backgroundColor: COLORS.gold,
+    alignItems: 'center',
+  },
+  loginDialogLoginText: {
+    color: '#1a2e44',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  
+  // TikTok Share Styles
+  tiktokOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'flex-end',
+    zIndex: 99999,
+    elevation: 99999,
+  },
+  tiktokBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  tiktokContent: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 8,
+    paddingBottom: 32,
+    zIndex: 100000,
+    elevation: 100000,
+  },
+  tiktokDragHandle: {
+    width: 40,
+    height: 5,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 3,
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  tiktokHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  tiktokTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a2e44',
+    flex: 1,
+    textAlign: 'center',
+  },
+  tiktokClose: {
+    padding: 4,
+  },
+  tiktokGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-around',
+    paddingHorizontal: 16,
+  },
+  tiktokItem: {
+    alignItems: 'center',
+    width: '25%',
+    marginBottom: 20,
+  },
+  tiktokIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tiktokLabel: {
+    color: '#1a2e44',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
 });
