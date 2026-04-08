@@ -21,6 +21,7 @@ import { useEngagedViewers } from '../hooks/useEngagedViewers';
 import { useFeatureFlag } from '../hooks/useFeatureFlag';
 import RNFS from 'react-native-fs';
 import { COLORS } from '../constants/theme';
+import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 import { filterMessage } from '../utils/moderation';
@@ -115,6 +116,13 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   const [isLive, setIsLive] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
   const [streamId, setStreamId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [questions, setQuestions] = useState([]);
@@ -298,7 +306,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       if (!cameraGranted) {
         __DEV__ && console.log('❌ [requestPermissions] Camera permission DENIED');
-        Alert.alert('Permission Required', 'Camera permission is needed to stream');
+        setDialog({ visible: true, title: 'Permission Required', message: 'Camera permission is needed to stream', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         return false;
       }
       
@@ -498,7 +506,7 @@ export default function LiveStreamScreen({ navigation, route }) {
 
       if (!hostToken) {
         __DEV__ && console.log('❌ [setup] No host token, aborting');
-        Alert.alert('Error', 'Could not get streaming token. Please try again.');
+        setDialog({ visible: true, title: 'Error', message: 'Could not get streaming token. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         setIsStarting(false); // 🔧 FIXED: Reset button state
         navigation.goBack();
         return;
@@ -520,7 +528,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         .single();
 
       if (streamError) {
-        Alert.alert('Error', 'Could not start stream.');
+        setDialog({ visible: true, title: 'Error', message: 'Could not start stream.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         setIsStarting(false); // 🔧 FIXED: Reset button state
         navigation.goBack();
         return;
@@ -711,7 +719,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         }
         engineRef.current = null;
       }
-      Alert.alert('Error', 'Failed to start live stream: ' + e.message);
+      setDialog({ visible: true, title: 'Error', message: 'Failed to start live stream: ' + e.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       setIsStarting(false);
       navigation.goBack();
     }
@@ -839,7 +847,7 @@ export default function LiveStreamScreen({ navigation, route }) {
     // Moderation check for host's own messages
     const moderationResult = filterMessage(msg, username);
     if (!moderationResult.allowed) {
-      Alert.alert('Message Blocked', 'Your message contains inappropriate content.');
+      setDialog({ visible: true, title: 'Message Blocked', message: 'Your message contains inappropriate content.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       return;
     }
     
@@ -1387,6 +1395,15 @@ export default function LiveStreamScreen({ navigation, route }) {
           <Text style={styles.endingText}>{endingMessage}</Text>
         </View>
       )}
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }
