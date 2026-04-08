@@ -273,9 +273,12 @@ export default function SearchScreen({ navigation }) {
     setVideoResults([]);
   }, []);
 
-  const handleCategoryPress = useCallback((item) => {
-    handleCategory(item);
-  }, [handleCategory]);
+    const handleCategoryPress = useCallback((item) => {
+      handleCategory(item);
+      if (query.trim().length >= 1) {
+        handleSearch(query);
+      }
+    }, [handleCategory, handleSearch, query]);
 
   const handleNavigateUserProfile = useCallback((profileUserId) => {
     navigation.navigate(ROUTES.USER_PROFILE, { profileUserId });
