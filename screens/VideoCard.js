@@ -128,6 +128,9 @@ function VideoCard({
   const durationRef = useRef(0);
   const playerRef = useRef(null);
   const isVideoReadyRef = useRef(false);
+  const isSeeking = useRef(false);
+  const progressBarRef = useRef(null);  // Ref for measure()
+  const progressBarPageX = useRef(0);   // Absolute screen X position
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
@@ -249,49 +252,65 @@ function VideoCard({
 
   // Progress bar dragging
   const progressBarWidth = useRef(0);
+  // Capture both width AND absolute screen position on layout
+  const onProgressBarLayout = (e) => {
+    const { width } = e.nativeEvent.layout;
+    progressBarWidth.current = width;
+
+    // measure() gives true pageX after layout
+    progressBarRef.current?.measure((fx, fy, w, h, pageX, pageY) => {
+      progressBarPageX.current = pageX;
+    });
+  };
+
+  // Convert any touch's pageX into 0-1 percentage along the bar
+  const pageXToPercentage = (pageX) => {
+    const offset = pageX - progressBarPageX.current;
+    return Math.max(0, Math.min(1, offset / progressBarWidth.current));
+  };
+
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => {
-        console.log('[PROGRESS] onStartShouldSetPanResponder - returning true');
-        return true;
-      },
-      onMoveShouldSetPanResponder: () => {
-        console.log('[PROGRESS] onMoveShouldSetPanResponder - returning true');
-        return true;
-      },
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      // Prevent parent scroll views from stealing gesture mid-drag
+      onPanResponderTerminationRequest: () => false,
+
       onPanResponderGrant: (evt) => {
-        const { locationX } = evt.nativeEvent;
-        console.log('[PROGRESS] Grant - locationX:', locationX, 'progressBarWidth:', progressBarWidth.current);
-        seekToPosition(locationX);
+        isSeeking.current = true;
+        // pageX is absolute screen coords - works regardless of which child touched
+        const pct = pageXToPercentage(evt.nativeEvent.pageX);
+        seekToPosition(pct);
       },
+
       onPanResponderMove: (evt) => {
-        const { locationX } = evt.nativeEvent;
-        console.log('[PROGRESS] Move - locationX:', locationX);
-        seekToPosition(locationX);
+        // pageX stays consistent throughout gesture, locationX does not
+        const pct = pageXToPercentage(evt.nativeEvent.pageX);
+        seekToPosition(pct);
       },
+
       onPanResponderRelease: (evt) => {
-        console.log('[PROGRESS] Release - drag ended');
+        const pct = pageXToPercentage(evt.nativeEvent.pageX);
+        seekToPosition(pct);
+        isSeeking.current = false;
+      },
+
+      onPanResponderTerminate: () => {
+        isSeeking.current = false;
       },
     })
   ).current;
 
-  const seekToPosition = (x) => {
-    const width = progressBarWidth.current;
-    const dur = durationRef.current;  // Read from ref, not state (fixes stale closure)
-    const vid = playerRef.current;    // Read from ref, not closed-over player
+  const seekToPosition = (percentage) => {
+    const dur = durationRef.current;
+    if (dur === 0) return;
 
-    if (width === 0 || dur === 0) return;
-
-    const percentage = Math.max(0, Math.min(1, x / width));
     const newTime = percentage * dur;
-
-    // Update UI immediately for responsiveness
-    setCurrentTime(newTime);
     progressAnim.setValue(percentage);
+    setCurrentTime(newTime);
 
-    // Seek only if video is ready
-    if (vid && isVideoReadyRef.current) {
-      vid.seek(newTime);
+    if (playerRef.current && isVideoReadyRef.current) {
+      playerRef.current.seek(newTime);
     }
   };
 
@@ -509,6 +528,7 @@ function VideoCard({
           }
         }}
         onProgress={(data) => {
+          if (isSeeking.current) return;  // Skip updates while user is seeking
           if (data?.currentTime && data?.seekableDuration) {
             setCurrentTime(data.currentTime);
             const progress = data.currentTime / data.seekableDuration;
@@ -663,25 +683,24 @@ function VideoCard({
       {paused && (
         <Pressable 
           style={[styles.progressContainer, { bottom: insets.bottom + s(90), zIndex: 10 }]}
-          onLayout={(e) => { 
-            progressBarWidth.current = e.nativeEvent.layout.width;
-            console.log('[PROGRESS] onLayout - progressBarWidth set to:', e.nativeEvent.layout.width);
-          }}
           onPress={(e) => {
-            // Calculate seek position from press location
-            const { locationX } = e.nativeEvent;
-            seekToPosition(locationX);
+            const pct = pageXToPercentage(e.nativeEvent.pageX);
+            seekToPosition(pct);
           }}
         >
           <View style={styles.timeRow}>
             <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
             <Text style={styles.timeText}>{formatTime(duration)}</Text>
           </View>
-          <View 
+          <View
+            ref={progressBarRef}
             style={styles.progressBarBg}
+            onLayout={onProgressBarLayout}
             {...panResponder.panHandlers}
           >
+            {/* Fill - pointerEvents none prevents touch interception */}
             <Animated.View 
+              pointerEvents="none"
               style={[
                 styles.progressBarFill,
                 { width: progressAnim.interpolate({
@@ -690,7 +709,9 @@ function VideoCard({
                 })}
               ]} 
             />
+            {/* Thumb - pointerEvents none prevents jump to start */}
             <Animated.View 
+              pointerEvents="none"
               style={[
                 styles.progressThumb,
                 { 
