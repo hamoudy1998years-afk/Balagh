@@ -10,6 +10,7 @@ import { SystemBars } from 'react-native-edge-to-edge';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -67,10 +68,16 @@ const NotificationItem = React.memo(function NotificationItem({ item, onDelete, 
 
   const handleLongPress = () => {
     Vibration.vibrate(40);
-    Alert.alert('Delete Notification', 'Remove this notification?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: triggerDelete },
-    ]);
+    setDialog({
+      visible: true,
+      title: 'Delete Notification',
+      message: 'Remove this notification?',
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
+        { text: 'Delete', style: 'destructive', onPress: () => { setDialog(d => ({ ...d, visible: false })); triggerDelete(); } }
+      ]
+    });
   };
 
   const handlePress = () => {
@@ -147,6 +154,13 @@ export default function NotificationsScreen({ navigation }) {
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
   const [isOffline,     setIsOffline]     = useState(false);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
   const [showOffline,   setShowOffline]   = useState(false);
   const { user: authUser } = useUser();
   const currentUserId = authUser?.id ?? null;
@@ -258,7 +272,7 @@ export default function NotificationsScreen({ navigation }) {
   const onRefresh = useCallback(async () => {
     if (isOffline) {
       // Show offline message instead of trying to refresh
-      Alert.alert('No Connection', 'You are offline. Connect to the internet to refresh notifications.');
+      setDialog({ visible: true, title: 'No Connection', message: 'You are offline. Connect to the internet to refresh notifications.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       return;
     }
     setRefreshing(true);
@@ -272,13 +286,20 @@ export default function NotificationsScreen({ navigation }) {
   }, [currentUserId]);
 
   const handleDeleteAll = useCallback(() => {
-    Alert.alert('Clear All Notifications', 'Are you sure you want to delete all notifications?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear All', style: 'destructive', onPress: async () => {
-        setNotifications([]);
-        await supabase.from('notifications').delete().eq('user_id', currentUserId);
-      }},
-    ]);
+    setDialog({
+      visible: true,
+      title: 'Clear All Notifications',
+      message: 'Are you sure you want to delete all notifications?',
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
+        { text: 'Clear All', style: 'destructive', onPress: async () => {
+          setDialog(d => ({ ...d, visible: false }));
+          setNotifications([]);
+          await supabase.from('notifications').delete().eq('user_id', currentUserId);
+        }},
+      ]
+    });
   }, [currentUserId]);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -351,6 +372,15 @@ export default function NotificationsScreen({ navigation }) {
           />
         )}
       </View>
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }
