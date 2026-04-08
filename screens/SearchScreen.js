@@ -101,7 +101,7 @@ export default function SearchScreen({ navigation }) {
 
   const handleSearch = useCallback((text) => {
     setQuery(text);
-    if (text.trim().length < 2) {
+    if (text.trim().length < 1) {
       setProfileResults([]);
       setVideoResults([]);
       return;
@@ -124,7 +124,7 @@ export default function SearchScreen({ navigation }) {
       let profileQuery = supabase
         .from('profiles')
         .select('id, username, avatar_url, full_name')
-        .or(`username.ilike.%${sanitized}%,full_name.ilike.%${sanitized}%`);
+        .or(`username.ilike.${sanitized}%,full_name.ilike.${sanitized}%`);
       
       // Exclude blocked users
       if (blockedIds.length > 0) {
