@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   Image,
 } from 'react-native';
@@ -14,6 +13,7 @@ import { useUser } from '../context/UserContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
 import { COLORS } from '../constants/theme';
+import ModernDialog from './ModernDialog';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -26,11 +26,18 @@ export default function AdminScreen({ navigation }) {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
 
   // Check if current user is admin
   useEffect(() => {
     if (authUser?.id !== ADMIN_USER_ID) {
-      Alert.alert('Access Denied', 'You do not have admin privileges.');
+      setDialog({ visible: true, title: 'Access Denied', message: 'You do not have admin privileges.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       navigation.goBack();
     }
   }, [authUser]);
@@ -88,7 +95,7 @@ export default function AdminScreen({ navigation }) {
       setReports(enrichedReports);
     } catch (error) {
       console.error('Error loading reports:', error);
-      Alert.alert('Error', 'Failed to load reports');
+      setDialog({ visible: true, title: 'Error', message: 'Failed to load reports', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -108,27 +115,30 @@ export default function AdminScreen({ navigation }) {
 
       if (error) {
         console.error('Dismiss error:', error);
-        Alert.alert('Error', 'Failed to dismiss report: ' + error.message);
+        setDialog({ visible: true, title: 'Error', message: 'Failed to dismiss report: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         return;
       }
 
       setReports(prev => prev.filter(r => r.id !== reportId));
-      Alert.alert('Success', 'Report dismissed');
+      setDialog({ visible: true, title: 'Success', message: 'Report dismissed', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } catch (error) {
-      Alert.alert('Error', 'Failed to dismiss report');
+      setDialog({ visible: true, title: 'Error', message: 'Failed to dismiss report', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   };
 
   const handleBanUser = async (userId, reportId) => {
-    Alert.alert(
-      'Ban User',
-      'Are you sure you want to ban this user?',
-      [
-        { text: 'Cancel', style: 'cancel' },
+    setDialog({
+      visible: true,
+      title: 'Ban User',
+      message: 'Are you sure you want to ban this user?',
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
         {
           text: 'Ban',
           style: 'destructive',
           onPress: async () => {
+            setDialog(d => ({ ...d, visible: false }));
             try {
               // Add to banned_users table
               await supabase.from('banned_users').insert({
@@ -140,38 +150,41 @@ export default function AdminScreen({ navigation }) {
               // Dismiss report
               await supabase.from('reports').delete().eq('id', reportId);
               setReports(prev => prev.filter(r => r.id !== reportId));
-              Alert.alert('Success', 'User banned');
+              setDialog({ visible: true, title: 'Success', message: 'User banned', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             } catch (error) {
-              Alert.alert('Error', 'Failed to ban user');
+              setDialog({ visible: true, title: 'Error', message: 'Failed to ban user', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
-    );
+    });
   };
 
   const handleDeleteVideo = async (videoId, reportId) => {
-    Alert.alert(
-      'Delete Video',
-      'Are you sure you want to delete this video?',
-      [
-        { text: 'Cancel', style: 'cancel' },
+    setDialog({
+      visible: true,
+      title: 'Delete Video',
+      message: 'Are you sure you want to delete this video?',
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            setDialog(d => ({ ...d, visible: false }));
             try {
               await supabase.from('videos').delete().eq('id', videoId);
               await supabase.from('reports').delete().eq('id', reportId);
               setReports(prev => prev.filter(r => r.id !== reportId));
-              Alert.alert('Success', 'Video deleted');
+              setDialog({ visible: true, title: 'Success', message: 'Video deleted', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             } catch (error) {
-              Alert.alert('Error', 'Failed to delete video');
+              setDialog({ visible: true, title: 'Error', message: 'Failed to delete video', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
-    );
+    });
   };
 
   const renderReport = ({ item }) => (
@@ -272,6 +285,15 @@ export default function AdminScreen({ navigation }) {
         ListEmptyComponent={
           <Text style={styles.empty}>No reports to review</Text>
         }
+      />
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
       />
     </View>
   );
