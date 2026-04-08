@@ -213,7 +213,7 @@ export default function SettingsScreen({ navigation }) {
 
   useEffect(() => {
     const backAction = () => {
-      if (screen === 'blocked') { setScreen('privacy'); return true; }
+      if (screen === 'blocked') { setScreen(null); return true; }
       if (screen === 'faq' || screen === 'contact' || screen === 'terms' || screen === 'privacypolicy') { setScreen('help'); return true; }
       if (screen !== null) { setScreen(null); return true; }
       return false;
@@ -548,7 +548,7 @@ export default function SettingsScreen({ navigation }) {
   if (screen === 'blocked') return (
     <View style={[styles.subContainer, { paddingTop: insets.top }]}>
       <View style={styles.subHeader}>
-        <TouchableOpacity onPress={handleNavigatePrivacy} style={styles.subBack}>
+        <TouchableOpacity onPress={() => setScreen(null)} style={styles.subBack}>
           <Text style={styles.subBackIcon}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.subTitle}>Blocked Users</Text>
