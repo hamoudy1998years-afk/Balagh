@@ -241,35 +241,39 @@ export default function SearchScreen({ navigation }) {
     }
   }, [currentUserId, followingIds]);
 
-      const handleCategory = useCallback(async (cat) => {
-        setSelectedCategory(cat);
+    const handleCategory = useCallback(async (cat) => {
+      setSelectedCategory(cat);
+      
+      // If search query exists, let handleSearch handle everything (no flicker)
+      if (query.trim().length >= 1) {
         setLoading(true);
-        
-        if (cat === 'Users') {
-          // Don't clear results yet if search exists - let handleSearch do it
-          setLoading(false);
-          return;
-        }
-        
-        // Clear both results when leaving Users category (going to All/Others)
-        // Let handleSearch repopulate everything
+        // Clear old results immediately, handleSearch will populate
         setProfileResults([]);
         setVideoResults([]);
-        
-        if (cat === 'All') {
-          const { data, error } = await supabase.from('videos').select('*').limit(30);
-          if (error) { __DEV__ && console.warn('Category error:', error.message); setVideoResults([]); setLoading(false); return; }
-          // Filter out current user's videos
-          const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
-          setVideoResults(filtered);
-        } else {
-          const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(30);
-          // Filter out current user's videos
-          const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
-          setVideoResults(filtered);
-        }
+        // Don't set loading false here - let handleSearch do it
+        return;
+      }
+      
+      setLoading(true);
+      
+      if (cat === 'Users') {
         setLoading(false);
-      }, [currentUserId]);
+        return;
+      }
+      
+      // Only auto-load videos when no search query
+      if (cat === 'All') {
+        const { data, error } = await supabase.from('videos').select('*').limit(30);
+        if (error) { __DEV__ && console.warn('Category error:', error.message); setVideoResults([]); setLoading(false); return; }
+        const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
+        setVideoResults(filtered);
+      } else {
+        const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(30);
+        const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
+        setVideoResults(filtered);
+      }
+      setLoading(false);
+    }, [currentUserId, query]);
 
   const hasResults = profileResults.length > 0 || videoResults.length > 0;
 
