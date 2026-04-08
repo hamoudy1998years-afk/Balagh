@@ -661,11 +661,16 @@ function VideoCard({
 
       {/* Progress Bar - Moved to end with high zIndex to receive touches */}
       {paused && (
-        <View 
+        <Pressable 
           style={[styles.progressContainer, { bottom: insets.bottom + s(90), zIndex: 10 }]}
           onLayout={(e) => { 
             progressBarWidth.current = e.nativeEvent.layout.width;
             console.log('[PROGRESS] onLayout - progressBarWidth set to:', e.nativeEvent.layout.width);
+          }}
+          onPress={(e) => {
+            // Calculate seek position from press location
+            const { locationX } = e.nativeEvent;
+            seekToPosition(locationX);
           }}
         >
           <View style={styles.timeRow}>
@@ -698,7 +703,7 @@ function VideoCard({
               ]}
             />
           </View>
-        </View>
+        </Pressable>
       )}
     </Animated.View>
   );
