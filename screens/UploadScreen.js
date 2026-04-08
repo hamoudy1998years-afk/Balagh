@@ -701,12 +701,13 @@ const styles = StyleSheet.create({
   },
   goLiveConfirmBtnText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   cancelBtn: {
-    borderWidth: 1,
-    borderColor: '#eeeeee',
+    borderWidth: 2,
+    borderColor: '#1a2e44',
     borderRadius: 16,
     padding: 16,
     alignItems: 'center',
     marginBottom: 40,
+    backgroundColor: '#ffffff',
   },
-  cancelBtnText: { color: '#aaaaaa', fontSize: 15 },
+  cancelBtnText: { color: '#1a2e44', fontSize: 16, fontWeight: '600' },
 });
