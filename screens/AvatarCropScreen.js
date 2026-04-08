@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { useState, useRef } from 'react';
 import * as ImageManipulator from 'expo-image-manipulator';
+import ModernDialog from './ModernDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
@@ -18,6 +19,7 @@ export default function AvatarCropScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const VERT = (height - CROP_SIZE) / 2 - insets.top;
   const [processing, setProcessing] = useState(false);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
 
   const translateX = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(0)).current;
@@ -112,9 +114,13 @@ export default function AvatarCropScreen({ route, navigation }) {
     } catch (e) {
         __DEV__ && console.error('Crop error:', e);
         setProcessing(false);
-        Alert.alert('Crop Failed', 'Could not crop the image. Please try again.', [
-          { text: 'OK', onPress: () => navigation.goBack() }
-        ]);
+        setDialog({
+          visible: true,
+          title: 'Crop Failed',
+          message: 'Could not crop the image. Please try again.',
+          type: 'error',
+          buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.goBack(); } }]
+        });
     }
   }
 
@@ -162,6 +168,14 @@ export default function AvatarCropScreen({ route, navigation }) {
         <View style={styles.circleBorder} pointerEvents="none" />
       </View>
 
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }

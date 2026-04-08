@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList,
   Keyboard, Platform, ActivityIndicator,
-  Animated, Dimensions, Alert,
+  Animated, Dimensions,
 } from 'react-native';
+import ModernDialog from './ModernDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { Room, RoomEvent, Track } from 'livekit-client';
@@ -40,6 +41,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [hostTimeoutReached, setHostTimeoutReached] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
 
   const roomRef = useRef(null);
   const flatListRef = useRef(null);
@@ -90,8 +92,13 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   async function setup() {
     if (!currentUser) {
-      Alert.alert('Error', 'Please login to watch streams');
-      navigation.goBack();
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: 'Please login to watch streams',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.goBack(); } }]
+      });
       return;
     }
 
@@ -200,8 +207,13 @@ export default function WatchLiveScreen({ navigation, route }) {
 
     } catch (e) {
       __DEV__ && console.error('Setup error:', e);
-      Alert.alert('Error', 'Failed to join stream.');
-      navigation.goBack();
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: 'Failed to join stream.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.goBack(); } }]
+      });
     }
   }
 
@@ -300,11 +312,23 @@ export default function WatchLiveScreen({ navigation, route }) {
     const { data: streamData } = await supabase
       .from('live_streams').select('allow_questions').eq('id', stream.id).single();
     if (!streamData?.allow_questions) {
-      Alert.alert('Questions Disabled', 'The scholar is not accepting questions right now.');
+      setDialog({
+        visible: true,
+        title: 'Questions Disabled',
+        message: 'The scholar is not accepting questions right now.',
+        type: 'info',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
     if (questionsLeft <= 0) {
-      Alert.alert('Limit Reached', `The scholar has set a limit of ${stream.max_questions} questions per viewer.`);
+      setDialog({
+        visible: true,
+        title: 'Limit Reached',
+        message: `The scholar has set a limit of ${stream.max_questions} questions per viewer.`,
+        type: 'info',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
     const q = questionInput.replace(/<[^>]*>/g, '').trim();
@@ -493,6 +517,15 @@ export default function WatchLiveScreen({ navigation, route }) {
           ))}
         </View>
       </View>
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }

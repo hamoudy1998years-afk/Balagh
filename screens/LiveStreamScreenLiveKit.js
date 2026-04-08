@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TextInput,
   FlatList,
-  Alert,
   Keyboard,
   Platform,
   ActivityIndicator,
@@ -16,6 +15,7 @@ import {
   Image,
   InteractionManager,
 } from 'react-native';
+import ModernDialog from './ModernDialog';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { registerGlobals, VideoView } from '@livekit/react-native';
 import { Camera } from 'expo-camera';
@@ -64,6 +64,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const [showViewerList, setShowViewerList] = useState(false);
   const [viewerListMode, setViewerListMode] = useState('recent');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
 
   // --- Chat & Questions ---
   const [messages, setMessages] = useState([]);
@@ -101,7 +102,13 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       const { status } = await Camera.requestCameraPermissionsAsync();
       setHasPermission(status === 'granted');
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Camera permission is required to stream');
+        setDialog({
+          visible: true,
+          title: 'Permission needed',
+          message: 'Camera permission is required to stream',
+          type: 'warning',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
       }
     })();
 
@@ -190,11 +197,23 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   // ─── START STREAM ─────────────────────────────────────────────────────────────
   const startStream = async () => {
     if (!hasPermission) {
-      Alert.alert('Error', 'Camera permission not granted');
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: 'Camera permission not granted',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
     if (!currentUser) {
-      Alert.alert('Error', 'You must be logged in to stream');
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: 'You must be logged in to stream',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
 
@@ -463,7 +482,13 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
     const moderationResult = filterMessage(msg, username);
     if (!moderationResult.allowed) {
-      Alert.alert('Message Blocked', 'Your message contains inappropriate content.');
+      setDialog({
+        visible: true,
+        title: 'Message Blocked',
+        message: 'Your message contains inappropriate content.',
+        type: 'warning',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
 
@@ -843,6 +868,15 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           </View>
         </View>
       )}
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }

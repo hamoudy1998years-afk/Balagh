@@ -6,10 +6,10 @@ import {
   FlatList,
   TouchableOpacity,
   Image,
-  Alert,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import ModernDialog from './ModernDialog';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
 import { COLORS } from '../constants/theme';
@@ -26,6 +26,7 @@ export default function BlockedUsersScreen({ navigation }) {
   const [blockedList, setBlockedList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
 
   const fetchBlockedUsers = useCallback(async () => {
     console.log('🚀 FETCH BLOCKED USERS STARTED');
@@ -97,7 +98,13 @@ export default function BlockedUsersScreen({ navigation }) {
     } catch (err) {
       console.error('💥 CRITICAL ERROR:', err);
       console.error('📋 Error stack:', err.stack);
-      Alert.alert('Error', 'Failed to load blocked users: ' + err.message);
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: 'Failed to load blocked users: ' + err.message,
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
     } finally {
       console.log('🏁 Fetch completed, setting loading false');
       setLoading(false);
@@ -120,27 +127,35 @@ export default function BlockedUsersScreen({ navigation }) {
   );
 
   const handleUnblock = (blockedUser) => {
-    Alert.alert(
-      'Unblock User',
-      `Are you sure you want to unblock ${blockedUser.profiles?.username || 'this user'}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
+    setDialog({
+      visible: true,
+      title: 'Unblock User',
+      message: `Are you sure you want to unblock ${blockedUser.profiles?.username || 'this user'}?`,
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
         {
           text: 'Unblock',
           style: 'destructive',
           onPress: async () => {
+            setDialog(d => ({ ...d, visible: false }));
             try {
               await unblockUser(blockedUser.blocked_id);
-              // Refresh the list
               fetchBlockedUsers();
             } catch (err) {
               console.error('Failed to unblock:', err);
-              Alert.alert('Error', 'Failed to unblock user');
+              setDialog({
+                visible: true,
+                title: 'Error',
+                message: 'Failed to unblock user',
+                type: 'error',
+                buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+              });
             }
           }
         }
       ]
-    );
+    });
   };
 
   const renderItem = ({ item }) => (
@@ -216,6 +231,15 @@ export default function BlockedUsersScreen({ navigation }) {
           }
         />
       )}
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }

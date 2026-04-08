@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   FlatList,
   Dimensions,
   StatusBar,
   Platform,
 } from 'react-native';
+import ModernDialog from './ModernDialog';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
@@ -21,6 +21,7 @@ const VISIBLE_ITEMS = 5;
 
 export default function AgeGateScreen({ onVerified }) {
   const insets = useSafeAreaInsets();
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
   
   useEffect(() => {
     StatusBar.setBarStyle('light-content', true);
@@ -53,11 +54,13 @@ export default function AgeGateScreen({ onVerified }) {
 
   const handleContinue = async () => {
     if (selectedAge < MIN_AGE) {
-      Alert.alert(
-        'Age Requirement',
-        'You must be at least 13 years old to use Balagh.',
-        [{ text: 'OK' }]
-      );
+      setDialog({
+        visible: true,
+        title: 'Age Requirement',
+        message: 'You must be at least 13 years old to use Balagh.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
 
@@ -195,6 +198,15 @@ export default function AgeGateScreen({ onVerified }) {
           By continuing, you agree to our Terms and Privacy Policy
         </Text>
       </View>
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }

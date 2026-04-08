@@ -1,4 +1,4 @@
-import { Alert, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { Camera } from 'expo-camera';
@@ -75,29 +75,32 @@ export async function checkStreamingPermissions() {
   };
 }
 
-// Permission alerts
+// Permission alerts - return dialog config for ModernDialog
 export function showCameraPermissionAlert() {
-  Alert.alert(
-    'Permission Required',
-    ERROR_MESSAGES.CAMERA_PERMISSION,
-    [{ text: 'OK' }]
-  );
+  return {
+    title: 'Permission Required',
+    message: ERROR_MESSAGES.CAMERA_PERMISSION,
+    type: 'warning',
+    buttons: [{ text: 'OK' }]
+  };
 }
 
 export function showMicrophonePermissionAlert() {
-  Alert.alert(
-    'Permission Required',
-    ERROR_MESSAGES.MICROPHONE_PERMISSION,
-    [{ text: 'OK' }]
-  );
+  return {
+    title: 'Permission Required',
+    message: ERROR_MESSAGES.MICROPHONE_PERMISSION,
+    type: 'warning',
+    buttons: [{ text: 'OK' }]
+  };
 }
 
 export function showMediaLibraryPermissionAlert() {
-  Alert.alert(
-    'Permission Required',
-    ERROR_MESSAGES.MEDIA_LIBRARY_PERMISSION,
-    [{ text: 'OK' }]
-  );
+  return {
+    title: 'Permission Required',
+    message: ERROR_MESSAGES.MEDIA_LIBRARY_PERMISSION,
+    type: 'warning',
+    buttons: [{ text: 'OK' }]
+  };
 }
 
 // Ensure permissions with alert on denial

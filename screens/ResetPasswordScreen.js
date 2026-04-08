@@ -1,4 +1,5 @@
-import { View, Text, TextInput, StyleSheet, Alert, ActivityIndicator, Animated, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ActivityIndicator, Animated, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import ModernDialog from './ModernDialog';
 import { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
@@ -13,6 +14,7 @@ export default function ResetPasswordScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
   
   // Password visibility states
   const [showPassword, setShowPassword] = useState(false);
@@ -43,27 +45,55 @@ export default function ResetPasswordScreen({ navigation }) {
 
   async function handleReset() {
     if (!password.trim() || !confirm.trim()) {
-      Alert.alert('Missing Fields', 'Please enter and confirm your new password.');
+      setDialog({
+        visible: true,
+        title: 'Missing Fields',
+        message: 'Please enter and confirm your new password.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
     if (password !== confirm) {
-      Alert.alert('Mismatch', 'Passwords do not match.');
+      setDialog({
+        visible: true,
+        title: 'Mismatch',
+        message: 'Passwords do not match.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
     if (password.length < 6) {
-      Alert.alert('Too Short', 'Password must be at least 6 characters.');
+      setDialog({
+        visible: true,
+        title: 'Too Short',
+        message: 'Password must be at least 6 characters.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password });
     setLoading(false);
     if (error) {
-      Alert.alert('Error', error.message);
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: error.message,
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
       return;
     }
-    Alert.alert('Success! ✅', 'Your password has been reset.', [
-      { text: 'Login', onPress: () => navigation.navigate(ROUTES.LOGIN) }
-    ]);
+    setDialog({
+      visible: true,
+      title: 'Success! ✅',
+      message: 'Your password has been reset.',
+      type: 'success',
+      buttons: [{ text: 'Login', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.navigate(ROUTES.LOGIN); } }]
+    });
   }
 
   return (
@@ -140,6 +170,15 @@ export default function ResetPasswordScreen({ navigation }) {
           : <Text style={styles.buttonText}>Save New Password</Text>
         }
       </AnimatedButton>
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </ScrollView>
     </KeyboardAvoidingView>
   );

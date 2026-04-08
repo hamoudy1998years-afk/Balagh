@@ -8,6 +8,7 @@ import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import ModernDialog from '../screens/ModernDialog';
 
 const SHEET_HEIGHT = 400;
 
@@ -20,6 +21,7 @@ export default function GlobalVideoOptionsSheet() {
   const [loginDialogAction, setLoginDialogAction] = useState('');
   const [blockConfirmVisible, setBlockConfirmVisible] = useState(false);
   const [blockUserData, setBlockUserData] = useState(null);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
   
   // TikTok sheet animation
   const tikTokTranslateY = useRef(new Animated.Value(0)).current;
@@ -121,12 +123,26 @@ export default function GlobalVideoOptionsSheet() {
     const { Clipboard } = require('react-native');
     Clipboard.setString(`https://bushrann.app/video/${video?.id}`);
     hideTikTokShare();
-    Alert.alert('Copied!', 'Link copied to clipboard');
+    setDialog({
+      visible: true,
+      title: 'Copied!',
+      message: 'Link copied to clipboard',
+      type: 'success',
+      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+    });
   };
 
   const handleShareWhatsApp = () => {
     const url = `whatsapp://send?text=Check out this video on Bushrann! ${video?.caption || ''} https://bushrann.app/video/${video?.id}`;
-    Linking.openURL(url).catch(() => Alert.alert('WhatsApp not installed'));
+    Linking.openURL(url).catch(() => {
+      setDialog({
+        visible: true,
+        title: 'Not Installed',
+        message: 'WhatsApp not installed',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
+    });
     hideTikTokShare();
   };
 
@@ -138,7 +154,15 @@ export default function GlobalVideoOptionsSheet() {
 
   const handleShareMessenger = () => {
     const url = `fb-messenger://share/?link=https://bushrann.app/video/${video?.id}`;
-    Linking.openURL(url).catch(() => Alert.alert('Messenger not installed'));
+    Linking.openURL(url).catch(() => {
+      setDialog({
+        visible: true,
+        title: 'Not Installed',
+        message: 'Messenger not installed',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
+    });
     hideTikTokShare();
   };
 
@@ -487,6 +511,15 @@ export default function GlobalVideoOptionsSheet() {
           </View>
         </View>
       )}
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }

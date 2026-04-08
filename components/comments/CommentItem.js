@@ -3,12 +3,12 @@ import {
   View, 
   Text, 
   StyleSheet, 
-  Alert, 
   TextInput,
   Animated,
   Vibration,
   Platform
 } from 'react-native';
+import ModernDialog from '../../screens/ModernDialog';
 import UserAvatar from '../common/UserAvatar';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { COLORS } from '../../constants/theme';
@@ -29,6 +29,7 @@ export default function CommentItem({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(comment.text);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const isOwner = comment.user_id === currentUserId;
@@ -82,21 +83,24 @@ export default function CommentItem({
   };
 
   const handleDelete = () => {
-    Alert.alert(
-      'Delete Comment',
-      'Are you sure you want to delete this comment?',
-      [
-        { text: 'Cancel', style: 'cancel', onPress: () => setActiveMenuId(null) },
+    setDialog({
+      visible: true,
+      title: 'Delete Comment',
+      message: 'Are you sure you want to delete this comment?',
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => { setDialog(d => ({ ...d, visible: false })); setActiveMenuId(null); } },
         { 
           text: 'Delete', 
           style: 'destructive',
           onPress: () => { 
+            setDialog(d => ({ ...d, visible: false }));
             if (onDelete) onDelete(comment.id); 
             setActiveMenuId(null);
           }
         }
       ]
-    );
+    });
   };
 
   const handleReply = () => {
@@ -133,10 +137,22 @@ export default function CommentItem({
         if (onPin) onPin(comment.id, !comment.is_pinned);
         break;
       case 'report':
-        Alert.alert('Report', 'Comment reported');
+        setDialog({
+          visible: true,
+          title: 'Report',
+          message: 'Comment reported',
+          type: 'success',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
         break;
       case 'copy':
-        Alert.alert('Copied', 'Text copied to clipboard');
+        setDialog({
+          visible: true,
+          title: 'Copied',
+          message: 'Text copied to clipboard',
+          type: 'success',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
         break;
     }
     setActiveMenuId(null);
@@ -271,6 +287,15 @@ export default function CommentItem({
           )}
         </View>
       </View>
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }
