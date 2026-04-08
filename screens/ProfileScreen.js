@@ -18,6 +18,7 @@ import { useDownload } from '../context/DownloadContext';
 import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { COLORS } from '../constants/theme';
+import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -490,31 +491,31 @@ export default function ProfileScreen({ route, navigation }) {
     if (following) {
       dispatchProfile({ type: 'FOLLOW_CHANGE', following: false, delta: -1 });
       const { error } = await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', targetUserId);
-      if (error) { dispatchProfile({ type: 'FOLLOW_CHANGE', following: true, delta: 1 }); Alert.alert('Error', 'Could not unfollow. Please try again.'); }
+      if (error) { dispatchProfile({ type: 'FOLLOW_CHANGE', following: true, delta: 1 }); setDialog({ visible: true, title: 'Error', message: 'Could not unfollow. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); }
     } else {
       dispatchProfile({ type: 'FOLLOW_CHANGE', following: true, delta: 1 });
       const { error } = await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: targetUserId });
-      if (error) { dispatchProfile({ type: 'FOLLOW_CHANGE', following: false, delta: -1 }); Alert.alert('Error', 'Could not follow. Please try again.'); }
+      if (error) { dispatchProfile({ type: 'FOLLOW_CHANGE', following: false, delta: -1 }); setDialog({ visible: true, title: 'Error', message: 'Could not follow. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); }
     }
   }
 
   async function uploadCroppedAvatar(croppedUri) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { Alert.alert('Error', 'Not logged in.'); return; }
+      if (!session) { setDialog({ visible: true, title: 'Error', message: 'Not logged in.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
       const user = session.user;
       const ext = 'jpg';
       const fileName = `${user.id}_avatar.${ext}`;
       const formData = new FormData();
       formData.append('file', { uri: croppedUri, name: fileName, type: `image/${ext}` });
       const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, formData, { upsert: true });
-      if (uploadError) { Alert.alert('Error', uploadError.message); return; }
+      if (uploadError) { setDialog({ visible: true, title: 'Error', message: uploadError.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
       const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
       const cacheBustedUrl = `${publicUrl}?t=${Date.now()}`;
       await supabase.from('profiles').update({ avatar_url: cacheBustedUrl }).eq('id', user.id);
       dispatchProfile({ type: 'UPDATE_AVATAR', url: cacheBustedUrl });
     } catch (e) {
-      Alert.alert('Error', 'Could not upload avatar. Please try again.');
+      setDialog({ visible: true, title: 'Error', message: 'Could not upload avatar. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       __DEV__ && console.error('Upload error:', e);
     }
   }
@@ -532,7 +533,7 @@ export default function ProfileScreen({ route, navigation }) {
       navigation.navigate(ROUTES.AVATAR_CROP, { imageUri: uri });
     } catch (e) {
       __DEV__ && console.error('[ProfileScreen] handleChangeAvatar error:', e);
-      Alert.alert('Error', 'Could not open image picker. Please try again.');
+      setDialog({ visible: true, title: 'Error', message: 'Could not open image picker. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }
 
@@ -541,26 +542,27 @@ export default function ProfileScreen({ route, navigation }) {
     try {
       const pinnedCount = (publicVideos || []).filter(v => v.is_pinned).length;
       if (video.is_pinned) {
-        Alert.alert('Unpin Video', 'Remove this video from pinned?', [
-          { text: 'Cancel', style: 'cancel' },
+        setDialog({ visible: true, title: 'Unpin Video', message: 'Remove this video from pinned?', type: 'confirm', buttons: [
+          { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
           { text: 'Unpin', onPress: async () => { 
+            setDialog(d => ({ ...d, visible: false }));
             try {
               await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); 
               if (currentUser?.id) loadVideos(currentUser.id, true); 
             } catch (e) {
               __DEV__ && console.error('[ProfileScreen] Unpin video error:', e);
-              Alert.alert('Error', 'Could not unpin video. Please try again.');
+              setDialog({ visible: true, title: 'Error', message: 'Could not unpin video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           } },
-        ]);
+        ]});
       } else {
-        if (pinnedCount >= 3) { Alert.alert('Limit Reached', 'You can only pin up to 3 videos.'); return; }
+        if (pinnedCount >= 3) { setDialog({ visible: true, title: 'Limit Reached', message: 'You can only pin up to 3 videos.', type: 'warning', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
         await supabase.from('videos').update({ is_pinned: true, pin_order: pinnedCount + 1 }).eq('id', video.id);
         if (currentUser?.id) loadVideos(currentUser.id, true);
       }
     } catch (e) {
       __DEV__ && console.error('[ProfileScreen] handlePinVideo error:', e);
-      Alert.alert('Error', 'Could not pin video. Please try again.');
+      setDialog({ visible: true, title: 'Error', message: 'Could not pin video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }
 
@@ -572,7 +574,7 @@ export default function ProfileScreen({ route, navigation }) {
         console.log('[DELETE] fast path - table:', table, 'video id:', video.id);
         const { error } = await supabase.from(table).delete().eq('id', video.id);
         console.log('[DELETE] fast path - delete result error:', error);
-        if (error) { Alert.alert('Error', error.message); return; }
+        if (error) { setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
         dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
         console.log('[DELETE] fast path - about to set timeout for toast');
         setTimeout(() => {
@@ -585,7 +587,7 @@ export default function ProfileScreen({ route, navigation }) {
         }, 300);
       } catch (e) {
         console.log('[DELETE] fast path - CATCH ERROR:', e);
-        Alert.alert('Error', 'Could not delete video. Please try again.');
+        setDialog({ visible: true, title: 'Error', message: 'Could not delete video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       }
     } else {
       setDontShowAgain(false);
@@ -601,7 +603,7 @@ export default function ProfileScreen({ route, navigation }) {
       const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
       const { error } = await supabase.from(table).delete().eq('id', video.id);
       console.log('[DELETE] supabase delete result - error:', error);
-      if (error) { Alert.alert('Error', error.message); return; }
+      if (error) { setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
       dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
       console.log('[DELETE] dontShowAgain:', dontShowAgain);
       if (dontShowAgain) await AsyncStorage.setItem('skip_delete_alert', 'true');
@@ -612,7 +614,7 @@ export default function ProfileScreen({ route, navigation }) {
       }, 300);
     } catch (e) {
       console.log('[DELETE] catch error:', e);
-      Alert.alert('Error', 'Could not delete video. Please try again.');
+      setDialog({ visible: true, title: 'Error', message: 'Could not delete video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }
 
@@ -625,7 +627,7 @@ export default function ProfileScreen({ route, navigation }) {
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Please allow access to your media library.');
+        setDialog({ visible: true, title: 'Permission Denied', message: 'Please allow access to your media library.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         return;
       }
       dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: true, progress: 0 });
@@ -642,10 +644,10 @@ export default function ProfileScreen({ route, navigation }) {
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
       dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: false, progress: 0 });
       downloadedVideoIds.add(video.id);
-      Alert.alert('Downloaded ✅', 'Video saved to your gallery!');
+      setDialog({ visible: true, title: 'Downloaded ✅', message: 'Video saved to your gallery!', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } catch (e) {
       dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: false, progress: 0 });
-      Alert.alert('Error', 'Could not download the video. Please try again.');
+      setDialog({ visible: true, title: 'Error', message: 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       __DEV__ && console.error('Download error:', e);
     }
   }
@@ -1072,6 +1074,13 @@ export default function ProfileScreen({ route, navigation }) {
   const [deleteModal, setDeleteModal] = useState({ visible: false, video: null });
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(false);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
 
   // Fetch signed URL for secure video playback
   const getSignedVideoUrl = async (livestreamId) => {
@@ -1235,6 +1244,15 @@ export default function ProfileScreen({ route, navigation }) {
             </View>
           </View>
         </Modal>
+
+        <ModernDialog
+          visible={dialog.visible}
+          title={dialog.title}
+          message={dialog.message}
+          type={dialog.type}
+          buttons={dialog.buttons}
+          onDismiss={() => setDialog({ ...dialog, visible: false })}
+        />
 
         </View>
       );
