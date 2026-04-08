@@ -62,7 +62,7 @@ function VideoCard({
   // Fetch signed URL for livestream videos
   useEffect(() => {
     const fetchSignedUrl = async () => {
-      console.log('[VideoCard] Fetching signed URL for:', item.id, item.video_url);
+
       // Only fetch signed URL for livestream videos (m3u8 files)
       if (item.video_url && item.video_url.includes('.m3u8')) {
         setIsLoadingSignedUrl(true);
@@ -71,18 +71,17 @@ function VideoCard({
             `https://balagh-server-production.up.railway.app/api/recording/livestreams/${item.id}/play`
           );
           const data = await response.json();
-          console.log('[VideoCard] Signed URL response:', data);
+
           if (data.signedUrl) {
-            console.log('[VideoCard] Setting videoUri to signed URL');
+
             setVideoUri(data.signedUrl);
-            console.log('[VideoCard] Got signed URL for livestream:', item.id);
+
           } else {
             // Fallback to original URL
             setVideoUri(item.video_url);
           }
         } catch (error) {
-          console.log('[VideoCard] Error fetching signed URL:', error.message);
-          console.error('[VideoCard] Failed to get signed URL:', error);
+
           // Fallback to original URL
           setVideoUri(item.video_url);
         } finally {
@@ -113,9 +112,7 @@ function VideoCard({
     checkBlocked();
   }, [currentUserId, item.user_id]);
 
-  console.log('[VIDEO_PLAYER] Received item:', item);
-  console.log('[VIDEO_PLAYER] Video URI being used:', videoUri);
-  console.log('[VIDEO_PLAYER] Item keys:', Object.keys(item));
+
   const { user: authUser, loading: authLoading } = useUser();
   const currentUserId = authUser?.id ?? null;
   const [paused, setPaused] = useState(false);
@@ -488,12 +485,11 @@ function VideoCard({
           bufferForPlaybackAfterRebufferMs: 5000,
         }}
         onError={(e) => {
-          console.log('[VIDEO ERROR] Full error:', JSON.stringify(e));
-          console.log('[VIDEO ERROR] Video URL:', videoUri);
+
           __DEV__ && console.log('Video error:', e);
         }}
         onLoad={(data) => {
-          console.log('[VIDEO SUCCESS] Video loaded:', videoUri);
+
           if (data?.duration) {
             setDuration(data.duration);
           }

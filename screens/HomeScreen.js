@@ -67,20 +67,20 @@ function LiveFeed({ navigation }) {
           schema: 'public', 
           table: 'live_streams' 
         }, (payload) => {
-          console.log('[Live] Realtime update received:', payload.eventType);
+
           loadStreams();
         })
         .subscribe((status, err) => {
           if (err) {
-            console.warn(`[Live] Subscription error (attempt ${retryCount + 1}/${maxRetries}):`, err.message);
+
             if (retryCount < maxRetries) {
               retryCount++;
               setTimeout(subscribeToLiveStreams, 2000 * retryCount);
             } else {
-              console.log('[Live] Max retries reached, using polling only (15s interval)');
+
             }
           } else if (status === 'SUBSCRIBED') {
-            console.log('[Live] Realtime subscription active');
+
             retryCount = 0;
           }
         });
@@ -122,7 +122,7 @@ function LiveFeed({ navigation }) {
         .order('created_at', { ascending: false });
       setStreams(data ?? []);
     } catch (error) {
-      console.log('[Home] loadStreams error:', error.message);
+
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -598,13 +598,13 @@ export default function HomeScreen({ navigation }) {
       const wasOffline = showOffline;
       const isOffline = !state.isInternetReachable;
       
-      __DEV__ && console.log(`[Home] Network state: isInternetReachable=${state.isInternetReachable}, wasOffline=${wasOffline}`);
+
       
       setShowOffline(isOffline);
       
       // Connection restored - auto refresh both tabs
       if (wasOffline && !isOffline) {
-        __DEV__ && console.log('[Home] Connection restored - auto refreshing feeds');
+
         setIsReconnecting(true);
         Promise.all([
           followingRef.current?.refresh?.(),
@@ -694,7 +694,7 @@ export default function HomeScreen({ navigation }) {
       feedCache.following = data ?? [];
       feedCache.ts.following = Date.now();
     } catch (error) {
-      console.log('[Home] preloadFollowingFeed error:', error.message);
+
     }
   }
 
