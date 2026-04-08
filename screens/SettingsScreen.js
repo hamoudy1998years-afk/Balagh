@@ -838,8 +838,8 @@ export default function SettingsScreen({ navigation }) {
             <View style={styles.profileOnline} />
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{profile?.full_name || profile?.username || 'Your Name'}</Text>
-            <Text style={styles.profileHandle}>@{profile?.username || 'yourhandle'}</Text>
+            <Text style={styles.profileName}>{profile?.full_name || profile?.username || currentUser?.user_metadata?.username || 'Your Name'}</Text>
+            <Text style={styles.profileHandle}>@{profile?.username || currentUser?.user_metadata?.username || 'yourhandle'}</Text>
           </View>
           <TouchableOpacity style={styles.profileEditBtn} onPress={handleNavigateEditProfileFromProfile}>
             <Text style={styles.profileEditText}>Edit Profile</Text>
