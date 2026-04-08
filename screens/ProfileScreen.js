@@ -938,8 +938,8 @@ export default function ProfileScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={styles.regularInfo}>
-          <Text style={styles.displayName}>{profile?.full_name || profile?.username || 'User'}</Text>
-          <Text style={styles.usernameText}>@{profile?.username || 'username'}</Text>
+          <Text style={styles.displayName}>{profile?.full_name || profile?.username || globalUser?.user_metadata?.username || 'User'}</Text>
+          <Text style={styles.usernameText}>@{profile?.username || globalUser?.user_metadata?.username || 'username'}</Text>
           {profile?.bio ? (
             <Text style={styles.bioText}>{profile.bio}</Text>
           ) : isOwnProfile ? (
