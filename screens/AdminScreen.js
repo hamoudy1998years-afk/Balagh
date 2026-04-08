@@ -24,6 +24,8 @@ export default function AdminScreen({ navigation }) {
   const { user: authUser } = useUser();
   const insets = useSafeAreaInsets();
   const [reports, setReports] = useState([]);
+  const [scholarApps, setScholarApps] = useState([]);
+  const [activeTab, setActiveTab] = useState('reports'); // 'reports' | 'scholars'
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dialog, setDialog] = useState({ 
@@ -41,6 +43,22 @@ export default function AdminScreen({ navigation }) {
       navigation.goBack();
     }
   }, [authUser]);
+
+  const loadScholarApplications = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('scholar_applications')
+        .select('*')
+        .eq('status', 'pending')
+        .order('submitted_at', { ascending: false });
+
+      if (error) throw error;
+      setScholarApps(data || []);
+    } catch (error) {
+      console.error('Error loading scholar applications:', error);
+      setDialog({ visible: true, title: 'Error', message: 'Failed to load scholar applications', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+    }
+  }, []);
 
   const loadReports = useCallback(async () => {
     try {
@@ -103,8 +121,13 @@ export default function AdminScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
-    loadReports();
-  }, [loadReports]);
+    if (activeTab === 'reports') {
+      loadReports();
+    } else {
+      loadScholarApplications();
+      setLoading(false);
+    }
+  }, [activeTab, loadReports, loadScholarApplications]);
 
   const handleDismiss = async (reportId) => {
     try {
@@ -186,6 +209,115 @@ export default function AdminScreen({ navigation }) {
       ]
     });
   };
+
+  const handleApproveScholar = async (application) => {
+    setDialog({
+      visible: true,
+      title: 'Approve Scholar',
+      message: `Approve ${application.full_name} as a verified scholar?`,
+      type: 'confirm',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
+        {
+          text: 'Approve',
+          onPress: async () => {
+            setDialog(d => ({ ...d, visible: false }));
+            try {
+              // Update application status
+              await supabase
+                .from('scholar_applications')
+                .update({ status: 'approved', reviewed_at: new Date().toISOString() })
+                .eq('id', application.id);
+              
+              // Update user profile
+              await supabase
+                .from('profiles')
+                .update({ is_scholar: true })
+                .eq('id', application.user_id);
+              
+              // Remove from pending list
+              setScholarApps(prev => prev.filter(app => app.id !== application.id));
+              setDialog({ visible: true, title: 'Success', message: 'Scholar approved!', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+            } catch (error) {
+              setDialog({ visible: true, title: 'Error', message: 'Failed to approve scholar', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+            }
+          }
+        }
+      ]
+    });
+  };
+
+  const handleRejectScholar = async (application) => {
+    setDialog({
+      visible: true,
+      title: 'Reject Application',
+      message: `Reject ${application.full_name}'s scholar application?`,
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            setDialog(d => ({ ...d, visible: false }));
+            try {
+              await supabase
+                .from('scholar_applications')
+                .update({ status: 'rejected', reviewed_at: new Date().toISOString() })
+                .eq('id', application.id);
+              
+              setScholarApps(prev => prev.filter(app => app.id !== application.id));
+              setDialog({ visible: true, title: 'Rejected', message: 'Application rejected', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+            } catch (error) {
+              setDialog({ visible: true, title: 'Error', message: 'Failed to reject application', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+            }
+          }
+        }
+      ]
+    });
+  };
+
+  const renderScholarApplication = ({ item }) => (
+    <View style={styles.reportCard}>
+      <View style={styles.reportHeader}>
+        <View style={styles.userInfo}>
+          <Text style={styles.label}>Applicant:</Text>
+          <Text style={styles.username}>{item.full_name}</Text>
+        </View>
+        <Text style={styles.date}>
+          {new Date(item.submitted_at).toLocaleDateString()}
+        </Text>
+      </View>
+
+      <View style={styles.scholarInfo}>
+        <Text style={styles.scholarLabel}>Age: <Text style={styles.scholarValue}>{item.age}</Text></Text>
+        <Text style={styles.scholarLabel}>Location: <Text style={styles.scholarValue}>{item.location}</Text></Text>
+        <Text style={styles.scholarLabel}>Education: <Text style={styles.scholarValue}>{item.education}</Text></Text>
+        <Text style={styles.scholarLabel}>Expertise: <Text style={styles.scholarValue}>{item.expertise}</Text></Text>
+      </View>
+
+      <View style={styles.bioContainer}>
+        <Text style={styles.label}>Bio:</Text>
+        <Text style={styles.bioText}>{item.bio}</Text>
+      </View>
+
+      <View style={styles.actions}>
+        <TouchableOpacity 
+          style={[styles.button, styles.rejectButton]}
+          onPress={() => handleRejectScholar(item)}
+        >
+          <Text style={styles.rejectText}>Reject</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[styles.button, styles.approveButton]}
+          onPress={() => handleApproveScholar(item)}
+        >
+          <Text style={styles.approveText}>Approve</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   const renderReport = ({ item }) => (
     <View style={styles.reportCard}>
@@ -269,21 +401,46 @@ export default function AdminScreen({ navigation }) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
 
-      <Text style={styles.title}>Admin Panel - Reports</Text>
-      <Text style={styles.subtitle}>{reports.length} pending reports</Text>
+      <Text style={styles.title}>Admin Panel</Text>
+      
+      {/* Tab Switcher */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'reports' && styles.activeTab]}
+          onPress={() => setActiveTab('reports')}
+        >
+          <Text style={[styles.tabText, activeTab === 'reports' && styles.activeTabText]}>
+            Reports ({reports.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'scholars' && styles.activeTab]}
+          onPress={() => setActiveTab('scholars')}
+        >
+          <Text style={[styles.tabText, activeTab === 'scholars' && styles.activeTabText]}>
+            Scholars ({scholarApps.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
       
       <FlatList
-        data={reports}
-        renderItem={renderReport}
+        data={activeTab === 'reports' ? reports : scholarApps}
+        renderItem={activeTab === 'reports' ? renderReport : renderScholarApplication}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.list}
         refreshing={refreshing}
         onRefresh={() => {
           setRefreshing(true);
-          loadReports();
+          if (activeTab === 'reports') {
+            loadReports();
+          } else {
+            loadScholarApplications();
+          }
         }}
         ListEmptyComponent={
-          <Text style={styles.empty}>No reports to review</Text>
+          <Text style={styles.empty}>
+            {activeTab === 'reports' ? 'No reports to review' : 'No pending scholar applications'}
+          </Text>
         }
       />
 
@@ -468,5 +625,80 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12,
     color: '#ea580c',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    gap: 12,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+  },
+  activeTab: {
+    backgroundColor: COLORS.gold,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  activeTabText: {
+    color: '#1a2e44',
+  },
+  scholarInfo: {
+    backgroundColor: '#f0fdf4',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  scholarLabel: {
+    fontSize: 13,
+    color: '#166534',
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  scholarValue: {
+    fontWeight: '500',
+    color: '#15803d',
+  },
+  bioContainer: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  bioText: {
+    fontSize: 14,
+    color: '#475569',
+    lineHeight: 20,
+  },
+  rejectButton: {
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  approveButton: {
+    backgroundColor: '#dcfce7',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  rejectText: {
+    fontWeight: '700',
+    fontSize: 12,
+    color: '#dc2626',
+  },
+  approveText: {
+    fontWeight: '700',
+    fontSize: 12,
+    color: '#16a34a',
   },
 });
