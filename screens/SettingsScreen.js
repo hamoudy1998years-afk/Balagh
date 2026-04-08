@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase';
 import { userCache } from '../utils/userCache';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../constants/theme';
+import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import { EDGE_FUNCTIONS, CONFIG } from '../constants/api';
 import { ERROR_TITLES, ERROR_MESSAGES } from '../constants/errors';
@@ -204,6 +205,13 @@ export default function SettingsScreen({ navigation }) {
   const [blockedUsers,   setBlockedUsers]   = useState([]);
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [unblockModalVisible, setUnblockModalVisible] = useState(false);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
   const [userToUnblock, setUserToUnblock] = useState(null);
 
   const [isDark, setIsDark] = useState(false);
@@ -274,7 +282,7 @@ export default function SettingsScreen({ navigation }) {
     setPhone(phoneInput);
     setSavingPhone(false);
     setEditingPhone(false);
-    Alert.alert('Saved ✓', 'Phone number updated successfully.');
+    setDialog({ visible: true, title: 'Saved ✓', message: 'Phone number updated successfully.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
   }
 
   const loadBlockedUsers = React.useCallback(async () => {
@@ -316,7 +324,7 @@ export default function SettingsScreen({ navigation }) {
       await supabase.from('blocks').delete().eq('blocker_id', currentUser.id).eq('blocked_id', userToUnblock.id);
       setBlockedUsers(prev => prev.filter(u => u.id !== userToUnblock.id));
     } catch (err) {
-      Alert.alert('Error', 'Failed to unblock user');
+      setDialog({ visible: true, title: 'Error', message: 'Failed to unblock user', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }, [userToUnblock, currentUser?.id]);
 
@@ -340,7 +348,7 @@ export default function SettingsScreen({ navigation }) {
   }, [navigation]);
 
   const handleChangeEmailAlert = React.useCallback(() => {
-    Alert.alert('Email', 'To change your email, please contact support.');
+    setDialog({ visible: true, title: 'Email', message: 'To change your email, please contact support.', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
   }, []);
 
   const handleCancelEditPhone = React.useCallback(() => {
@@ -353,11 +361,11 @@ export default function SettingsScreen({ navigation }) {
   }, []);
 
   const handleSwitchAccountAlert = React.useCallback(() => {
-    Alert.alert('Switch Account', 'Multiple account support coming soon!');
+    setDialog({ visible: true, title: 'Switch Account', message: 'Multiple account support coming soon!', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
   }, []);
 
   const handleAddAccountAlert = React.useCallback(() => {
-    Alert.alert('Add Account', 'Multiple account support coming soon!');
+    setDialog({ visible: true, title: 'Add Account', message: 'Multiple account support coming soon!', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
   }, []);
 
   const handleCommentPermChange = React.useCallback((value) => {
@@ -415,12 +423,18 @@ export default function SettingsScreen({ navigation }) {
   }, [navigation]);
 
   async function handleDeleteAccount() {
-    Alert.alert('Delete Account', 'This will permanently delete your account, videos, comments, and all data. This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete Forever', style: 'destructive', onPress: async () => {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) throw new Error('No active session');
+    setDialog({
+      visible: true,
+      title: 'Delete Account',
+      message: 'This will permanently delete your account, videos, comments, and all data. This cannot be undone.',
+      type: 'warning',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
+        { text: 'Delete Forever', style: 'destructive', onPress: async () => {
+          setDialog(d => ({ ...d, visible: false }));
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) throw new Error('No active session');
           const response = await fetch(EDGE_FUNCTIONS.DELETE_USER, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -429,23 +443,31 @@ export default function SettingsScreen({ navigation }) {
           if (!response.ok) throw new Error(result.error || 'Deletion failed');
           await userCache.clear();
           await supabase.auth.signOut();
-        } catch (error) {
-          Alert.alert(ERROR_TITLES.ERROR, error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG);
-        }
-      }},
-    ]);
+          } catch (error) {
+            setDialog({ visible: true, title: ERROR_TITLES.ERROR, message: error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+          }
+        }},
+      ]
+    });
   }
 
   async function handleResetPassword() {
-    Alert.alert('Reset Password', 'Send a password reset link to your email?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Send Link', onPress: async () => {
-        if (currentUser?.email) {
-          await supabase.auth.resetPasswordForEmail(currentUser.email);
-          Alert.alert('Sent! ✉️', 'Check your email for the reset link.');
-        }
-      }},
-    ]);
+    setDialog({
+      visible: true,
+      title: 'Reset Password',
+      message: 'Send a password reset link to your email?',
+      type: 'confirm',
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
+        { text: 'Send Link', onPress: async () => {
+          setDialog(d => ({ ...d, visible: false }));
+          if (currentUser?.email) {
+            await supabase.auth.resetPasswordForEmail(currentUser.email);
+            setDialog({ visible: true, title: 'Sent! ✉️', message: 'Check your email for the reset link.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+          }
+        }},
+      ]
+    });
   }
 
   const logoutModal = (
@@ -679,7 +701,7 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="APP INFO" />
       <Card>
         <Row icon="📱" label="About Bushrann" sublabel="Version 1.0.0"
-          onPress={() => Alert.alert('Bushrann', 'Version 1.0.0\n\nA platform for sharing Islamic knowledge and connecting with scholars.\n\nMade with ❤️')} last />
+          onPress={() => setDialog({ visible: true, title: 'Bushrann', message: 'Version 1.0.0\n\nA platform for sharing Islamic knowledge and connecting with scholars.\n\nMade with ❤️', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] })} last />
       </Card>
     </SubScreen>
   );
@@ -722,7 +744,7 @@ export default function SettingsScreen({ navigation }) {
         <GroupLabel text="REACH US AT" />
         <Card>
           <Row icon="📧" label="Email Support" sublabel="support@bushrann.app"
-            onPress={() => Alert.alert('Email Us', 'Send us an email at support@bushrann.app')} last />
+            onPress={() => setDialog({ visible: true, title: 'Email Us', message: 'Send us an email at support@bushrann.app', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] })} last />
         </Card>
         <GroupLabel text="RESPONSE TIME" />
         <View style={styles.infoBox}>
