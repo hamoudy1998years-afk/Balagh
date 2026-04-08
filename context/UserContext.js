@@ -43,11 +43,16 @@ export function UserProvider({ children }) {
         
         // Load blocked users from database
         const { data: blockedData } = await supabase
-          .from('blocked_users')
+          .from('blocks')
           .select('blocked_id')
           .eq('blocker_id', freshUser.id);
         if (blockedData) {
-          setBlockedUsers(new Set(blockedData.map(b => b.blocked_id)));
+          // Filter out own ID (can't block yourself) and nulls
+          const blockedIds = blockedData
+            .map(b => b.blocked_id)
+            .filter(id => id && id !== freshUser.id);
+          setBlockedUsers(new Set(blockedIds));
+          console.log('[UserContext] Loaded blocked users:', blockedIds.length);
         }
       }
     } catch (e) {
@@ -134,7 +139,7 @@ export function UserProvider({ children }) {
     // Save to Supabase for persistence
     try {
       await supabase
-        .from('blocked_users')
+        .from('blocks')
         .insert([{ blocker_id: user.id, blocked_id: userIdToBlock }]);
     } catch (err) {
       console.error('Failed to save block to DB:', err);
@@ -152,7 +157,7 @@ export function UserProvider({ children }) {
     
     try {
       await supabase
-        .from('blocked_users')
+        .from('blocks')
         .delete()
         .eq('blocker_id', user.id)
         .eq('blocked_id', userIdToUnblock);

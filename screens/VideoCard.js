@@ -133,21 +133,6 @@ function VideoCard({
   
   // Fade animation for blocked content
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  
-  useEffect(() => {
-    if (isUserBlocked) {
-      console.log('🚫 User blocked, fading out video:', item.id);
-      // Fade out animation
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      // Reset opacity if unblocked
-      fadeAnim.setValue(1);
-    }
-  }, [isUserBlocked, item.id, fadeAnim]);
 
   // ── PLAY/PAUSE LOGIC ──────────────────────────────────────────────────────
 
@@ -465,7 +450,7 @@ function VideoCard({
   const captionText = item.caption?.replace(/#\w+/g, '').trim() ?? '';
 
   return (
-    <Animated.View style={[styles.card, { height: cardHeight, opacity: fadeAnim }]}>
+    <Animated.View style={[styles.card, { height: cardHeight, opacity: isUserBlocked ? 0 : 1 }]}>
       <Video
         ref={player}
         source={{ uri: videoUri }}

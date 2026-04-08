@@ -176,9 +176,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [videos, setVideos] = useState(() => feedCache[type] ?? []);
   
   // Filter out blocked users' videos
-  const visibleVideos = useMemo(() => {
-    return videos.filter(video => !blockedUsers?.has(video.user_id));
-  }, [videos, blockedUsers]);
+  const visibleVideos = videos;
   const [loading, setLoading] = useState(() => !feedCache[type]);
   const [refreshing, setRefreshing] = useState(false);
   const [feedError, setFeedError] = useState(null);
@@ -408,6 +406,10 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .order('created_at', { ascending: false })
         .limit(20);
 
+      console.log('[HOME FEED] Fetched videos:', data?.length);
+      console.log('[HOME FEED] Videos:', data?.map(v => ({id: v.id, user_id: v.user_id, username: v.profiles?.username})));
+      if (error) console.log('[HOME FEED] Error:', error.message);
+
       if (error) { 
         __DEV__ && console.warn('ForYou feed error:', error.message); 
         setFeedError('Could not load your feed.'); 
@@ -422,9 +424,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       const shuffled = arr;
       feedCache.foryou = shuffled;
       feedCache.ts.foryou = Date.now();
-      if (shuffled[0]?.id !== videos[0]?.id) {
-        setVideos(shuffled);
-      }
+      setVideos(shuffled);
+      console.log('[HOME FEED] Set videos state:', shuffled?.length);
     }
 
     setLoading(false);
@@ -463,10 +464,17 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   }
 
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
-    if (viewableItems.length > 0) setActiveIndex(viewableItems[0].index);
+    console.log('[HOME VIEWABLE] Viewable items:', viewableItems?.length);
+    console.log('[HOME VIEWABLE] First viewable:', viewableItems?.[0]?.index);
+    if (viewableItems.length > 0) {
+      console.log('[HOME ACTIVE] Active index changed to:', viewableItems[0].index);
+      setActiveIndex(viewableItems[0].index);
+    }
   }).current;
 
+  console.log('[HOME RENDER] Total videos:', videos.length);
   const renderItem = useCallback(({ item, index }) => {
+    console.log('[HOME RENDER] Rendering video:', item.id, 'index:', index, 'isActive:', index === activeIndex);
     const isVisible = Math.abs(index - activeIndex) <= 5;
     if (!isVisible) return <View style={{ height: listHeight }} />;
 
@@ -546,10 +554,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         maxToRenderPerBatch={2}
         initialNumToRender={1}
         removeClippedSubviews={true}
-        maintainVisibleContentPosition={{
-          minIndexForVisible: 0,
-          autoscrollToTopThreshold: 10
-        }}
+
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
