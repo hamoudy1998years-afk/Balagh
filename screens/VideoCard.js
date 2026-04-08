@@ -293,6 +293,9 @@ function VideoCard({
         const pct = pageXToPercentage(evt.nativeEvent.pageX);
         seekToPosition(pct);
         isSeeking.current = false;
+        // Auto-play after seeking (TikTok behavior)
+        manualPauseRef.current = false;
+        setPaused(false);
       },
 
       onPanResponderTerminate: () => {
@@ -686,6 +689,9 @@ function VideoCard({
           onPress={(e) => {
             const pct = pageXToPercentage(e.nativeEvent.pageX);
             seekToPosition(pct);
+            // Auto-play after seeking (TikTok behavior)
+            manualPauseRef.current = false;
+            setPaused(false);
           }}
         >
           <View style={styles.timeRow}>
