@@ -1,133 +1,152 @@
-import { Alert } from 'react-native';
 import { ERROR_TITLES, ERROR_MESSAGES, SUCCESS_TITLES, SUCCESS_MESSAGES, CONFIRM_TITLES, CONFIRM_MESSAGES } from '../constants/errors';
 import { ROUTES } from '../constants/routes';
 
-// Error alerts
+// Error alerts - return dialog configs for ModernDialog
 export function showErrorAlert(message, title = ERROR_TITLES.ERROR) {
-  Alert.alert(title, message, [{ text: 'OK' }]);
+  return { title, message, type: 'error', buttons: [{ text: 'OK' }] };
 }
 
 export function showNetworkError(navigation) {
-  Alert.alert(
-    ERROR_TITLES.NETWORK_ERROR,
-    ERROR_MESSAGES.NETWORK_ERROR,
-    [{ text: 'OK' }]
-  );
+  return {
+    title: ERROR_TITLES.NETWORK_ERROR,
+    message: ERROR_MESSAGES.NETWORK_ERROR,
+    type: 'error',
+    buttons: [{ text: 'OK' }]
+  };
 }
 
 export function showAuthError(navigation) {
-  Alert.alert(
-    ERROR_TITLES.AUTH_ERROR,
-    ERROR_MESSAGES.NOT_LOGGED_IN,
-    [
+  return {
+    title: ERROR_TITLES.AUTH_ERROR,
+    message: ERROR_MESSAGES.NOT_LOGGED_IN,
+    type: 'error',
+    buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Login', onPress: () => navigation?.navigate(ROUTES.LOGIN) },
     ]
-  );
+  };
 }
 
 export function showPermissionAlert(permissionType, message) {
-  Alert.alert(
-    ERROR_TITLES.PERMISSION_DENIED,
+  return {
+    title: ERROR_TITLES.PERMISSION_DENIED,
     message,
-    [{ text: 'OK' }]
-  );
+    type: 'error',
+    buttons: [{ text: 'OK' }]
+  };
 }
 
-// Success alerts
+// Success alerts - return dialog configs
 export function showSuccessAlert(message, title = SUCCESS_TITLES.SUCCESS) {
-  Alert.alert(title, message, [{ text: 'OK' }]);
+  return { title, message, type: 'success', buttons: [{ text: 'OK' }] };
 }
 
 export function showSuccessWithAction(message, actionText, action, title = SUCCESS_TITLES.SUCCESS) {
-  Alert.alert(
+  return {
     title,
     message,
-    [
-      { text: 'OK', onPress: action },
-    ]
-  );
+    type: 'success',
+    buttons: [{ text: actionText || 'OK', onPress: action }]
+  };
 }
 
-// Confirmation dialogs
+// Confirmation dialogs - return dialog configs
 export function showDeleteConfirmation(itemName, onDelete) {
-  Alert.alert(
-    `${CONFIRM_TITLES.DELETE} ${itemName}?`,
-    CONFIRM_MESSAGES.DELETE_VIDEO,
-    [
+  return {
+    title: `${CONFIRM_TITLES.DELETE} ${itemName}?`,
+    message: CONFIRM_MESSAGES.DELETE_VIDEO,
+    type: 'warning',
+    buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: CONFIRM_TITLES.DELETE, style: 'destructive', onPress: onDelete },
     ]
-  );
+  };
 }
 
 export function showUnpinConfirmation(onUnpin) {
-  Alert.alert(
-    CONFIRM_TITLES.UNPIN_VIDEO,
-    CONFIRM_MESSAGES.UNPIN_VIDEO,
-    [
+  return {
+    title: CONFIRM_TITLES.UNPIN_VIDEO,
+    message: CONFIRM_MESSAGES.UNPIN_VIDEO,
+    type: 'confirm',
+    buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: CONFIRM_TITLES.UNPIN, onPress: onUnpin },
     ]
-  );
+  };
 }
 
 export function showUnblockConfirmation(username, onUnblock) {
-  Alert.alert(
-    `${CONFIRM_TITLES.UNBLOCK} @${username}?`,
-    CONFIRM_MESSAGES.UNBLOCK_USER,
-    [
+  return {
+    title: `${CONFIRM_TITLES.UNBLOCK} @${username}?`,
+    message: CONFIRM_MESSAGES.UNBLOCK_USER,
+    type: 'confirm',
+    buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: CONFIRM_TITLES.UNBLOCK, onPress: onUnblock },
     ]
-  );
+  };
 }
 
 export function showLogoutConfirmation(onLogout) {
-  Alert.alert(
-    CONFIRM_TITLES.LOG_OUT,
-    CONFIRM_MESSAGES.LOG_OUT,
-    [
+  return {
+    title: CONFIRM_TITLES.LOG_OUT,
+    message: CONFIRM_MESSAGES.LOG_OUT,
+    type: 'warning',
+    buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: CONFIRM_TITLES.LOG_OUT, style: 'destructive', onPress: onLogout },
     ]
-  );
+  };
 }
 
 export function showDeleteAccountConfirmation(onDelete) {
-  Alert.alert(
-    CONFIRM_TITLES.DELETE_ACCOUNT,
-    CONFIRM_MESSAGES.DELETE_ACCOUNT,
-    [
+  return {
+    title: CONFIRM_TITLES.DELETE_ACCOUNT,
+    message: CONFIRM_MESSAGES.DELETE_ACCOUNT,
+    type: 'warning',
+    buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete Forever', style: 'destructive', onPress: onDelete },
     ]
-  );
+  };
 }
 
 export function showClearNotificationsConfirmation(onClear) {
-  Alert.alert(
-    CONFIRM_TITLES.CLEAR_ALL,
-    CONFIRM_MESSAGES.CLEAR_NOTIFICATIONS,
-    [
+  return {
+    title: CONFIRM_TITLES.CLEAR_ALL,
+    message: CONFIRM_MESSAGES.CLEAR_NOTIFICATIONS,
+    type: 'warning',
+    buttons: [
       { text: 'Cancel', style: 'cancel' },
       { text: CONFIRM_TITLES.CLEAR_ALL, style: 'destructive', onPress: onClear },
     ]
-  );
+  };
 }
 
-// Field validation alerts
+// Field validation alerts - return dialog configs
 export function showMissingFieldAlert(fieldName) {
-  Alert.alert(ERROR_TITLES.MISSING_FIELD, `${fieldName} is required.`);
+  return {
+    title: ERROR_TITLES.MISSING_FIELD,
+    message: `${fieldName} is required.`,
+    type: 'error',
+    buttons: [{ text: 'OK' }]
+  };
 }
 
 export function showTooShortAlert(fieldName, minLength) {
-  Alert.alert(
-    ERROR_TITLES.TOO_SHORT,
-    `${fieldName} must be at least ${minLength} characters.`
-  );
+  return {
+    title: ERROR_TITLES.TOO_SHORT,
+    message: `${fieldName} must be at least ${minLength} characters.`,
+    type: 'error',
+    buttons: [{ text: 'OK' }]
+  };
 }
 
 export function showInvalidInputAlert(message) {
-  Alert.alert(ERROR_TITLES.INVALID_INPUT, message);
+  return {
+    title: ERROR_TITLES.INVALID_INPUT,
+    message,
+    type: 'error',
+    buttons: [{ text: 'OK' }]
+  };
 }
