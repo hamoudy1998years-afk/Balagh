@@ -625,7 +625,7 @@ function VideoCard({
       {/* Progress Bar - Only show when paused, positioned above bottom nav */}
       {paused && (
         <View 
-          style={[styles.progressContainer, { bottom: '10%' }]}
+          style={[styles.progressContainer, { bottom: insets.bottom + s(90) }]}
           onLayout={(e) => { progressBarWidth.current = e.nativeEvent.layout.width; }}
         >
           <View style={styles.timeRow}>
