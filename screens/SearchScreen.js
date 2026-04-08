@@ -99,7 +99,7 @@ export default function SearchScreen({ navigation }) {
     }, [])
   );
 
-  const handleSearch = useCallback((text) => {
+  const handleSearch = useCallback((text, categoryOverride = null) => {
     setQuery(text);
     if (text.trim().length < 1) {
       setProfileResults([]);
@@ -110,9 +110,10 @@ export default function SearchScreen({ navigation }) {
     searchTimeout.current = setTimeout(async () => {
       setLoading(true);
       const sanitized = text.replace(/[%_\\]/g, '\\$&').trim();
+      const activeCategory = categoryOverride || selectedCategory;
 
         let captionQuery = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
-        if (selectedCategory !== 'All' && selectedCategory !== 'Users') captionQuery = captionQuery.eq('category', selectedCategory);
+        if (activeCategory !== 'All' && activeCategory !== 'Users') captionQuery = captionQuery.eq('category', activeCategory);
 
       // Get blocked users list
       const { data: blockedUsers } = await supabase
@@ -154,7 +155,7 @@ export default function SearchScreen({ navigation }) {
         const profileIds = matchedProfiles.map(p => p.id);
 
         let profileVideoQuery = supabase.from('videos').select('*').in('user_id', profileIds);
-        if (selectedCategory !== 'All' && selectedCategory !== 'Users') profileVideoQuery = profileVideoQuery.eq('category', selectedCategory);
+        if (activeCategory !== 'All' && activeCategory !== 'Users') profileVideoQuery = profileVideoQuery.eq('category', activeCategory);
 
         const parallelQueries = [
           supabase.from('follows').select('following_id').in('following_id', profileIds),
@@ -199,9 +200,11 @@ export default function SearchScreen({ navigation }) {
 
       setProfileResults(profiles);
       // Only show videos if not in Users category
-      if (selectedCategory !== 'Users') {
+      if (activeCategory !== 'Users') {
         const filteredVideos = combined.filter(v => v.user_id !== currentUserId);
         setVideoResults(filteredVideos.slice(0, 30));
+      } else {
+        setVideoResults([]);
       }
       setLoading(false);
     }, 400);
@@ -238,18 +241,20 @@ export default function SearchScreen({ navigation }) {
     }
   }, [currentUserId, followingIds]);
 
-    const handleCategory = useCallback(async (cat) => {
-      setSelectedCategory(cat);
-      setLoading(true);
-      
-      if (cat === 'Users') {
-        // Don't clear results yet if search exists - let handleSearch do it
-        setLoading(false);
-        return;
-      }
-      
-      // Clear profile results when leaving Users category (going to All/Others)
-      setProfileResults([]);
+      const handleCategory = useCallback(async (cat) => {
+        setSelectedCategory(cat);
+        setLoading(true);
+        
+        if (cat === 'Users') {
+          // Don't clear results yet if search exists - let handleSearch do it
+          setLoading(false);
+          return;
+        }
+        
+        // Clear both results when leaving Users category (going to All/Others)
+        // Let handleSearch repopulate everything
+        setProfileResults([]);
+        setVideoResults([]);
         
         if (cat === 'All') {
           const { data, error } = await supabase.from('videos').select('*').limit(30);
@@ -277,7 +282,7 @@ export default function SearchScreen({ navigation }) {
     const handleCategoryPress = useCallback((item) => {
       handleCategory(item);
       if (query.trim().length >= 1) {
-        handleSearch(query);
+        handleSearch(query, item);
       }
     }, [handleCategory, handleSearch, query]);
 
