@@ -501,9 +501,16 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         cardHeight={listHeight}
         username={item.profiles?.username ?? 'user'}
         avatarUrl={item.profiles?.avatar_url ?? null}
+        onBlocked={(blockedIndex) => {
+          // Scroll to next video after blocking
+          const nextIndex = blockedIndex + 1;
+          if (nextIndex < videos.length) {
+            flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+          }
+        }}
       />
     );
-  }, [activeIndex, listHeight, myLikes, myFollows, isTabActive, playerPool, updateMyFollows, navigation]);
+  }, [activeIndex, listHeight, myLikes, myFollows, isTabActive, playerPool, updateMyFollows, navigation, videos, flatListRef]);
 
   if (feedError) {
     return (

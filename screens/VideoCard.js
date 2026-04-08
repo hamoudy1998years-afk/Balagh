@@ -45,6 +45,7 @@ function VideoCard({
   onFollowChange, navigation, cardHeight,
   username: usernameProp,
   avatarUrl: avatarUrlProp,
+  onBlocked,
 }) {
   const { width } = useWindowDimensions();
   const { showVideoOptionsSheet, showTikTokShare } = useDownload();
@@ -426,7 +427,7 @@ function VideoCard({
     try {
       await supabase.from('blocks').insert({ blocker_id: currentUserId, blocked_id: item.user_id });
       setIsBlocked(true);
-      setDialog({ visible: true, title: 'Blocked 🚫', message: 'You have blocked this user. Their content will no longer appear in your feed.', type: 'success', buttons: [{ text: 'OK' }] });
+      setDialog({ visible: true, title: 'Blocked 🚫', message: 'You have blocked this user. Their content will no longer appear in your feed.', type: 'success', buttons: [{ text: 'OK', onPress: () => onBlocked?.(index) }] });
     } catch (error) {
       console.error('Block error:', error);
       setDialog({ visible: true, title: 'Error', message: 'Could not block user. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
