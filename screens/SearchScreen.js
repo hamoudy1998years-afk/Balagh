@@ -238,15 +238,18 @@ export default function SearchScreen({ navigation }) {
     }
   }, [currentUserId, followingIds]);
 
-  const handleCategory = useCallback(async (cat) => {
-    setSelectedCategory(cat);
-    setLoading(true);
-    
-    if (cat === 'Users') {
-      // Don't clear results yet if search exists - let handleSearch do it
-      setLoading(false);
-      return;
-    }
+    const handleCategory = useCallback(async (cat) => {
+      setSelectedCategory(cat);
+      setLoading(true);
+      
+      if (cat === 'Users') {
+        // Don't clear results yet if search exists - let handleSearch do it
+        setLoading(false);
+        return;
+      }
+      
+      // Clear profile results when leaving Users category (going to All/Others)
+      setProfileResults([]);
         
         if (cat === 'All') {
           const { data, error } = await supabase.from('videos').select('*').limit(30);
