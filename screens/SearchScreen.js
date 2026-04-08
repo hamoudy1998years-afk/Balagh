@@ -9,7 +9,7 @@ import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 
-const CATEGORIES = ['All', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
+const CATEGORIES = ['All', 'Users', 'Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
 
 function formatCount(n) {
   if (!n || n === 0) return '0';
@@ -111,8 +111,8 @@ export default function SearchScreen({ navigation }) {
       setLoading(true);
       const sanitized = text.replace(/[%_\\]/g, '\\$&').trim();
 
-      let captionQuery = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
-      if (selectedCategory !== 'All') captionQuery = captionQuery.eq('category', selectedCategory);
+        let captionQuery = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
+        if (selectedCategory !== 'All' && selectedCategory !== 'Users') captionQuery = captionQuery.eq('category', selectedCategory);
 
       // Get blocked users list
       const { data: blockedUsers } = await supabase
@@ -154,7 +154,7 @@ export default function SearchScreen({ navigation }) {
         const profileIds = matchedProfiles.map(p => p.id);
 
         let profileVideoQuery = supabase.from('videos').select('*').in('user_id', profileIds);
-        if (selectedCategory !== 'All') profileVideoQuery = profileVideoQuery.eq('category', selectedCategory);
+        if (selectedCategory !== 'All' && selectedCategory !== 'Users') profileVideoQuery = profileVideoQuery.eq('category', selectedCategory);
 
         const parallelQueries = [
           supabase.from('follows').select('following_id').in('following_id', profileIds),
@@ -198,9 +198,11 @@ export default function SearchScreen({ navigation }) {
       }
 
       setProfileResults(profiles);
-      // Filter out current user's videos
-      const filteredVideos = combined.filter(v => v.user_id !== currentUserId);
-      setVideoResults(filteredVideos.slice(0, 30));
+      // Only show videos if not in Users category
+      if (selectedCategory !== 'Users') {
+        const filteredVideos = combined.filter(v => v.user_id !== currentUserId);
+        setVideoResults(filteredVideos.slice(0, 30));
+      }
       setLoading(false);
     }, 400);
   }, [selectedCategory, currentUserId]);
@@ -236,24 +238,32 @@ export default function SearchScreen({ navigation }) {
     }
   }, [currentUserId, followingIds]);
 
-  const handleCategory = useCallback(async (cat) => {
-    setSelectedCategory(cat);
-    setProfileResults([]);
-    setLoading(true);
-    if (cat === 'All') {
-      const { data, error } = await supabase.from('videos').select('*').limit(30);
-      if (error) { __DEV__ && console.warn('Category error:', error.message); setVideoResults([]); setLoading(false); return; }
-      // Filter out current user's videos
-      const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
-      setVideoResults(filtered);
-    } else {
-      const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(30);
-      // Filter out current user's videos
-      const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
-      setVideoResults(filtered);
-    }
-    setLoading(false);
-  }, []);
+      const handleCategory = useCallback(async (cat) => {
+        setSelectedCategory(cat);
+        setProfileResults([]);
+        setVideoResults([]);
+        setLoading(true);
+        
+        if (cat === 'Users') {
+          // Users category: don't auto-load anything, wait for search query
+          setLoading(false);
+          return;
+        }
+        
+        if (cat === 'All') {
+          const { data, error } = await supabase.from('videos').select('*').limit(30);
+          if (error) { __DEV__ && console.warn('Category error:', error.message); setVideoResults([]); setLoading(false); return; }
+          // Filter out current user's videos
+          const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
+          setVideoResults(filtered);
+        } else {
+          const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(30);
+          // Filter out current user's videos
+          const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
+          setVideoResults(filtered);
+        }
+        setLoading(false);
+      }, [currentUserId]);
 
   const hasResults = profileResults.length > 0 || videoResults.length > 0;
 
