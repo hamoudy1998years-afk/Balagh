@@ -1,6 +1,6 @@
 import {
   View, Text, TextInput, StyleSheet,
-  TouchableOpacity, Animated, Alert,
+  TouchableOpacity, Animated,
   Platform, StatusBar,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
@@ -8,14 +8,17 @@ import { useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import AnimatedButton from './AnimatedButton';
+import ModernDialog from './ModernDialog';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SystemBars } from 'react-native-edge-to-edge';
 
 export default function SignupScreen({ navigation }) {
   const insets = useSafeAreaInsets();
+  const { user: authUser, setUser } = useUser();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -25,11 +28,41 @@ export default function SignupScreen({ navigation }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [focusedField, setFocusedField] = useState(null);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
 
   const passwordEyeOpacity = useRef(new Animated.Value(0)).current;
   const confirmEyeOpacity = useRef(new Animated.Value(0)).current;
 
   const { saveAccount } = useBiometricAuth();
+
+  async function handleAutoLogin(loginEmail, loginPassword) {
+    setLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginEmail,
+      password: loginPassword,
+    });
+    setLoading(false);
+    
+    if (error) {
+      setDialog({
+        visible: true,
+        title: 'Login Failed',
+        message: error.message || 'Please try logging in manually.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => navigation.navigate(ROUTES.LOGIN) }]
+      });
+    } else if (data?.session) {
+      // Set session user - App.js ensureProfileExists will create profile
+      setUser(data.session.user);
+      navigation.navigate(ROUTES.MAIN);
+    }
+  }
 
   const togglePassword = () => {
     setShowPassword(prev => !prev);
@@ -92,10 +125,24 @@ export default function SignupScreen({ navigation }) {
     await saveAccount(username.trim(), authEmail, 'email');
     setLoading(false);
 
-    Alert.alert('Account Created! 🎉', 'Your account is ready. You can now log in.', [
-      { text: 'Go to Login', onPress: () => navigation.navigate(ROUTES.LOGIN) }
-    ]);
-    navigation.navigate(ROUTES.LOGIN);
+    setDialog({
+      visible: true,
+      title: 'Account Created! 🎉',
+      message: 'Your account is ready. Would you like to log in now?',
+      type: 'success',
+      buttons: [
+        { 
+          text: 'Yes, Log In', 
+          onPress: () => handleAutoLogin(authEmail, password),
+          style: 'default'
+        },
+        { 
+          text: 'Later', 
+          onPress: () => navigation.navigate(ROUTES.LOGIN),
+          style: 'cancel'
+        }
+      ]
+    });
   }
 
   const handleNavigateLogin = useCallback(() => {
@@ -314,6 +361,15 @@ export default function SignupScreen({ navigation }) {
 
         </View>
       </KeyboardAwareScrollView>
+
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </View>
   );
 }
