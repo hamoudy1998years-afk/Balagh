@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image, ScrollView, useWindowDimensions } from 'react-native';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
@@ -44,7 +44,7 @@ function ProfileCard({ profile, isFollowing, onFollowToggle, onPress, currentUse
       {profile.id !== currentUserId && (
         <AnimatedButton
           style={[styles.profileFollowBtn, isFollowing && styles.profileFollowingBtn]}
-          onPress={onFollowToggle}
+          onPress={() => onFollowToggle(profile)}
         >
           <Text style={[styles.profileFollowBtnText, isFollowing && styles.profileFollowingBtnText]}>
             {isFollowing ? 'Following' : 'Follow'}
@@ -63,11 +63,28 @@ export default function SearchScreen({ navigation }) {
   const [videoResults, setVideoResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const { user: authUser } = useUser();
+  const { user: authUser, blockedUsers } = useUser();
   const currentUserId = authUser?.id ?? null;
   const [followingIds, setFollowingIds] = useState(new Set());
   const scrollRef = useRef(null);
   const searchTimeout = useRef(null);
+  useEffect(() => {
+    setProfileResults(prev => {
+      // Filter out blocked users and current user
+      return prev.filter(p => {
+        const isBlocked = blockedUsers?.has(p.id);
+        const isCurrentUser = p.id === currentUserId;
+        return !isBlocked && !isCurrentUser;
+      });
+    });
+  }, [blockedUsers, currentUserId]);
+
+  // Also filter out blocked users' videos
+  useEffect(() => {
+    if (blockedUsers?.size > 0) {
+      setVideoResults(prev => prev.filter(v => !blockedUsers.has(v.user_id)));
+    }
+  }, [blockedUsers]);
 
   const ITEM_SIZE = (width - 2) / 3;
 
@@ -162,10 +179,12 @@ export default function SearchScreen({ navigation }) {
           followerCountMap[row.following_id] = (followerCountMap[row.following_id] ?? 0) + 1;
         });
 
-        profiles = matchedProfiles.map(p => ({
-          ...p,
-          followerCount: followerCountMap[p.id] ?? 0,
-        }));
+        profiles = matchedProfiles
+          .filter(p => p.id !== currentUserId) // Hide current user
+          .map(p => ({
+            ...p,
+            followerCount: followerCountMap[p.id] ?? 0,
+          }));
 
         setFollowingIds(new Set(followData.map(r => r.following_id)));
 
@@ -179,7 +198,9 @@ export default function SearchScreen({ navigation }) {
       }
 
       setProfileResults(profiles);
-      setVideoResults(combined.slice(0, 30));
+      // Filter out current user's videos
+      const filteredVideos = combined.filter(v => v.user_id !== currentUserId);
+      setVideoResults(filteredVideos.slice(0, 30));
       setLoading(false);
     }, 400);
   }, [selectedCategory, currentUserId]);
@@ -222,10 +243,14 @@ export default function SearchScreen({ navigation }) {
     if (cat === 'All') {
       const { data, error } = await supabase.from('videos').select('*').limit(30);
       if (error) { __DEV__ && console.warn('Category error:', error.message); setVideoResults([]); setLoading(false); return; }
-      setVideoResults(data ?? []);
+      // Filter out current user's videos
+      const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
+      setVideoResults(filtered);
     } else {
       const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(30);
-      setVideoResults(data ?? []);
+      // Filter out current user's videos
+      const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
+      setVideoResults(filtered);
     }
     setLoading(false);
   }, []);

@@ -18,30 +18,32 @@ export default function GlobalVideoOptionsSheet() {
   const fallbackNavigation = useNavigation();
   const [loginDialogVisible, setLoginDialogVisible] = useState(false);
   const [loginDialogAction, setLoginDialogAction] = useState('');
+  const [blockConfirmVisible, setBlockConfirmVisible] = useState(false);
+  const [blockUserData, setBlockUserData] = useState(null);
   
   // TikTok sheet animation
   const tikTokTranslateY = useRef(new Animated.Value(0)).current;
   
   useEffect(() => {
-    console.log('🔥 useEffect triggered, tiktokShareVisible:', tiktokShareVisible);
+  
     if (tiktokShareVisible) {
-      console.log('🎬 Animation starting - stopping any running animation');
+
       // Stop any running animation and reset to off-screen position
       tikTokTranslateY.stopAnimation(() => {
-        console.log('📍 Setting translateY to 400 (off-screen)');
+
         tikTokTranslateY.setValue(400);
-        console.log('🚀 Starting spring animation to 0');
+
         Animated.spring(tikTokTranslateY, {
           toValue: 0,
           tension: 65,
           friction: 11,
           useNativeDriver: true,
         }).start(() => {
-          console.log('✅ Animation completed, current value should be 0');
+
         });
       });
     } else {
-      console.log('⏸️ tiktokShareVisible is false, not animating');
+
     }
   }, [tiktokShareVisible]);
 
@@ -55,15 +57,15 @@ export default function GlobalVideoOptionsSheet() {
         }
       },
       onPanResponderRelease: (_, gestureState) => {
-        console.log('👋 PanResponder release, dy:', gestureState.dy, 'vy:', gestureState.vy);
+
         if (gestureState.dy > 100 || gestureState.vy > 0.5) {
-          console.log('📉 Closing sheet - animating to 400');
+
           Animated.timing(tikTokTranslateY, {
             toValue: 400,
             duration: 200,
             useNativeDriver: true,
           }).start(() => {
-            console.log('✅ Close animation done, calling hideTikTokShare');
+
             hideTikTokShare();
           });
         } else {
@@ -79,7 +81,7 @@ export default function GlobalVideoOptionsSheet() {
   ).current;
   
   if (!context) {
-    __DEV__ && console.log('GlobalVideoOptionsSheet: context is undefined');
+
     return null;
   }
   
@@ -89,12 +91,12 @@ export default function GlobalVideoOptionsSheet() {
     return null;
   }
 
-  console.log('📱 GlobalVideoOptionsSheet rendering, visible:', visible);
+
 
   const { visible, video, isOwner, hasDownloaded, currentUserId, onPin, onDelete, onDownload, onBlock, tiktokShareVisible } = sheetState;
   // Force reset animation when tiktokShareVisible becomes true
   if (tiktokShareVisible && tikTokTranslateY.__getValue() > 350) {
-    console.log('🔄 Force resetting animation to 400');
+
     tikTokTranslateY.setValue(400);
     Animated.spring(tikTokTranslateY, {
       toValue: 0,
@@ -102,13 +104,13 @@ export default function GlobalVideoOptionsSheet() {
       friction: 11,
       useNativeDriver: true,
     }).start(() => {
-      console.log('✅ Animation completed');
+
     });
   }
   
   // Properly check if user is logged in
   const isGuest = !currentUserId || currentUserId === null || currentUserId === undefined;
-  console.log('[DEBUG SHEET] currentUserId:', currentUserId, 'isGuest:', isGuest, 'type:', typeof currentUserId);
+
   
   // TikTok share handlers
   const handleTikTokClose = () => {
@@ -217,20 +219,30 @@ export default function GlobalVideoOptionsSheet() {
   };
 
   const handleBlock = () => {
+    console.log('🚫 Blocking user:', video?.user_id);
     if (isGuest) {
       setLoginDialogAction('block users');
       setLoginDialogVisible(true);
       return;
     }
+    
+    // Show confirmation modal
+    setBlockUserData(video);
+    setBlockConfirmVisible(true);
+  };
+
+  const confirmBlock = async () => {
+    if (!blockUserData) return;
+    setBlockConfirmVisible(false);
     hideVideoOptionsSheet();
     
     // Use context blockUser for instant UI update (triggers fade animation)
-    if (video?.user_id) {
-      blockUser(video.user_id);
+    if (blockUserData?.user_id) {
+      blockUser(blockUserData.user_id);
     }
     
     // Also call the callback if provided
-    setTimeout(() => onBlock && onBlock(video), 300);
+    setTimeout(() => onBlock && onBlock(blockUserData), 300);
   };
 
 
@@ -313,7 +325,7 @@ export default function GlobalVideoOptionsSheet() {
           )}
 
           {/* Block - Non-owner only */}
-          {!isOwner && (
+          {sheetState.onBlock && (
             <Pressable style={styles.gridItem} onPress={handleBlock}>
               <View style={[styles.gridIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
                 <Ionicons name="ban-outline" size={24} color="#ef4444" />
@@ -434,6 +446,45 @@ export default function GlobalVideoOptionsSheet() {
               </Pressable>
             </View>
           </Animated.View>
+        </View>
+      )}
+
+      {/* Block Confirmation Modal */}
+      {blockConfirmVisible && (
+        <View style={styles.blockConfirmOverlay}>
+          <Pressable style={styles.blockConfirmBackdrop} onPress={() => setBlockConfirmVisible(false)} />
+          <View style={styles.blockConfirmContainer}>
+            <View style={styles.blockConfirmCard}>
+              <View style={styles.blockConfirmHeader}>
+                <Text style={styles.blockConfirmTitle}>
+                  Block @{blockUserData?.profiles?.username || 'user'}?
+                </Text>
+                <Text style={styles.blockConfirmMessage}>
+                  They won't be able to see your content or interact with you. You can unblock them anytime from your settings.
+                </Text>
+              </View>
+              <View style={styles.blockConfirmDivider} />
+              <Pressable
+                style={({ pressed }) => [
+                  styles.blockConfirmButton,
+                  pressed && { backgroundColor: 'rgba(255, 59, 48, 0.1)' }
+                ]}
+                onPress={confirmBlock}
+              >
+                <Text style={[styles.blockConfirmButtonText, { color: '#ff3b30' }]}>Block</Text>
+              </Pressable>
+              <View style={styles.blockConfirmDivider} />
+              <Pressable
+                style={({ pressed }) => [
+                  styles.blockConfirmButton,
+                  pressed && { backgroundColor: '#f5f5f5' }
+                ]}
+                onPress={() => setBlockConfirmVisible(false)}
+              >
+                <Text style={[styles.blockConfirmButtonText, { color: '#1a2e44' }]}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
       )}
     </View>
@@ -712,5 +763,76 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  
+  // Block Confirmation Modal Styles
+  blockConfirmOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100001,
+    elevation: 100001,
+  },
+  blockConfirmBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  blockConfirmContainer: {
+    width: '100%',
+    maxWidth: 300,
+    paddingHorizontal: 32,
+    zIndex: 100002,
+  },
+  blockConfirmCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: '#e5e5e5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  blockConfirmHeader: {
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  blockConfirmTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a2e44',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  blockConfirmMessage: {
+    fontSize: 13,
+    color: '#888888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  blockConfirmDivider: {
+    height: 0.5,
+    backgroundColor: '#e5e5e5',
+    width: '100%',
+  },
+  blockConfirmButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockConfirmButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

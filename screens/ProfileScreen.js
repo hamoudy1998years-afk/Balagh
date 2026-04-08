@@ -180,7 +180,7 @@ function DownloadProgressOverlay({ visible, progress }) {
 export default function ProfileScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const targetUserId = route?.params?.profileUserId ?? null;
-  const { user: globalUser, loading: userLoading } = useUser();
+  const { user: globalUser, loading: userLoading, blockUser } = useUser();
 
   useEffectHook(() => {
     if (!navigation) return;
@@ -480,6 +480,8 @@ export default function ProfileScreen({ route, navigation }) {
       await supabase.from('follows').delete()
         .eq('follower_id', currentUser.id)
         .eq('following_id', targetUserId);
+      blockUser(targetUserId);
+      navigation.goBack();
     }
   }
 

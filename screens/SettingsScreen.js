@@ -542,11 +542,6 @@ export default function SettingsScreen({ navigation }) {
         <Row icon="❤️" label="Show Like Count" sublabel="Let others see your video like counts"
           right={<ASwitch value={showLikes} onValueChange={v => { setShowLikes(v); savePrivacy('show_likes', v); }} label="Show like counts on videos" />} last />
       </Card>
-      <GroupLabel text="SAFETY" />
-      <Card>
-        <Row icon="🚫" label="Blocked Users" sublabel="Manage accounts you've blocked"
-          onPress={handleNavigateBlocked} last />
-      </Card>
     </SubScreen>
   );
 
@@ -612,23 +607,23 @@ export default function SettingsScreen({ navigation }) {
                 <Pressable
                   style={({ pressed }) => [
                     styles.unblockModalButton,
-                    styles.unblockModalButtonPrimary,
-                    pressed && styles.unblockModalButtonPressed
+                    pressed && { backgroundColor: 'rgba(183, 110, 121, 0.1)' }
                   ]}
                   onPress={confirmUnblock}
                 >
-                  <Text style={styles.unblockModalButtonText}>Unblock</Text>
+                  <Text style={[styles.unblockModalButtonText, { color: '#B76E79' }]}>Unblock</Text>
+                </Pressable>
+                <View style={styles.unblockModalDivider} />
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.unblockModalButton,
+                    pressed && { backgroundColor: '#f5f5f5' }
+                  ]}
+                  onPress={() => setUnblockModalVisible(false)}
+                >
+                  <Text style={[styles.unblockModalButtonText, { color: TEXT }]}>Cancel</Text>
                 </Pressable>
               </View>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.unblockModalCancelButton,
-                  pressed && styles.unblockModalButtonPressed
-                ]}
-                onPress={() => setUnblockModalVisible(false)}
-              >
-                <Text style={styles.unblockModalCancelText}>Cancel</Text>
-              </Pressable>
             </View>
           </View>
         </View>
@@ -853,7 +848,8 @@ export default function SettingsScreen({ navigation }) {
         <GroupLabel text="PREFERENCES" />
         <Card>
           <CategoryButton icon="👤" label="Account"          sublabel="Profile, password, phone number"      onPress={handleNavigateAccount} />
-          <CategoryButton icon="🔒" label="Privacy & Safety" sublabel="Comments, blocked users, like count"  onPress={() => setScreen('privacy')} />
+          <CategoryButton icon="🔒" label="Privacy & Safety" sublabel="Comments, like count, safety"         onPress={() => setScreen('privacy')} />
+          <CategoryButton icon="🚫" label="Blocked Users"    sublabel="Manage accounts you've blocked"       onPress={handleNavigateBlocked} />
           <CategoryButton icon="🔔" label="Notifications"    sublabel="Likes, comments, followers, messages" onPress={handleNavigateNotifications} />
           <CategoryButton icon="🎨" label="Appearance"       sublabel="Dark mode & theme"                    onPress={handleNavigateAppearance} />
           <CategoryButton icon="💬" label="Help & Support"   sublabel="FAQ, contact us, terms, about"        onPress={handleNavigateHelp} last />
@@ -1094,26 +1090,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 59, 48, 0.15)',
   },
   unblockModalButtonText: {
-    color: '#B76E79',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  unblockModalCancelButton: {
-    backgroundColor: BG,
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 12,
-    borderWidth: 0.5,
-    borderColor: BORDER,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  unblockModalCancelText: {
-    color: TEXT,
     fontSize: 15,
     fontWeight: '600',
   },
