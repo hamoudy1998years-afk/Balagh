@@ -1,8 +1,9 @@
-import { View, Text, TextInput, StyleSheet, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
+import ModernDialog from './ModernDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUser } from '../context/UserContext';
 import { SystemBars } from 'react-native-edge-to-edge';
@@ -18,6 +19,13 @@ export default function ApplyScholarScreen({ navigation }) {
   const [bio,        setBio]        = useState('');
   const [loading,    setLoading]    = useState(false);
   const [toast,      setToast]      = useState(null);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
 
   async function handleApply() {
     const fn  = fullName.trim();
@@ -26,30 +34,64 @@ export default function ApplyScholarScreen({ navigation }) {
     const exp = expertise.trim();
     const b   = bio.trim();
 
-    if (!fn)           { Alert.alert('Missing Field', 'Full name is required.');                          return; }
-    if (fn.length < 3) { Alert.alert('Too Short',     'Full name must be at least 3 characters.');        return; }
+    if (!fn) { 
+      setDialog({ visible: true, title: 'Missing Field', message: 'Full name is required.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
+    if (fn.length < 3) { 
+      setDialog({ visible: true, title: 'Too Short', message: 'Full name must be at least 3 characters.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
 
     const trimmedAge = age.trim();
     const ageNum = parseInt(trimmedAge, 10);
     if (!trimmedAge || isNaN(ageNum) || !/^\d+$/.test(trimmedAge) || ageNum < 18 || ageNum > 100) {
-      Alert.alert('Invalid Age', 'Please enter a valid age between 18 and 100.');
+      setDialog({ visible: true, title: 'Invalid Age', message: 'Please enter a valid age between 18 and 100.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       return;
     }
 
-    if (!loc)           { Alert.alert('Missing Field', 'Location is required.');                           return; }
-    if (loc.length < 2) { Alert.alert('Too Short',     'Please enter a valid location.');                  return; }
+    if (!loc) { 
+      setDialog({ visible: true, title: 'Missing Field', message: 'Location is required.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
+    if (loc.length < 2) { 
+      setDialog({ visible: true, title: 'Too Short', message: 'Please enter a valid location.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
 
-    if (!edu)            { Alert.alert('Missing Field', 'Education background is required.');               return; }
-    if (edu.length < 20) { Alert.alert('Too Short',     'Education must be at least 20 characters.');      return; }
+    if (!edu) { 
+      setDialog({ visible: true, title: 'Missing Field', message: 'Education background is required.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
+    if (edu.length < 20) { 
+      setDialog({ visible: true, title: 'Too Short', message: 'Education must be at least 20 characters.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
 
-    if (!exp)           { Alert.alert('Missing Field', 'Area of expertise is required.');                  return; }
-    if (exp.length < 3) { Alert.alert('Too Short',     'Expertise must be at least 3 characters.');       return; }
+    if (!exp) { 
+      setDialog({ visible: true, title: 'Missing Field', message: 'Area of expertise is required.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
+    if (exp.length < 3) { 
+      setDialog({ visible: true, title: 'Too Short', message: 'Expertise must be at least 3 characters.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
 
-    if (!b)            { Alert.alert('Missing Field', 'Bio is required.');                                 return; }
-    if (b.length < 30) { Alert.alert('Too Short',     'Bio must be at least 30 characters.');             return; }
+    if (!b) { 
+      setDialog({ visible: true, title: 'Missing Field', message: 'Bio is required.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
+    if (b.length < 30) { 
+      setDialog({ visible: true, title: 'Too Short', message: 'Bio must be at least 30 characters.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
     setLoading(true);
     const user = authUser;
-    if (!user) { setLoading(false); Alert.alert('Error', 'You must be logged in to apply.'); return; }
+    if (!user) { 
+      setLoading(false); 
+      setDialog({ visible: true, title: 'Error', message: 'You must be logged in to apply.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
+      return; 
+    }
 
     const { data: existing } = await supabase
       .from('scholar_applications')
@@ -58,7 +100,7 @@ export default function ApplyScholarScreen({ navigation }) {
       .maybeSingle();
     if (existing) {
       setLoading(false);
-      Alert.alert('Already Applied', 'You have already submitted a scholar application. Please wait for review.');
+      setDialog({ visible: true, title: 'Already Applied', message: 'You have already submitted a scholar application. Please wait for review.', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
       return;
     }
     const { error } = await supabase.from('scholar_applications').insert({
@@ -72,11 +114,9 @@ export default function ApplyScholarScreen({ navigation }) {
     });
     setLoading(false);
     if (error) {
-      Alert.alert('Error', error.message);
+      setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } else {
-      Alert.alert('Application Submitted!', 'We will review your application and get back to you.', [
-        { text: 'OK', onPress: () => navigation.goBack() }
-      ]);
+      setDialog({ visible: true, title: 'Application Submitted!', message: 'We will review your application and get back to you.', type: 'success', buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.goBack(); } }] });
       // Show toast confirmation
       setToast({ message: 'Application submitted successfully!', type: 'success' });
       setTimeout(() => setToast(null), 3000);
@@ -121,6 +161,14 @@ export default function ApplyScholarScreen({ navigation }) {
         <Text style={{ color: '#fff', fontSize: 14, fontWeight: '500' }}>{toast.message}</Text>
       </View>
     )}
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
     </ScrollView>
     </KeyboardAvoidingView>
     </>

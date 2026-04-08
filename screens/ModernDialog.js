@@ -64,13 +64,7 @@ export default function ModernDialog({
   };
 
   const getTitleColor = () => {
-    switch (type) {
-      case 'success': return '#00C896';
-      case 'error': return '#FF4458';
-      case 'warning': return '#B76E79';
-      case 'confirm': return '#B76E79';
-      default: return '#ffffff';
-    }
+    return '#1a2e44'; // Always dark navy text
   };
 
   if (!visible) return null;
@@ -136,14 +130,17 @@ const styles = StyleSheet.create({
     padding: s(24),
   },
   container: {
-    backgroundColor: '#1a2e44',
-    borderRadius: s(20),
+    backgroundColor: '#ffffff',
+    borderRadius: s(24),
     padding: s(28),
     width: '100%',
     maxWidth: s(320),
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#2a3a5c',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
   },
   icon: {
     fontSize: ms(48),
@@ -157,7 +154,7 @@ const styles = StyleSheet.create({
   },
   message: {
     fontSize: ms(14),
-    color: '#94a3b8',
+    color: '#64748b',
     textAlign: 'center',
     lineHeight: ms(20),
     marginBottom: s(24),
@@ -169,7 +166,7 @@ const styles = StyleSheet.create({
   },
   button: {
     width: '100%',
-    backgroundColor: COLORS.gold,
+    backgroundColor: '#B76E79',
     borderRadius: s(12),
     paddingVertical: s(14),
     paddingHorizontal: s(20),
@@ -183,21 +180,20 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   cancelButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#4b5563',
+    backgroundColor: '#f1f5f9',
+    borderWidth: 0,
   },
   destructiveButton: {
     backgroundColor: '#dc2626',
   },
   buttonText: {
-    color: '#1a2e44',
+    color: '#ffffff',
     fontSize: ms(16),
     fontWeight: '700',
     textAlign: 'center',
   },
   cancelButtonText: {
-    color: '#94a3b8',
+    color: '#64748b',
   },
   destructiveButtonText: {
     color: '#ffffff',

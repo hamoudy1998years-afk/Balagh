@@ -83,11 +83,56 @@ export default function SignupScreen({ navigation }) {
   };
 
   async function handleSignup() {
-    if (!username.trim()) { Alert.alert('Missing Field', 'Please enter a username.'); return; }
-    if (!email.trim() || !email.includes('@')) { Alert.alert('Email Required', 'Please enter a valid email address.'); return; }
-    if (!password.trim()) { Alert.alert('Missing Field', 'Please enter a password.'); return; }
-    if (password.trim().length < 8) { Alert.alert('Weak Password', 'Password must be at least 8 characters.'); return; }
-    if (password.trim() !== confirmPassword.trim()) { Alert.alert('Password Mismatch', 'Passwords do not match.'); return; }
+    if (!username.trim()) { 
+      setDialog({ 
+        visible: true, 
+        title: 'Missing Field', 
+        message: 'Please enter a username.', 
+        type: 'error', 
+        buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
+      }); 
+      return; 
+    }
+    if (!email.trim() || !email.includes('@')) { 
+      setDialog({ 
+        visible: true, 
+        title: 'Email Required', 
+        message: 'Please enter a valid email address.', 
+        type: 'error', 
+        buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
+      }); 
+      return; 
+    }
+    if (!password.trim()) { 
+      setDialog({ 
+        visible: true, 
+        title: 'Missing Field', 
+        message: 'Please enter a password.', 
+        type: 'error', 
+        buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
+      }); 
+      return; 
+    }
+    if (password.trim().length < 8) { 
+      setDialog({ 
+        visible: true, 
+        title: 'Weak Password', 
+        message: 'Password must be at least 8 characters.', 
+        type: 'error', 
+        buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
+      }); 
+      return; 
+    }
+    if (password.trim() !== confirmPassword.trim()) { 
+      setDialog({ 
+        visible: true, 
+        title: 'Password Mismatch', 
+        message: 'Passwords do not match.', 
+        type: 'error', 
+        buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
+      }); 
+      return; 
+    }
 
     const hasPhone = phone.trim().length > 0;
     setLoading(true);
@@ -102,9 +147,21 @@ export default function SignupScreen({ navigation }) {
     if (error) {
       setLoading(false);
       if (error.message?.includes('already registered') || error.message?.includes('already exists') || error.code === '23505') {
-        Alert.alert('Email Already Registered', 'This email is already in use. Please login instead.');
+        setDialog({ 
+          visible: true, 
+          title: 'Email Already Registered', 
+          message: 'This email is already in use. Please login instead.', 
+          type: 'error', 
+          buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
+        });
       } else {
-        Alert.alert('Signup Failed', error.message || 'Please try again later.');
+        setDialog({ 
+          visible: true, 
+          title: 'Signup Failed', 
+          message: error.message || 'Please try again later.', 
+          type: 'error', 
+          buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
+        });
       }
       return;
     }
