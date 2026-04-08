@@ -124,6 +124,10 @@ function VideoCard({
   const [showProgress, setShowProgress] = useState(true);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [isDownloading, setIsDownloading] = useState(false);
+  // Refs to fix stale closure in PanResponder - always hold latest values
+  const durationRef = useRef(0);
+  const playerRef = useRef(null);
+  const isVideoReadyRef = useRef(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
@@ -193,6 +197,9 @@ function VideoCard({
 
   useEffect(() => { setLiked(initialLiked); }, [initialLiked]);
   useEffect(() => { setFollowed(initialFollowed); }, [item.user_id]);
+  // Sync state to refs so PanResponder always reads latest values
+  useEffect(() => { durationRef.current = duration; }, [duration]);
+  useEffect(() => { playerRef.current = player.current; }, [player.current]);
 
   useEffect(() => {
     const loadCachedVideo = async () => {
@@ -244,27 +251,47 @@ function VideoCard({
   const progressBarWidth = useRef(0);
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => {
+        console.log('[PROGRESS] onStartShouldSetPanResponder - returning true');
+        return true;
+      },
+      onMoveShouldSetPanResponder: () => {
+        console.log('[PROGRESS] onMoveShouldSetPanResponder - returning true');
+        return true;
+      },
       onPanResponderGrant: (evt) => {
         const { locationX } = evt.nativeEvent;
+        console.log('[PROGRESS] Grant - locationX:', locationX, 'progressBarWidth:', progressBarWidth.current);
         seekToPosition(locationX);
       },
       onPanResponderMove: (evt) => {
         const { locationX } = evt.nativeEvent;
+        console.log('[PROGRESS] Move - locationX:', locationX);
         seekToPosition(locationX);
+      },
+      onPanResponderRelease: (evt) => {
+        console.log('[PROGRESS] Release - drag ended');
       },
     })
   ).current;
 
   const seekToPosition = (x) => {
-    if (!duration || progressBarWidth.current === 0) return;
-    const percentage = Math.max(0, Math.min(1, x / progressBarWidth.current));
-    const newTime = percentage * duration;
-    if (player?.current) {
-      player.current.seek(newTime);
-      setCurrentTime(newTime);
-      progressAnim.setValue(percentage);
+    const width = progressBarWidth.current;
+    const dur = durationRef.current;  // Read from ref, not state (fixes stale closure)
+    const vid = playerRef.current;    // Read from ref, not closed-over player
+
+    if (width === 0 || dur === 0) return;
+
+    const percentage = Math.max(0, Math.min(1, x / width));
+    const newTime = percentage * dur;
+
+    // Update UI immediately for responsiveness
+    setCurrentTime(newTime);
+    progressAnim.setValue(percentage);
+
+    // Seek only if video is ready
+    if (vid && isVideoReadyRef.current) {
+      vid.seek(newTime);
     }
   };
 
@@ -475,9 +502,10 @@ function VideoCard({
           __DEV__ && console.log('Video error:', e);
         }}
         onLoad={(data) => {
-
           if (data?.duration) {
             setDuration(data.duration);
+            durationRef.current = data.duration; // Set ref immediately, no useEffect lag
+            isVideoReadyRef.current = true;
           }
         }}
         onProgress={(data) => {
@@ -491,7 +519,7 @@ function VideoCard({
       />
 
       <TouchableOpacity
-        style={styles.tapAreaFull}
+        style={[styles.tapAreaFull, { bottom: insets.bottom + s(120) }]}  // Stop before progress bar area
         onPress={handleTap}
         onLongPress={handleLongPress}
         delayLongPress={500}
@@ -622,11 +650,23 @@ function VideoCard({
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
 
-      {/* Progress Bar - Only show when paused, positioned above bottom nav */}
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog({ ...dialog, visible: false })}
+      />
+
+      {/* Progress Bar - Moved to end with high zIndex to receive touches */}
       {paused && (
         <View 
-          style={[styles.progressContainer, { bottom: insets.bottom + s(90) }]}
-          onLayout={(e) => { progressBarWidth.current = e.nativeEvent.layout.width; }}
+          style={[styles.progressContainer, { bottom: insets.bottom + s(90), zIndex: 10 }]}
+          onLayout={(e) => { 
+            progressBarWidth.current = e.nativeEvent.layout.width;
+            console.log('[PROGRESS] onLayout - progressBarWidth set to:', e.nativeEvent.layout.width);
+          }}
         >
           <View style={styles.timeRow}>
             <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
@@ -660,15 +700,6 @@ function VideoCard({
           </View>
         </View>
       )}
-
-      <ModernDialog
-        visible={dialog.visible}
-        title={dialog.title}
-        message={dialog.message}
-        type={dialog.type}
-        buttons={dialog.buttons}
-        onDismiss={() => setDialog({ ...dialog, visible: false })}
-      />
     </Animated.View>
   );
 }
