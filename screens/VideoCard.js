@@ -48,6 +48,8 @@ function VideoCard({
   onBlocked,
 }) {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const safeBottom = insets?.bottom ?? 0;
   const { showVideoOptionsSheet, showTikTokShare } = useDownload();
   const { blockedUsers } = useUser();
 
@@ -131,6 +133,7 @@ function VideoCard({
   const isSeeking = useRef(false);
   const progressBarRef = useRef(null);  // Ref for measure()
   const progressBarPageX = useRef(0);   // Absolute screen X position
+  const lastSeekTime = useRef(0);  // Throttle video seek during drag
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
@@ -194,6 +197,9 @@ function VideoCard({
   const [dialog, setDialog] = useState({
     visible: false, title: '', message: '', type: 'info', buttons: []
   });
+  // TikTok-style progress bar visibility
+  const [isDragging, setIsDragging] = useState(false);
+  const barOpacity = useRef(new Animated.Value(0)).current;
 
   const username = usernameProp ?? 'user';
   const avatarUrl = avatarUrlProp ?? null;
@@ -203,6 +209,24 @@ function VideoCard({
   // Sync state to refs so PanResponder always reads latest values
   useEffect(() => { durationRef.current = duration; }, [duration]);
   useEffect(() => { playerRef.current = player.current; }, [player.current]);
+  // TikTok-style: fade in/out progress bar based on paused or dragging
+  useEffect(() => {
+    if (paused || isDragging) {
+      // Show instantly (100ms fade in)
+      Animated.timing(barOpacity, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      // Smooth fade out (250ms)
+      Animated.timing(barOpacity, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [paused, isDragging]);
 
   useEffect(() => {
     const loadCachedVideo = async () => {
@@ -248,10 +272,14 @@ function VideoCard({
 
   const lastTap = useRef(null);
   const tapTimer = useRef(null);
-  const insets = useSafeAreaInsets();
 
   // Progress bar dragging
   const progressBarWidth = useRef(0);
+  // Helper for instant UI updates during drag
+  const updateProgressBarUI = (pct) => {
+    const safePct = Math.max(0, Math.min(1, pct));
+    progressAnim.setValue(safePct);
+  };
   // Capture both width AND absolute screen position on layout
   const onProgressBarLayout = (e) => {
     const { width } = e.nativeEvent.layout;
@@ -271,35 +299,47 @@ function VideoCard({
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      // Prevent parent scroll views from stealing gesture mid-drag
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
       onPanResponderTerminationRequest: () => false,
 
       onPanResponderGrant: (evt) => {
+        setIsDragging(true); // Forces bar to show
         isSeeking.current = true;
-        // pageX is absolute screen coords - works regardless of which child touched
+        manualPauseRef.current = true;
+        setPaused(true); // Pause while dragging
+
         const pct = pageXToPercentage(evt.nativeEvent.pageX);
+        updateProgressBarUI(pct);
         seekToPosition(pct);
       },
 
       onPanResponderMove: (evt) => {
-        // pageX stays consistent throughout gesture, locationX does not
         const pct = pageXToPercentage(evt.nativeEvent.pageX);
-        seekToPosition(pct);
+        updateProgressBarUI(pct);
+
+        const now = Date.now();
+        if (now - lastSeekTime.current > 100) {
+          seekToPosition(pct);
+          lastSeekTime.current = now;
+        }
       },
 
       onPanResponderRelease: (evt) => {
         const pct = pageXToPercentage(evt.nativeEvent.pageX);
+        updateProgressBarUI(pct);
         seekToPosition(pct);
+
         isSeeking.current = false;
-        // Auto-play after seeking (TikTok behavior)
         manualPauseRef.current = false;
-        setPaused(false);
+        setPaused(false); // Resume playback
+        setIsDragging(false); // Hide bar (fade out handled by useEffect)
       },
 
       onPanResponderTerminate: () => {
         isSeeking.current = false;
+        setPaused(false);
+        setIsDragging(false);
       },
     })
   ).current;
@@ -541,11 +581,10 @@ function VideoCard({
         useTextureView={false}
       />
 
-      <TouchableOpacity
-        style={[styles.tapAreaFull, { bottom: insets.bottom + s(120) }]}  // Stop before progress bar area
+      {/* Full-screen tap area for pause/play (behind progress bar) */}
+      <Pressable
+        style={StyleSheet.absoluteFill}
         onPress={handleTap}
-        onLongPress={handleLongPress}
-        delayLongPress={500}
         activeOpacity={1}
       />
 
@@ -563,7 +602,14 @@ function VideoCard({
         </View>
       )}
 
-      <View style={[styles.overlay, { bottom: insets.bottom + s(120) }]}>
+      {/* Bottom UI - fades out when dragging (TikTok style) */}
+      <Animated.View style={[styles.overlay, { 
+        bottom: safeBottom + s(120),
+        opacity: barOpacity.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 0] // Fade out UI when bar shows
+        })
+      }]}>
         <AnimatedButton onPress={handleNavigateUserProfile}>
           <Text style={styles.username}>@{username}</Text>
         </AnimatedButton>
@@ -573,9 +619,9 @@ function VideoCard({
             {hashtags.map((tag, i) => <Text key={i} style={styles.hashtag}>{tag}</Text>)}
           </View>
         )}
-      </View>
+      </Animated.View>
 
-      <View style={[styles.actions, { bottom: insets.bottom + s(100) }]}>
+      <View style={[styles.actions, { bottom: safeBottom + s(100) }]}>
         <View style={styles.creatorContainer}>
           <AnimatedButton onPress={handleNavigateUserProfile}>
             <View style={[styles.creatorAvatar, followed && styles.creatorAvatarFollowed]}>
@@ -682,29 +728,30 @@ function VideoCard({
         onDismiss={() => setDialog({ ...dialog, visible: false })}
       />
 
-      {/* Progress Bar - Moved to end with high zIndex to receive touches */}
-      {paused && (
-        <Pressable 
-          style={[styles.progressContainer, { bottom: insets.bottom + s(90), zIndex: 10 }]}
-          onPress={(e) => {
-            const pct = pageXToPercentage(e.nativeEvent.pageX);
-            seekToPosition(pct);
-            // Auto-play after seeking (TikTok behavior)
-            manualPauseRef.current = false;
-            setPaused(false);
-          }}
-        >
-          <View style={styles.timeRow}>
-            <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
-            <Text style={styles.timeText}>{formatTime(duration)}</Text>
-          </View>
+      {/* TikTok-style Progress Bar - always mounted, opacity controls visibility */}
+      <Animated.View 
+        style={[
+          styles.progressContainer, 
+          { 
+            bottom: safeBottom + s(90), 
+            zIndex: 10, 
+            height: 40, 
+            justifyContent: 'center',
+            opacity: barOpacity // Bound to animation value
+          }
+        ]}
+        onLayout={onProgressBarLayout}
+        {...panResponder.panHandlers}
+      >
+        {/* Invisible hit slop area */}
+        <View style={{ paddingVertical: 15, width: '100%' }}>
           <View
             ref={progressBarRef}
-            style={styles.progressBarBg}
-            onLayout={onProgressBarLayout}
-            {...panResponder.panHandlers}
+            style={[
+              styles.progressBarBg, 
+              { height: isDragging ? 6 : 4 } // Thicker when dragging (TikTok style)
+            ]}
           >
-            {/* Fill - pointerEvents none prevents touch interception */}
             <Animated.View 
               pointerEvents="none"
               style={[
@@ -715,7 +762,6 @@ function VideoCard({
                 })}
               ]} 
             />
-            {/* Thumb - pointerEvents none prevents jump to start */}
             <Animated.View 
               pointerEvents="none"
               style={[
@@ -730,8 +776,8 @@ function VideoCard({
               ]}
             />
           </View>
-        </Pressable>
-      )}
+        </View>
+      </Animated.View>
     </Animated.View>
   );
 }
