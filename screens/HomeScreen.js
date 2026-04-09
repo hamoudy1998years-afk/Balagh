@@ -67,20 +67,15 @@ function LiveFeed({ navigation }) {
           schema: 'public', 
           table: 'live_streams' 
         }, (payload) => {
-
           loadStreams();
         })
         .subscribe((status, err) => {
           if (err) {
-
             if (retryCount < maxRetries) {
               retryCount++;
               setTimeout(subscribeToLiveStreams, 2000 * retryCount);
-            } else {
-
             }
           } else if (status === 'SUBSCRIBED') {
-
             retryCount = 0;
           }
         });
@@ -122,7 +117,6 @@ function LiveFeed({ navigation }) {
         .order('created_at', { ascending: false });
       setStreams(data ?? []);
     } catch (error) {
-
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -175,14 +169,16 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const { user: authUser, blockedUsers } = useUser();
   const [videos, setVideos] = useState(() => feedCache[type] ?? []);
   
-  // Filter out blocked users' videos
   const visibleVideos = videos;
   const [loading, setLoading] = useState(() => !feedCache[type]);
   const [refreshing, setRefreshing] = useState(false);
   const [feedError, setFeedError] = useState(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const { width, height } = useWindowDimensions();
-  const [listHeight, setListHeight] = useState(height);
+
+  // ── FIX: initialize to null so we wait for real measured height ──
+  const [listHeight, setListHeight] = useState(null);
+
   const [myLikes, setMyLikes] = useState(() => feedCache.likes ?? []);
   const [myFollows, setMyFollows] = useState(() => feedCache.follows ?? []);
 
@@ -205,7 +201,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     const user = authUser;
     if (!user) return;
 
-    // Get blocked users list
     const { data: blockedUsers } = await supabase
       .from('blocks')
       .select('blocked_id')
@@ -231,7 +226,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       .in('user_id', followingIds)
       .neq('user_id', user.id);
     
-    // Exclude blocked users
     if (blockedIds.length > 0) {
       query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
     }
@@ -265,7 +259,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     },
   }));
 
-  // FIX: Removed playerPool.playCurrent() — VideoCard handles play/pause via isTabActive prop
   useEffect(() => {
     if (videos.length === 0) return;
     if (isRefreshingRef.current) return;
@@ -274,7 +267,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     setActiveIndex(0);
   }, [videos]);
 
-  // FIX: Removed playerPool.playCurrent() — VideoCard handles play/pause via isTabActive prop
   useEffect(() => {
     if (videos.length === 0) return;
 
@@ -288,7 +280,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     const currentVideo = videos[activeIndex];
     if (currentVideo) {
       playerPool.loadVideo('current', currentVideo.video_url);
-      // ✅ No playerPool.playCurrent() here — isTabActive prop on VideoCard controls playback
     }
 
     const nextVideo = videos[activeIndex + 1];
@@ -306,11 +297,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     prevIndexRef.current = activeIndex;
   }, [activeIndex, videos]);
 
-  // FIX: Removed entire playerPool play/pause effect — isTabActive prop on VideoCard handles this
-  // The old effect was calling playerPool.pauseAll() which leaked audio across tabs
-
   useEffect(() => {
-    // Always fetch fresh Following data to respect block status
     if (type === 'following') {
       loadVideos();
       loadMyInteractions();
@@ -337,7 +324,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       const user = authUser;
       if (!user) { setVideos([]); setLoading(false); return; }
 
-      // Get blocked users list
       const { data: blockedUsers } = await supabase
         .from('blocks')
         .select('blocked_id')
@@ -363,7 +349,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .in('user_id', followingIds)
         .neq('user_id', user.id);
       
-      // Exclude blocked users
       if (blockedIds.length > 0) {
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
       }
@@ -381,7 +366,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       }
 
     } else {
-      // Get current user (may be null for guests)
       const currentUser = authUser;
       
       let blockedIds = [];
@@ -397,7 +381,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .from('videos')
         .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)');
       
-      // Exclude blocked users if any
       if (blockedIds.length > 0) {
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
       }
@@ -423,7 +406,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       feedCache.foryou = shuffled;
       feedCache.ts.foryou = Date.now();
       setVideos(shuffled);
-      // Videos state updated
     }
 
     setLoading(false);
@@ -495,7 +477,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         username={item.profiles?.username ?? 'user'}
         avatarUrl={item.profiles?.avatar_url ?? null}
         onBlocked={(blockedIndex) => {
-          // Scroll to next video after blocking
           const nextIndex = blockedIndex + 1;
           if (nextIndex < videos.length) {
             flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
@@ -537,35 +518,44 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <FlatList
-        ref={flatListRef}
-        data={visibleVideos}
-        keyExtractor={(item) => item.id}
-        style={{ backgroundColor: '#000' }}
-        overScrollMode="never"
-        onLayout={(e) => setListHeight(e.nativeEvent.layout.height)}
-        renderItem={renderItem}
-        pagingEnabled
-        showsVerticalScrollIndicator={false}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}
-        windowSize={3}
-        maxToRenderPerBatch={2}
-        initialNumToRender={1}
-        removeClippedSubviews={true}
-
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#ffffff"
-            colors={['#ffffff']}
-            progressBackgroundColor="#000000"
-            progressViewOffset={90}
-          />
+    // ── FIX: measure real height here, only render FlatList once we have it ──
+    <View
+      style={{ flex: 1, backgroundColor: '#000' }}
+      onLayout={(e) => {
+        const measured = e.nativeEvent.layout.height;
+        if (measured > 0 && measured !== listHeight) {
+          setListHeight(measured);
         }
-      />
+      }}
+    >
+      {listHeight ? (
+        <FlatList
+          ref={flatListRef}
+          data={visibleVideos}
+          keyExtractor={(item) => item.id}
+          style={{ backgroundColor: '#000' }}
+          overScrollMode="never"
+          renderItem={renderItem}
+          pagingEnabled
+          showsVerticalScrollIndicator={false}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}
+          windowSize={3}
+          maxToRenderPerBatch={2}
+          initialNumToRender={1}
+          removeClippedSubviews={true}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#ffffff"
+              colors={['#ffffff']}
+              progressBackgroundColor="#000000"
+              progressViewOffset={90}
+            />
+          }
+        />
+      ) : null}
     </View>
   );
 });
@@ -597,19 +587,14 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => { indexRef.current = index; }, [index]);
   useEffect(() => { isFocusedRef.current = isFocused; }, [isFocused]);
 
-  // NetInfo for offline detection with auto-refresh
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       const wasOffline = showOffline;
       const isOffline = !state.isInternetReachable;
       
-
-      
       setShowOffline(isOffline);
       
-      // Connection restored - auto refresh both tabs
       if (wasOffline && !isOffline) {
-
         setIsReconnecting(true);
         Promise.all([
           followingRef.current?.refresh?.(),
@@ -627,7 +612,6 @@ export default function HomeScreen({ navigation }) {
     return () => unsubscribe();
   }, [showOffline]);
 
-  // Pulse animation for LIVE dot
   useEffect(() => {
     const pulseAnimation = Animated.loop(
       Animated.sequence([
@@ -661,7 +645,6 @@ export default function HomeScreen({ navigation }) {
     if (!user) return;
 
     try {
-      // Get blocked users list
       const { data: blockedUsers } = await supabase
         .from('blocks')
         .select('blocked_id')
@@ -687,7 +670,6 @@ export default function HomeScreen({ navigation }) {
         .in('user_id', followingIds)
         .neq('user_id', user.id);
       
-      // Exclude blocked users
       if (blockedIds.length > 0) {
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
       }
@@ -698,12 +680,9 @@ export default function HomeScreen({ navigation }) {
 
       feedCache.following = data ?? [];
       feedCache.ts.following = Date.now();
-    } catch (error) {
-
-    }
+    } catch (error) {}
   }
 
-  // FIX: When screen focus changes, update both tabs correctly
   useEffect(() => {
     followingRef.current?.setActive(isFocused && index === 0);
     foryouRef.current?.setActive(isFocused && index === 1);
@@ -721,7 +700,6 @@ export default function HomeScreen({ navigation }) {
 
   const handleIndexChange = useCallback((newIndex) => {
     setIndex(newIndex);
-    // FIX: Immediately pause the old tab and activate the new one
     followingRef.current?.setActive(isFocusedRef.current && newIndex === 0);
     foryouRef.current?.setActive(isFocusedRef.current && newIndex === 1);
   }, []);
