@@ -156,7 +156,9 @@ function VideoCard({
       // Scrolled back — restart from 0 and play like TikTok
       manualPauseRef.current = false;
       try {
-        if (player?.current) player.current.seek(0);
+        if (player?.current?.seek) {
+          player.current.seek(0);
+        }
       } catch (e) {}
       setPaused(false);
     }
@@ -168,7 +170,11 @@ function VideoCard({
       if (isActive) {
         manualPauseRef.current = false;
         setPaused(false);
-        try { if (player?.current) player.current.seek(0); } catch (e) {}
+        try { 
+          if (player?.current?.seek) {
+            player.current.seek(0); 
+          }
+        } catch (e) {}
       } else {
         manualPauseRef.current = false;
         setPaused(false);
@@ -176,7 +182,11 @@ function VideoCard({
     } else {
       setPaused(true);
       if (isActive) {
-        try { if (player?.current) player.current.seek(0); } catch (e) {}
+        try { 
+          if (player?.current?.seek) {
+            player.current.seek(0); 
+          }
+        } catch (e) {}
       }
     }
   }, [isTabActive]);
@@ -448,10 +458,7 @@ function VideoCard({
   }, [handleLike]);
 
   const handleLongPress = useCallback(() => {
-    console.log('[DEBUG VideoCard] Long press triggered, handleBlockUser exists:', !!handleBlockUser);
-    console.log('[DEBUG VideoCard] Passing currentUserId:', currentUserId);
     if (!showVideoOptionsSheet) return;
-    console.log('[DEBUG VideoCard] Calling showVideoOptionsSheet with onBlock');
     showVideoOptionsSheet(item, false, hasDownloaded, {
       onDownload: handleDownloadVideo,
       onPin: null,

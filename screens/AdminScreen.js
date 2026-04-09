@@ -69,9 +69,7 @@ export default function AdminScreen({ navigation }) {
         .order('created_at', { ascending: false })
         .limit(50);
 
-      console.log('DEBUG - Reports fetched:', reportsData);
-      console.log('DEBUG - Reports count:', reportsData?.length);
-      console.log('DEBUG - Reports error:', reportsError);
+      // Logs removed
 
       if (reportsError) throw reportsError;
       

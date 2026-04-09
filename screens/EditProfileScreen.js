@@ -54,9 +54,7 @@ export default function EditProfileScreen({ navigation }) {
     const user = authUser;
     if (!user) return;
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-    console.log('[EDIT PROFILE] authUser:', user?.id);
-    console.log('[EDIT PROFILE] user_metadata:', user?.user_metadata);
-    console.log('[EDIT PROFILE] profile:', profile);
+    // Profile loaded
     if (profile) {
       // Profile exists but username might be null - use fallback if needed
       const usernameFromProfile = profile.username ?? authUser?.user_metadata?.username ?? '';
@@ -67,7 +65,7 @@ export default function EditProfileScreen({ navigation }) {
     } else {
       // No profile yet - use username from signup metadata
       const fallbackUsername = authUser?.user_metadata?.username || '';
-      console.log('[EDIT PROFILE] Using fallback username:', fallbackUsername);
+      // Using fallback username
       setUsername(fallbackUsername);
     }
     if (profile?.is_scholar) {

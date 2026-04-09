@@ -37,7 +37,7 @@ const THUMBNAIL_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 const RECORDING_UID = 12345;
 
 async function getAgoraToken(channelName, uid, role) {
-  __DEV__ && console.log('🚀 [getAgoraToken] Fetching token...');
+// Dev log removed
   const fetchWithTimeout = (url, options, timeout = 10000) => {
     return Promise.race([
       fetch(url, options),
@@ -59,14 +59,14 @@ async function getAgoraToken(channelName, uid, role) {
     const data = await response.json();
     return data.token;
   } catch (error) {
-    __DEV__ && console.log('[getAgoraToken] Network error:', error.message);
+// Dev log removed
     return null;
   }
 }
 
 async function uploadThumbnail(filePath, streamId) {
   try {
-    __DEV__ && console.log('📤 Uploading snapshot to Supabase...');
+// Dev log removed
 
     const fileName = `thumbnail_${streamId}_${Date.now()}.jpg`;
 
@@ -85,17 +85,17 @@ async function uploadThumbnail(filePath, streamId) {
       });
 
     if (error) {
-      __DEV__ && console.log('📤 Upload error (offline?):', error.message);
+// Dev log removed
       return null;
     }
 
-    __DEV__ && console.log('✅ Upload successful:', data);
+// Dev log removed
 
     const { data: { publicUrl } } = supabase.storage
       .from('thumbnails')
       .getPublicUrl(fileName);
 
-    __DEV__ && console.log('✅ Thumbnail public URL:', publicUrl);
+// Dev log removed
 
     await supabase
       .from('live_streams')
@@ -104,7 +104,7 @@ async function uploadThumbnail(filePath, streamId) {
 
     return publicUrl;
   } catch (error) {
-    __DEV__ && console.log('📤 Thumbnail upload failed (offline?):', error.message);
+// Dev log removed
     // Continue without thumbnail - stream still works
     return null;
   }
@@ -181,7 +181,7 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   useEffect(() => {
       isMountedRef.current = true;
-      __DEV__ && console.log('📹 [LiveStreamScreen] Component MOUNTED');
+// Dev log removed
       
       // REMOVED: setup() - now called manually when pressing "Start Streaming"
       
@@ -189,11 +189,11 @@ export default function LiveStreamScreen({ navigation, route }) {
       const netInfoSubscription = NetInfo.addEventListener(state => {
         // Fix offline detection
         if (!state.isInternetReachable) {
-          __DEV__ && console.log('[NETINFO] Setting OFFLINE');
+// Dev log removed
           setConnectionStatus('offline');
         } else if (state.isInternetReachable && connectionStatus === 'offline') {
           // Internet back
-          __DEV__ && console.log('[NetInfo] Back online, retrying...');
+// Dev log removed
           reconnectAttemptRef.current = 0;
           setConnectionStatus('connected');
           handleNetworkReconnect();
@@ -205,10 +205,10 @@ export default function LiveStreamScreen({ navigation, route }) {
         
         // Network type changed (e.g., wifi -> cellular, or connection lost)
         if (currentType !== lastNetworkType.current && isLiveRef.current) {
-          __DEV__ && console.log('🌐 [Network] Type changed:', lastNetworkType.current, '->', currentType);
+// Dev log removed
           
           if (isOffline || (!wasOffline && isOffline)) {
-            __DEV__ && console.log('🌐 [Network] Connection lost, triggering reconnect...');
+// Dev log removed
             if (!isReconnectingRef.current) {
               handleNetworkReconnect();
             }
@@ -220,15 +220,15 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
         if (nextAppState === 'background' || nextAppState === 'inactive') {
-          __DEV__ && console.log('App went to background, tracking time...');
+// Dev log removed
           backgroundTimeRef.current = Date.now();
         } else if (nextAppState === 'active' && backgroundTimeRef.current) {
           const timeInBackground = Date.now() - backgroundTimeRef.current;
-          __DEV__ && console.log('App returned from background after', timeInBackground, 'ms');
+// Dev log removed
           
           // If was in background >30s and is live, force reconnect
           if (timeInBackground > 30000 && isLiveRef.current) {
-            __DEV__ && console.log('🌐 [Network] Background timeout, forcing reconnect...');
+// Dev log removed
             if (!isReconnectingRef.current) {
               handleNetworkReconnect();
             }
@@ -288,10 +288,10 @@ export default function LiveStreamScreen({ navigation, route }) {
   }, [isLive]);
 
   async function requestPermissions() {
-    __DEV__ && console.log('🔐 [requestPermissions] Checking permissions...');
+// Dev log removed
     
     if (Platform.OS === 'android') {
-      __DEV__ && console.log('🔐 [requestPermissions] Android detected, requesting permissions...');
+// Dev log removed
       const results = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.CAMERA,
         PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
@@ -301,22 +301,22 @@ export default function LiveStreamScreen({ navigation, route }) {
       const audioGranted = results[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] === PermissionsAndroid.RESULTS.GRANTED;
       console.log('[PERM] Camera:', cameraGranted, 'Audio:', audioGranted);
       
-      __DEV__ && console.log('🔐 [requestPermissions] Camera granted:', cameraGranted);
-      __DEV__ && console.log('🔐 [requestPermissions] Audio granted:', audioGranted);
+// Dev log removed
+// Dev log removed
       
       if (!cameraGranted) {
-        __DEV__ && console.log('❌ [requestPermissions] Camera permission DENIED');
+// Dev log removed
         setDialog({ visible: true, title: 'Permission Required', message: 'Camera permission is needed to stream', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         return false;
       }
       
       if (!audioGranted) {
-        __DEV__ && console.log('⚠️ [requestPermissions] Audio permission DENIED (camera ok, continuing)');
+// Dev log removed
       }
       
-      __DEV__ && console.log('✅ [requestPermissions] All required permissions granted');
+// Dev log removed
     } else {
-      __DEV__ && console.log('🔐 [requestPermissions] iOS detected, permissions checked via Info.plist');
+// Dev log removed
     }
     return true;
   }
@@ -347,13 +347,13 @@ export default function LiveStreamScreen({ navigation, route }) {
     reconnectAttemptRef.current += 1;
     const attempt = reconnectAttemptRef.current;
     
-    __DEV__ && console.log('🌐 [Network] Reconnect attempt', attempt, '/', MAX_RETRIES);
+// Dev log removed
     setConnectionStatus('reconnecting');
     
     try {
       // Leave current channel
       await engineRef.current?.leaveChannel();
-      __DEV__ && console.log('🌐 [Network] Left channel for reconnect');
+// Dev log removed
       
       // Exponential backoff: 1s, 2s, 4s, 8s, 16s (max 30s)
       // Add 5s penalty if rate limited (429 error)
@@ -361,7 +361,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       const rateLimitPenalty = isFromError ? 5000 : 0;
       const delay = baseDelay + rateLimitPenalty;
       console.log(`[DEBUG] Calculated delay: ${delay}ms (attempt: ${attempt})`);
-      __DEV__ && console.log('🌐 [Network] Retrying in', delay, 'ms');
+// Dev log removed
       
       await new Promise(r => setTimeout(r, delay));
       
@@ -421,7 +421,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       });
       
       // SUCCESS - DO NOT reset counter here, only on initial setup or manual retry
-      __DEV__ && console.log('✅ [Network] Reconnect successful');
+// Dev log removed
       setConnectionStatus('connected');
     } catch (error) {
       console.log('[DEBUG-RECONNECT] handleReconnect FAILED:', error.message);
@@ -443,34 +443,34 @@ export default function LiveStreamScreen({ navigation, route }) {
   }, []);
 
   function switchCamera() {
-    __DEV__ && console.log('🎥 [switchCamera] Switching camera...');
-    __DEV__ && console.log('🎥 [switchCamera] Engine exists:', !!engineRef.current);
+// Dev log removed
+// Dev log removed
     
     if (engineRef.current) {
       try {
         engineRef.current.switchCamera();
         setIsFrontCamera(!isFrontCamera);
-        __DEV__ && console.log('✅ [switchCamera] Camera switched to:', !isFrontCamera ? 'front' : 'back');
+// Dev log removed
       } catch (e) {
-        __DEV__ && console.error('❌ [switchCamera] Error:', e);
+// Dev log removed
       }
     } else {
-      __DEV__ && console.warn('⚠️ [switchCamera] No engine available');
+// Dev log removed
     }
   }
 
   async function setup() {
-    __DEV__ && console.log('🎬 [setup] ========== SETUP STARTED ==========');
-    __DEV__ && console.log('🎬 [setup] currentUser exists:', !!currentUser);
+// Dev log removed
+// Dev log removed
     
     if (!currentUser) {
-      __DEV__ && console.log('❌ [setup] No currentUser, aborting');
+// Dev log removed
       setIsStarting(false);
       return;
     }
 
     const hasPermission = await requestPermissions();
-    __DEV__ && console.log('🎬 [setup] Permissions result:', hasPermission);
+// Dev log removed
     if (!hasPermission) {
       setIsStarting(false); // 🔧 FIXED: Reset button state
       return;
@@ -493,19 +493,19 @@ export default function LiveStreamScreen({ navigation, route }) {
 
       const channel = `bushrann_${currentUser.id}_${Date.now()}`;
       currentChannelRef.current = channel;
-      __DEV__ && console.log('🎬 [setup] Channel name:', channel);
+// Dev log removed
 
-      __DEV__ && console.log('🎬 [setup] Fetching tokens...');
+// Dev log removed
       const [hostToken, viewerToken] = await Promise.all([
         getAgoraToken(channel, 1, 'host'),
         getAgoraToken(channel, 0, 'audience')
       ]);
 
-      __DEV__ && console.log('🎬 [setup] Host token received:', !!hostToken);
-      __DEV__ && console.log('🎬 [setup] Viewer token received:', !!viewerToken);
+// Dev log removed
+// Dev log removed
 
       if (!hostToken) {
-        __DEV__ && console.log('❌ [setup] No host token, aborting');
+// Dev log removed
         setDialog({ visible: true, title: 'Error', message: 'Could not get streaming token. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         setIsStarting(false); // 🔧 FIXED: Reset button state
         navigation.goBack();
@@ -538,37 +538,37 @@ export default function LiveStreamScreen({ navigation, route }) {
       setStreamId(currentStreamId);
       currentStreamIdRef.current = currentStreamId;
 
-      __DEV__ && console.log('🎬 [setup] Creating Agora engine...');
+// Dev log removed
       const engine = createAgoraRtcEngine();
       engineRef.current = engine;
-      __DEV__ && console.log('🎬 [setup] Engine created:', !!engine);
+// Dev log removed
       
-      __DEV__ && console.log('🎬 [setup] Initializing Agora SDK...');
-      __DEV__ && console.log('🎬 [setup] Using APP_ID:', AGORA_APP_ID?.substring(0, 8) + '...');
+// Dev log removed
+// Dev log removed
       
       try {
         const initResult = engine.initialize({ appId: AGORA_APP_ID });
-        __DEV__ && console.log('🎬 [setup] Agora SDK initialized, result:', initResult);
+// Dev log removed
       } catch (initError) {
-        __DEV__ && console.error('❌ [setup] Agora SDK initialization FAILED:', initError);
+// Dev log removed
         throw initError;
       }
 
-      __DEV__ && console.log('🎬 [setup] Registering event handlers...');
+// Dev log removed
       
       engine.registerEventHandler({
         onJoinChannelSuccess: (connection, elapsed) => {
           console.log('[AGORA] Joined channel! uid:', connection.localUid);
-          __DEV__ && console.log('✅ [Agora] Joined channel:', connection.channelId);
-          __DEV__ && console.log('✅ [Agora] Local UID:', connection.localUid);
-          __DEV__ && console.log('✅ [Agora] Elapsed time:', elapsed);
+// Dev log removed
+// Dev log removed
+// Dev log removed
 
           snapshotTimeoutRef.current = setTimeout(() => {
             // 🔧 FIXED: Use platform-specific path
             const snapshotPath = Platform.OS === 'ios' 
               ? `${RNFS.CachesDirectoryPath}/snapshot_${Date.now()}.jpg`
               : `/data/user/0/com.bushrann.app/cache/snapshot_${Date.now()}.jpg`;
-            __DEV__ && console.log('📸 Taking Agora snapshot to:', snapshotPath);
+// Dev log removed
             if (engineRef.current) {
               engineRef.current.takeSnapshot(0, snapshotPath);
             }
@@ -576,48 +576,48 @@ export default function LiveStreamScreen({ navigation, route }) {
         },
 
         onSnapshotTaken: (connection, uid, filePath, width, height, errCode) => {
-          __DEV__ && console.log('📸 [Agora] Snapshot taken! uid:', uid);
-          __DEV__ && console.log('📸 [Agora] Path:', filePath);
-          __DEV__ && console.log('📸 [Agora] Dimensions:', width, 'x', height);
-          __DEV__ && console.log('📸 [Agora] Error code:', errCode);
+// Dev log removed
+// Dev log removed
+// Dev log removed
+// Dev log removed
           if (errCode === 0 && filePath) {
             uploadThumbnail(filePath, currentStreamIdRef.current).then(url => {
               if (url) {
-                __DEV__ && console.log('📸 [Agora] Thumbnail URL saved to state:', url);
+// Dev log removed
                 setThumbnailUrl(url);
                 thumbnailUrlRef.current = url;
               }
             });
           } else {
-            __DEV__ && console.log('📸 Snapshot failed (offline?):', errCode);
+// Dev log removed
           }
         },
 
         onError: (errCode, msg) => {
-          __DEV__ && console.error('❌ [Agora] SDK Error - Code:', errCode, 'Message:', msg);
+// Dev log removed
         },
         onLocalVideoStateChanged: (state, error) => {
-          __DEV__ && console.log('📹 [Agora] Local video state:', state, 'error:', error);
-          __DEV__ && console.log('📹 [Agora] State meaning:', state === 0 ? 'Stopped' : state === 1 ? 'Capturing' : state === 2 ? 'Encoding' : 'Unknown');
+// Dev log removed
+// Dev log removed
         },
         onUserJoined: (connection, uid, elapsed) => {
           console.log('[AGORA] User joined:', uid);
-          __DEV__ && console.log('👤 [Agora] User joined - UID:', uid);
+// Dev log removed
         },
         onUserOffline: (connection, uid, reason) => {
           console.log('[AGORA] User left:', uid);
-          __DEV__ && console.log('👋 [Agora] User offline - UID:', uid, 'Reason:', reason);
+// Dev log removed
         },
         onConnectionStateChanged: (connection, state, reason) => {
           console.log('[AGORA] State:', state, 'Reason:', reason);
-          __DEV__ && console.log('🔗 [Agora] Connection state:', state, 'Reason:', reason);
+// Dev log removed
           console.log('[DEBUG-AGORA] Connection state changed! State:', state, 'Reason:', reason);
           console.log('[DEBUG-AGORA] Current connectionStatus before handling:', connectionStatus);
           
           // Agora states: 1=Disconnected, 2=Connecting, 3=Connected, 4=Reconnecting, 5=Failed
           if (state === 1 || state === 5) {
             // Disconnected (1) or Failed (5) - trigger reconnection
-            __DEV__ && console.log('🔗 [Agora] Connection lost, will reconnect...');
+// Dev log removed
             console.log('[DEBUG-AGORA] State is DISCONNECTED/FAILED, checking if should reconnect...');
             console.log('[DEBUG-AGORA] isReconnectingRef:', isReconnectingRef.current);
             if (!isMountedRef.current || !engineRef.current) {
@@ -630,13 +630,13 @@ export default function LiveStreamScreen({ navigation, route }) {
             }
           } else if (state === 3) {
             // State 3 is CONNECTED - this is success
-            __DEV__ && console.log('✅ [Agora] Connection established (state 3)');
+// Dev log removed
             setConnectionStatus('connected');
             reconnectAttemptRef.current = 0; // Reset counter on confirmed connection
           }
         },
         onConnectionLost: () => {
-          __DEV__ && console.log('🔗 [Agora] Connection lost - will attempt reconnect');
+// Dev log removed
           if (!isMountedRef.current || !engineRef.current) {
             console.log(`[DEBUG] Not mounted or no engine, skipping connection lost handler`);
             return;
@@ -647,26 +647,26 @@ export default function LiveStreamScreen({ navigation, route }) {
         }
       });
 
-      __DEV__ && console.log('🎬 [setup] Setting channel profile to LIVE BROADCASTING');
+// Dev log removed
       engine.setChannelProfile(ChannelProfileType.ChannelProfileLiveBroadcasting);
       
-      __DEV__ && console.log('🎬 [setup] Setting client role to BROADCASTER');
+// Dev log removed
       engine.setClientRole(ClientRoleType.ClientRoleBroadcaster);
       
-      __DEV__ && console.log('🎬 [setup] Enabling video...');
+// Dev log removed
       const videoEnableResult = engine.enableVideo();
-      __DEV__ && console.log('🎬 [setup] enableVideo result:', videoEnableResult);
+// Dev log removed
       
-      __DEV__ && console.log('🎬 [setup] Starting camera preview...');
+// Dev log removed
       const previewResult = engine.startPreview();
-      __DEV__ && console.log('🎬 [setup] startPreview result:', previewResult);
+// Dev log removed
       
-      __DEV__ && console.log('🎬 [setup] Is front camera:', isFrontCamera);
+// Dev log removed
 
-      __DEV__ && console.log('🎬 [setup] Joining Agora channel...');
-      __DEV__ && console.log('🎬 [setup] Channel:', channel);
-      __DEV__ && console.log('🎬 [setup] UID: 1');
-      __DEV__ && console.log('🎬 [setup] Token length:', hostToken?.length);
+// Dev log removed
+// Dev log removed
+// Dev log removed
+// Dev log removed
       
       try {
         const joinResult = await engine.joinChannel(hostToken, channel, 1, {
@@ -674,13 +674,13 @@ export default function LiveStreamScreen({ navigation, route }) {
           publishCameraTrack: true,
           publishMicrophoneTrack: true,
         });
-        __DEV__ && console.log('🎬 [setup] joinChannel result:', joinResult);
+// Dev log removed
       } catch (joinError) {
-        __DEV__ && console.error('❌ [setup] joinChannel FAILED:', joinError);
+// Dev log removed
         throw joinError;
       }
 
-      __DEV__ && console.log('✅ [setup] ========== SETUP COMPLETE ==========');
+// Dev log removed
       console.log(`[DEBUG] Setup complete - resetting attemptRef to 0`);
       reconnectAttemptRef.current = 0;
       setIsLive(true);
@@ -688,7 +688,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       durationIntervalRef.current = setInterval(() => {
         setStreamDuration(prev => prev + 1);
       }, 1000);
-      __DEV__ && console.log('🔥 Engine exists:', engineRef.current !== null);
+// Dev log removed
       setLoading(false);
       
       // Start cloud recording if saveToProfile is enabled
@@ -709,13 +709,13 @@ export default function LiveStreamScreen({ navigation, route }) {
       subscribeToQuestions(stream.id);
 
     } catch (e) {
-      __DEV__ && console.error('❌ [setup] ========== SETUP FAILED ==========');
-      __DEV__ && console.error('❌ [setup] Error:', e.message);
-      __DEV__ && console.error('❌ [setup] Error stack:', e.stack);
+// Dev log removed
+// Dev log removed
+// Dev log removed
       
       if (engineRef.current) {
         try { engineRef.current.release(); } catch (releaseError) {
-          __DEV__ && console.error('❌ [setup] Engine release error:', releaseError);
+// Dev log removed
         }
         engineRef.current = null;
       }
@@ -735,7 +735,7 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   async function cleanup() {
     console.log('[FUNC] cleanup() STARTED. Reason:', 'unmount');
-    __DEV__ && console.log('🧹 [cleanup] Cleaning up resources...');
+// Dev log removed
     console.log('[DEBUG-CLEANUP] Cleanup started. Setting isLive false, isMounted false');
     console.log('[DEBUG-OFFLINE] Cleanup running. isLive was:', isLive);
     isMountedRef.current = false;
@@ -743,7 +743,7 @@ export default function LiveStreamScreen({ navigation, route }) {
     setIsLive(false); // Ensure React state is also updated
     
     if (snapshotTimeoutRef.current) {
-      __DEV__ && console.log('🧹 [cleanup] Clearing snapshot timeout');
+// Dev log removed
       clearTimeout(snapshotTimeoutRef.current);
       snapshotTimeoutRef.current = null;
     }
@@ -764,26 +764,26 @@ export default function LiveStreamScreen({ navigation, route }) {
       questionsChannelRef.current = null;
     }
     if (engineRef.current) {
-      __DEV__ && console.log('🧹 [cleanup] Leaving Agora channel...');
+// Dev log removed
       try {
         engineRef.current.leaveChannel();
-        __DEV__ && console.log('✅ [cleanup] Left channel');
+// Dev log removed
       } catch (e) {
-        __DEV__ && console.error('❌ [cleanup] Leave channel error:', e);
+// Dev log removed
       }
       
-      __DEV__ && console.log('🧹 [cleanup] Releasing Agora engine...');
+// Dev log removed
       try {
         engineRef.current.release();
-        __DEV__ && console.log('✅ [cleanup] Engine released');
+// Dev log removed
       } catch (e) {
-        __DEV__ && console.error('❌ [cleanup] Release engine error:', e);
+// Dev log removed
       }
       console.log(`[DEBUG] Cleanup called. Setting engine to null.`);
       engineRef.current = null;
     }
     
-    __DEV__ && console.log('✅ [cleanup] Cleanup complete');
+// Dev log removed
   }
 
   function subscribeToChat(sid) {
@@ -1124,8 +1124,8 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   console.log('[RENDER] Showing LIVE UI');
-  __DEV__ && console.log('🎨 [render] Rendering live stream UI - isLive:', isLive);
-  __DEV__ && console.log('🎨 [render] Engine exists:', !!engineRef.current);
+// Dev log removed
+// Dev log removed
   
   return (
     <View style={styles.container}>

@@ -18,40 +18,25 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
 export default function BlockedUsersScreen({ navigation }) {
-  console.log('>>> BlockedUsersScreen RENDER TRIGGERED');
-  
   const insets = useSafeAreaInsets();
   const { user, unblockUser } = useUser();
-  console.log('👤 user?.id:', user?.id || 'UNDEFINED');
   const [blockedList, setBlockedList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
 
   const fetchBlockedUsers = useCallback(async () => {
-    console.log('🚀 FETCH BLOCKED USERS STARTED');
-    console.log('👤 user?.id:', user?.id);
-    
     if (!user?.id) {
-      console.log('❌ ERROR: No user ID, cannot fetch');
       setLoading(false);
       return;
     }
     
-    console.log('🔍 Fetching blocked users for:', user.id);
-    
     try {
-      // Step 1: Get blocked user IDs
-      console.log('📡 Querying Supabase for blocked_users...');
       const { data: blockedData, error: blockedError } = await supabase
         .from('blocked_users')
         .select('blocked_id')
         .eq('blocker_id', user.id);
       
-      console.log('✅ Supabase query executed');
-      console.log('📦 blockedData:', JSON.stringify(blockedData));
-      console.log('❌ blockedError:', blockedError);
-        
       if (blockedError) throw blockedError;
       
       if (!blockedData || blockedData.length === 0) {
@@ -60,10 +45,8 @@ export default function BlockedUsersScreen({ navigation }) {
       }
       
       const blockedIds = blockedData.map(b => b.blocked_id);
-      console.log('🔍 Found blocked IDs:', blockedIds);
       
       if (blockedIds.length === 0) {
-        console.log('📭 No blocked IDs found in database');
         setBlockedList([]);
         setLoading(false);
         return;
@@ -75,29 +58,19 @@ export default function BlockedUsersScreen({ navigation }) {
         .select('id, username, avatar_url')
         .in('id', blockedIds);
       
-      console.log('👤 Profiles data:', profilesData);
-      console.log('❌ Profiles error:', profilesError);
-        
       if (profilesError) throw profilesError;
-      
-      console.log('👤 Found profiles:', profilesData);
       
       // Step 3: Combine data
       const combined = blockedIds.map(blockedId => {
         const profile = profilesData?.find(p => p.id === blockedId);
-        console.log('🔄 Combining for ID:', blockedId, 'found profile:', profile);
         return {
           blocked_id: blockedId,
           profiles: profile || { username: 'Unknown User', avatar_url: null }
         };
       });
       
-      console.log('📋 Combined list:', combined);
-      
       setBlockedList(combined);
     } catch (err) {
-      console.error('💥 CRITICAL ERROR:', err);
-      console.error('📋 Error stack:', err.stack);
       setDialog({
         visible: true,
         title: 'Error',
@@ -106,7 +79,6 @@ export default function BlockedUsersScreen({ navigation }) {
         buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
       });
     } finally {
-      console.log('🏁 Fetch completed, setting loading false');
       setLoading(false);
       setRefreshing(false);
     }
@@ -114,14 +86,12 @@ export default function BlockedUsersScreen({ navigation }) {
 
   // Initial mount fetch
   useEffect(() => {
-    console.log('⚡ useEffect running (initial mount), user?.id:', user?.id);
     fetchBlockedUsers();
   }, [user?.id, fetchBlockedUsers]);
 
   // Refetch when screen comes into focus (handles navigation caching)
   useFocusEffect(
     useCallback(() => {
-      console.log('👁️ useFocusEffect TRIGGERED - screen focused');
       fetchBlockedUsers();
     }, [fetchBlockedUsers])
   );
@@ -179,11 +149,7 @@ export default function BlockedUsersScreen({ navigation }) {
     </View>
   );
 
-  console.log('🎨 Rendering with blockedList:', blockedList);
-  console.log('⏳ Loading state:', loading);
-
   if (loading) {
-    console.log('⏳ Showing loading spinner');
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <ActivityIndicator color={COLORS.gold} size="large" />
@@ -191,8 +157,6 @@ export default function BlockedUsersScreen({ navigation }) {
       </View>
     );
   }
-
-  console.log('🔍 Checking empty state, length:', blockedList.length);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -205,7 +169,6 @@ export default function BlockedUsersScreen({ navigation }) {
       </View>
 
       {blockedList.length === 0 ? (
-        console.log('📭 Showing empty state, blockedList:', blockedList),
         <View style={styles.emptyState}>
           <Ionicons name="shield-checkmark" size={64} color={COLORS.gold} />
           <Text style={styles.emptyText}>No blocked users</Text>
