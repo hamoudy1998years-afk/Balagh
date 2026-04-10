@@ -1,4 +1,4 @@
-﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert } from 'react-native';
+﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -131,11 +131,12 @@ function MainTabs({ session }) {
           backgroundColor: '#1a2e44',
           borderTopColor: 'rgba(255,255,255,0.06)',
           borderTopWidth: 1,
-          marginHorizontal: 12,
-          marginBottom: 12,
-          borderRadius: 22,
-          height: 60 + (insets.bottom > 0 ? insets.bottom - 8 : 0),
-          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
+          marginHorizontal: 0,
+          marginBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : 0, android: 0 }),
+          borderRadius: 20,
+          height: Platform.select({ ios: 55 + (insets.bottom > 0 ? 8 : 0), android: 55 }),
+          paddingBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : 8, android: 8 }),
+          paddingTop: 0,
           position: 'absolute',
           elevation: 0,
         },
