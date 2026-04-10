@@ -107,25 +107,6 @@ function ASwitch({ value, onValueChange, label }) {
   );
 }
 
-function ThemeToggle({ isDark, onToggle }) {
-  const anim = useRef(new Animated.Value(isDark ? 1 : 0)).current;
-  const toggle = () => {
-    Animated.spring(anim, { toValue: isDark ? 0 : 1, useNativeDriver: false, tension: 80, friction: 8 }).start();
-    onToggle();
-  };
-  const knobX   = anim.interpolate({ inputRange: [0, 1], outputRange: [2, 26] });
-  const trackBg = anim.interpolate({ inputRange: [0, 1], outputRange: [MUTED, `${COLORS.gold}30`] });
-  return (
-    <TouchableOpacity onPress={toggle} activeOpacity={0.8}>
-      <Animated.View style={[styles.toggleTrack, { backgroundColor: trackBg }]}>
-        <Animated.View style={[styles.toggleKnob, { left: knobX }]}>
-          <Text style={{ fontSize: 11 }}>{isDark ? '🌙' : '☀️'}</Text>
-        </Animated.View>
-      </Animated.View>
-    </TouchableOpacity>
-  );
-}
-
 function Card({ children }) {
   return <View style={styles.card}>{children}</View>;
 }
@@ -214,7 +195,7 @@ export default function SettingsScreen({ navigation }) {
   });
   const [userToUnblock, setUserToUnblock] = useState(null);
 
-  const [isDark, setIsDark] = useState(false);
+
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   useEffect(() => { init(); }, []);
@@ -408,10 +389,6 @@ export default function SettingsScreen({ navigation }) {
 
   const handleNavigateNotifications = React.useCallback(() => {
     setScreen('notifications');
-  }, []);
-
-  const handleNavigateAppearance = React.useCallback(() => {
-    setScreen('appearance');
   }, []);
 
   const handleNavigateHelp = React.useCallback(() => {
@@ -675,17 +652,6 @@ export default function SettingsScreen({ navigation }) {
     </SubScreen>
   );
 
-  if (screen === 'appearance') return (
-    <SubScreen title="Appearance" onBack={() => setScreen(null)} insets={insets}>
-      <GroupLabel text="THEME" />
-      <Card>
-        <Row icon={isDark ? '🌙' : '☀️'} label="Dark Mode"
-          sublabel={isDark ? 'Currently using dark theme' : 'Currently using light theme'}
-          right={<ThemeToggle isDark={isDark} onToggle={() => setIsDark(p => !p)} />} last />
-      </Card>
-    </SubScreen>
-  );
-
   if (screen === 'help') return (
     <SubScreen title="Help & Support" onBack={() => setScreen(null)} insets={insets}>
       <GroupLabel text="SUPPORT" />
@@ -873,7 +839,6 @@ export default function SettingsScreen({ navigation }) {
           <CategoryButton icon="🔒" label="Privacy & Safety" sublabel="Comments, like count, safety"         onPress={() => setScreen('privacy')} />
           <CategoryButton icon="🚫" label="Blocked Users"    sublabel="Manage accounts you've blocked"       onPress={handleNavigateBlocked} />
           <CategoryButton icon="🔔" label="Notifications"    sublabel="Likes, comments, followers, messages" onPress={handleNavigateNotifications} />
-          <CategoryButton icon="🎨" label="Appearance"       sublabel="Dark mode & theme"                    onPress={handleNavigateAppearance} />
           <CategoryButton icon="💬" label="Help & Support"   sublabel="FAQ, contact us, terms, about"        onPress={handleNavigateHelp} last />
         </Card>
         <TouchableOpacity 
@@ -1033,8 +998,7 @@ const styles = StyleSheet.create({
   legalBody:       { fontSize: 13, color: SUBTEXT, lineHeight: 22 },
   legalFooter:     { alignItems: 'center', paddingVertical: 24 },
   legalFooterText: { fontSize: 12, color: '#ccc', textAlign: 'center' },
-  toggleTrack: { width: 52, height: 28, borderRadius: 14, justifyContent: 'center' },
-  toggleKnob:  { position: 'absolute', width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+
   modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   modalBox:            { backgroundColor: '#fff', borderRadius: 24, padding: 28, alignItems: 'center', width: '100%', borderWidth: 0.5, borderColor: BORDER },
   modalIcon:           { fontSize: 40, marginBottom: 12 },
