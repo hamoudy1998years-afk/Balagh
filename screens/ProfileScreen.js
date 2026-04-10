@@ -995,19 +995,21 @@ export default function ProfileScreen({ route, navigation }) {
       ) : (
         <View style={styles.actionButtons}>
           <View style={{ flexDirection: 'row', gap: 10 }}>
+            {!blocked && (
+              <AnimatedButton 
+                style={[styles.followBtn, following && styles.followingBtn, { flex: 1 }]} 
+                onPress={handleFollow}
+                accessibilityLabel={following ? "Unfollow user" : "Follow user"}
+                accessibilityRole="button"
+                accessibilityState={{ selected: following }}
+              >
+                <Text style={[styles.followBtnText, following && styles.followingBtnText]}>
+                  {following ? '✓ Following' : '+ Follow'}
+                </Text>
+              </AnimatedButton>
+            )}
             <AnimatedButton 
-              style={[styles.followBtn, following && styles.followingBtn, { flex: 1 }]} 
-              onPress={handleFollow}
-              accessibilityLabel={following ? "Unfollow user" : "Follow user"}
-              accessibilityRole="button"
-              accessibilityState={{ selected: following }}
-            >
-              <Text style={[styles.followBtnText, following && styles.followingBtnText]}>
-                {following ? '✓ Following' : '+ Follow'}
-              </Text>
-            </AnimatedButton>
-            <AnimatedButton 
-              style={styles.blockBtn} 
+              style={[styles.blockBtn, blocked && { flex: 1 }]} 
               onPress={handleBlock}
               accessibilityLabel={blocked ? "Unblock user" : "Block user"}
               accessibilityRole="button"
