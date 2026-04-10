@@ -394,11 +394,16 @@ function App() {
     if (__DEV__) console.log('[DEEP LINK] handleDeepLink called with:', url);
     if (!url || !url.startsWith('bushrann://')) return;
 
+    // Ignore Expo development client URLs (development only)
+    if (url.includes('expo-development-client')) {
+      return;
+    }
+
     // Validate deep link route
     const validRoutes = ['auth/callback', 'video', 'user', 'live', 'go-live'];
     const path = url.replace('bushrann://', '').split('?')[0];
     if (!validRoutes.some(route => path.startsWith(route))) {
-      console.warn('[DeepLink] Invalid route:', url);
+      if (__DEV__) console.log('[DeepLink] Unhandled route:', url);
       return;
     }
 
