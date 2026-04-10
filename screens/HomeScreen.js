@@ -737,6 +737,7 @@ export default function HomeScreen({ navigation }) {
 
   const renderTabBar = useCallback((props) => {
     const { navigationState, position } = props;
+    const isLiveTab = index === 2;
     return (
       <View style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 10, paddingHorizontal: 16 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -765,7 +766,7 @@ export default function HomeScreen({ navigation }) {
                         marginRight: 6,
                       }} />
                       <Text style={{
-                        color: isFocusedTab ? '#FF3B30' : 'rgba(255,59,48,0.6)',
+                        color: isFocusedTab ? '#FF3B30' : (isLiveTab ? 'rgba(255,59,48,0.5)' : 'rgba(255,59,48,0.6)'),
                         fontSize: 15,
                         fontWeight: isFocusedTab ? '700' : '600',
                         letterSpacing: 0.5,
@@ -775,7 +776,7 @@ export default function HomeScreen({ navigation }) {
                     </View>
                   ) : (
                     <Text style={{
-                      color: isFocusedTab ? COLORS.gold : 'rgba(255,255,255,0.6)',
+                      color: isFocusedTab ? (isLiveTab ? '#1a2e44' : COLORS.gold) : (isLiveTab ? 'rgba(26,46,68,0.5)' : 'rgba(255,255,255,0.6)'),
                       fontSize: 15,
                       fontWeight: isFocusedTab ? '700' : '600',
                     }}>
@@ -787,7 +788,7 @@ export default function HomeScreen({ navigation }) {
                     alignSelf: 'center',
                     width: 30,
                     height: 3,
-                    backgroundColor: COLORS.gold,
+                    backgroundColor: isLiveTab ? '#1a2e44' : COLORS.gold,
                     borderRadius: 2,
                     opacity,
                   }} />
