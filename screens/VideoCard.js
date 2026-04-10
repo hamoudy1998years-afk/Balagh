@@ -9,7 +9,7 @@ import { videoCache } from '../utils/VideoCache';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
   useWindowDimensions, Image, PanResponder, Animated, Linking,
-  Pressable, Alert,
+  Pressable, Alert, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
@@ -548,45 +548,51 @@ function VideoCard({
 
   return (
     <Animated.View style={[styles.card, { height: cardHeight, opacity: isUserBlocked ? 0 : 1 }]}>
-      <Video
-        ref={player}
-        source={{ uri: videoUri }}
-        style={styles.video}
-        resizeMode="contain"
-        repeat={true}
-        paused={!isActive || !isTabActive || paused}
-        muted={false}
-        playInBackground={false}
-        playWhenInactive={false}
-        ignoreSilentSwitch="ignore"
-        progressUpdateInterval={250}
-        bufferConfig={{
-          minBufferMs: 15000,
-          maxBufferMs: 50000,
-          bufferForPlaybackMs: 2500,
-          bufferForPlaybackAfterRebufferMs: 5000,
-        }}
-        onError={(e) => {
+      {videoUri ? (
+        <Video
+          ref={player}
+          source={{ uri: videoUri }}
+          style={styles.video}
+          resizeMode="contain"
+          repeat={true}
+          paused={!isActive || !isTabActive || paused}
+          muted={false}
+          playInBackground={false}
+          playWhenInactive={false}
+          ignoreSilentSwitch="ignore"
+          progressUpdateInterval={250}
+          bufferConfig={{
+            minBufferMs: 15000,
+            maxBufferMs: 50000,
+            bufferForPlaybackMs: 2500,
+            bufferForPlaybackAfterRebufferMs: 5000,
+          }}
+          onError={(e) => {
 
-          __DEV__ && console.log('Video error:', e);
-        }}
-        onLoad={(data) => {
-          if (data?.duration) {
-            setDuration(data.duration);
-            durationRef.current = data.duration; // Set ref immediately, no useEffect lag
-            isVideoReadyRef.current = true;
-          }
-        }}
-        onProgress={(data) => {
-          if (isSeeking.current) return;  // Skip updates while user is seeking
-          if (data?.currentTime && data?.seekableDuration) {
-            setCurrentTime(data.currentTime);
-            const progress = data.currentTime / data.seekableDuration;
-            progressAnim.setValue(progress);
-          }
-        }}
-        useTextureView={false}
-      />
+            __DEV__ && console.log('Video error:', e);
+          }}
+          onLoad={(data) => {
+            if (data?.duration) {
+              setDuration(data.duration);
+              durationRef.current = data.duration; // Set ref immediately, no useEffect lag
+              isVideoReadyRef.current = true;
+            }
+          }}
+          onProgress={(data) => {
+            if (isSeeking.current) return;  // Skip updates while user is seeking
+            if (data?.currentTime && data?.seekableDuration) {
+              setCurrentTime(data.currentTime);
+              const progress = data.currentTime / data.seekableDuration;
+              progressAnim.setValue(progress);
+            }
+          }}
+          useTextureView={false}
+        />
+      ) : (
+        <View style={[styles.video, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator color={COLORS.gold} size="large" />
+        </View>
+      )}
 
       {/* Full-screen tap area for pause/play (behind progress bar) */}
       <Pressable
