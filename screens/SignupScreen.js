@@ -261,7 +261,7 @@ export default function SignupScreen({ navigation }) {
                 onChangeText={setUsername}
                 onFocus={() => setFocusedField('username')}
                 onBlur={() => setFocusedField(null)}
-                autoCapitalize="none"
+                autoCapitalize="sentences"
                 autoComplete="off"
                 autoCorrect={false}
                 accessibilityLabel="Username input field"
@@ -283,8 +283,8 @@ export default function SignupScreen({ navigation }) {
                 onChangeText={setEmail}
                 onFocus={() => setFocusedField('email')}
                 onBlur={() => setFocusedField(null)}
+                autoCapitalize="sentences"
                 keyboardType="email-address"
-                autoCapitalize="none"
                 autoComplete="off"
                 autoCorrect={false}
                 accessibilityLabel="Email input field"
@@ -306,8 +306,8 @@ export default function SignupScreen({ navigation }) {
                 onChangeText={setPhone}
                 onFocus={() => setFocusedField('phone')}
                 onBlur={() => setFocusedField(null)}
+                autoCapitalize="sentences"
                 keyboardType="phone-pad"
-                autoCapitalize="none"
                 autoComplete="off"
                 accessibilityLabel="Phone number input field"
                 accessibilityHint="Enter your phone number"

@@ -781,7 +781,7 @@ export default function LoginScreen({ navigation }) {
                 onFocus={handleIdentifierFocus}
                 onBlur={handleIdentifierBlur}
                 onPressIn={handleIdentifierFocus}
-                autoCapitalize="none"
+                autoCapitalize="sentences"
                 autoComplete="off"
                 autoCorrect={false}
                 importantForAutofill="no"
