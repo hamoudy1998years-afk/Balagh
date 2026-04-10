@@ -40,6 +40,7 @@ const initialProfileState = {
   followingCount: 0,
   isScholar: false,
   scholarData: null,
+  hasPendingApplication: false,
 };
 
 function profileReducer(state, action) {
@@ -49,6 +50,7 @@ function profileReducer(state, action) {
     case 'SET_PROFILE': return { ...state, profile: action.profile };
     case 'UPDATE_AVATAR': return { ...state, profile: state.profile ? { ...state.profile, avatar_url: action.url } : state.profile };
     case 'SET_SCHOLAR': return { ...state, isScholar: action.isScholar, scholarData: action.scholarData };
+    case 'SET_PENDING_APPLICATION': return { ...state, hasPendingApplication: action.hasPendingApplication };
     case 'SET_FOLLOW_COUNTS': return { ...state, followersCount: action.followersCount, followingCount: action.followingCount };
     case 'SET_FOLLOWING': return { ...state, following: action.following };
     case 'SET_BLOCKED': return { ...state, blocked: action.blocked };
@@ -201,7 +203,7 @@ export default function ProfileScreen({ route, navigation }) {
   const [videoState, dispatchVideo] = useReducer(videoReducer, initialVideoState);
   const [uiState, dispatchUI] = useReducer(uiReducer, initialUIState);
 
-  const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData } = profileState;
+  const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData, hasPendingApplication } = profileState;
   const { publicVideos, privateVideos, likedVideos, livestreams, totalLikes, activeTab } = videoState;
   const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress, toast } = uiState;
 
@@ -460,8 +462,17 @@ export default function ProfileScreen({ route, navigation }) {
         .limit(1)
         .maybeSingle();
       dispatchProfile({ type: 'SET_SCHOLAR', isScholar: true, scholarData: scholarInfo ?? null });
+      dispatchProfile({ type: 'SET_PENDING_APPLICATION', hasPendingApplication: false });
     } else {
+      // Check for pending application
+      const { data: pendingApp } = await supabase
+        .from('scholar_applications')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('status', 'pending')
+        .maybeSingle();
       dispatchProfile({ type: 'SET_SCHOLAR', isScholar: false, scholarData: null });
+      dispatchProfile({ type: 'SET_PENDING_APPLICATION', hasPendingApplication: !!pendingApp });
     }
   }
 
@@ -976,10 +987,20 @@ export default function ProfileScreen({ route, navigation }) {
 
       {isOwnProfile ? (
         <>
-          {!isScholar && (
+          {!isScholar && !hasPendingApplication && (
             <View style={styles.actionButtons}>
               <AnimatedButton style={styles.scholarApplyBtn} onPress={handleNavigateApplyScholar}>
                 <Text style={styles.scholarApplyBtnText}>🎓 Apply as Scholar</Text>
+              </AnimatedButton>
+            </View>
+          )}
+          {!isScholar && hasPendingApplication && (
+            <View style={styles.actionButtons}>
+              <AnimatedButton 
+                style={[styles.scholarApplyBtn, { backgroundColor: '#94a3b8' }]} 
+                disabled={true}
+              >
+                <Text style={styles.scholarApplyBtnText}>🎓 Application Pending</Text>
               </AnimatedButton>
             </View>
           )}
@@ -1056,7 +1077,7 @@ export default function ProfileScreen({ route, navigation }) {
         </AnimatedButton>
       </View>
     </View>
-  ), [profile, isScholar, scholarData, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation]);
+  ), [profile, isScholar, scholarData, hasPendingApplication, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation]);
 
   const activeVideos = activeTab === 'videos' 
     ? publicVideos.filter(v => !v.video_url?.includes('.m3u8'))
