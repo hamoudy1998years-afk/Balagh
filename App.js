@@ -132,7 +132,7 @@ function MainTabs({ session }) {
           borderTopColor: 'rgba(255,255,255,0.06)',
           borderTopWidth: 1,
           marginHorizontal: 0,
-          marginBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : 0, android: 0 }),
+          marginBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : -1, android: -1 }),
           borderRadius: 20,
           height: Platform.select({ ios: 55 + (insets.bottom > 0 ? 8 : 0), android: 55 }),
           paddingBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : 8, android: 8 }),
