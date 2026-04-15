@@ -5,7 +5,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Switch, Animated, Alert, Image, Modal,
   TextInput, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform, BackHandler,
-  Pressable, Dimensions,
+  Pressable, Dimensions, Linking,
 } from 'react-native';
 // BlurView removed - using standard iOS blur effect
 import { supabase } from '../lib/supabase';
@@ -662,7 +662,14 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="LEGAL" />
       <Card>
         <Row icon="📄" label="Terms of Service" onPress={handleNavigateTerms} />
-        <Row icon="🔏" label="Privacy Policy" onPress={handleNavigatePrivacyPolicy} sublabel={CONFIG.PRIVACY_POLICY_URL} last />
+        <Row icon="🔏" label="Privacy Policy" onPress={handleNavigatePrivacyPolicy} sublabel={CONFIG.PRIVACY_POLICY_URL} />
+        <Row 
+          icon="⚖️" 
+          label="Content Policy" 
+          sublabel="Copyright & DMCA"
+          onPress={() => Linking.openURL(CONFIG.CONTENT_POLICY_URL)} 
+          last 
+        />
       </Card>
       <GroupLabel text="APP INFO" />
       <Card>

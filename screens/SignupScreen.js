@@ -1,7 +1,7 @@
 import {
   View, Text, TextInput, StyleSheet,
   TouchableOpacity, Animated,
-  Platform, StatusBar,
+  Platform, StatusBar, Linking,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useState, useRef, useCallback } from 'react';
@@ -10,6 +10,7 @@ import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import AnimatedButton from './AnimatedButton';
 import ModernDialog from './ModernDialog';
 import { COLORS } from '../constants/theme';
+import { CONFIG } from '../constants/api';
 import { ROUTES } from '../constants/routes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUser } from '../context/UserContext';
@@ -35,6 +36,7 @@ export default function SignupScreen({ navigation }) {
     type: 'info', 
     buttons: [] 
   });
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const passwordEyeOpacity = useRef(new Animated.Value(0)).current;
   const confirmEyeOpacity = useRef(new Animated.Value(0)).current;
@@ -132,6 +134,16 @@ export default function SignupScreen({ navigation }) {
         buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
       }); 
       return; 
+    }
+    if (!acceptedTerms) {
+      setDialog({
+        visible: true,
+        title: 'Terms Required',
+        message: 'You must agree to the Terms of Service and Content Policy to create an account.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }]
+      });
+      return;
     }
 
     const hasPhone = phone.trim().length > 0;
@@ -390,6 +402,33 @@ export default function SignupScreen({ navigation }) {
             * Username, email, and password are required.
           </Text>
 
+          {/* Terms Checkbox */}
+          <TouchableOpacity 
+            style={styles.termsRow}
+            onPress={() => setAcceptedTerms(!acceptedTerms)}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
+              {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
+            </View>
+            <Text style={styles.termsText}>
+              I agree to the{' '}
+              <Text 
+                style={styles.termsLink}
+                onPress={() => Linking.openURL(CONFIG.TERMS_URL)}
+              >
+                Terms of Service
+              </Text>
+              {' '}and{' '}
+              <Text 
+                style={styles.termsLink}
+                onPress={() => Linking.openURL(CONFIG.CONTENT_POLICY_URL)}
+              >
+                Content Policy
+              </Text>
+            </Text>
+          </TouchableOpacity>
+
           {/* Signup Button */}
           <AnimatedButton
             style={[styles.button, loading && { opacity: 0.7 }]}
@@ -577,5 +616,40 @@ const styles = StyleSheet.create({
   linkBold: {
     color: COLORS.gold,
     fontWeight: '700',
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+    marginTop: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: COLORS.gold,
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: COLORS.gold,
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  termsText: {
+    flex: 1,
+    color: '#8B92A8',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  termsLink: {
+    color: COLORS.gold,
+    fontWeight: '600',
   },
 });

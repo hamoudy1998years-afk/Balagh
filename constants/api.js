@@ -1,8 +1,9 @@
 // Hardcoded configuration (move to env vars in production)
 export const CONFIG = {
   SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
-  PRIVACY_POLICY_URL: 'https://sites.google.com/view/bushrann',
+  PRIVACY_POLICY_URL: 'https://sites.google.com/view/bushrann/privacy-policy',
   TERMS_URL: 'https://sites.google.com/view/bushrann/terms',
+  CONTENT_POLICY_URL: 'https://sites.google.com/view/bushrann/content-policy',
 };
 
 // API Configuration

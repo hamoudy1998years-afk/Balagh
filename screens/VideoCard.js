@@ -715,6 +715,7 @@ function VideoCard({
           { text: 'Spam', onPress: () => handleReport('spam') },
           { text: 'Inappropriate', onPress: () => handleReport('inappropriate') },
           { text: 'Harassment', onPress: () => handleReport('harassment') },
+          { text: 'Copyright Violation', onPress: () => handleReport('copyright') },
           { text: 'Cancel', style: 'cancel', onPress: () => setShowReportSheet(false) },
         ]}
         onDismiss={() => setShowReportSheet(false)}
