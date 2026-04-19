@@ -54,7 +54,7 @@ function profileReducer(state, action) {
     case 'SET_PENDING_APPLICATION': return { ...state, hasPendingApplication: action.hasPendingApplication };
     case 'SET_FOLLOW_COUNTS': return { ...state, followersCount: action.followersCount, followingCount: action.followingCount };
     case 'SET_FOLLOWING': return { ...state, following: action.following };
-    case 'SET_BLOCKED': return { ...state, blocked: action.blocked };
+    case 'SET_ALL_PROFILE': return { ...state, profile: action.profile, followersCount: action.followersCount, followingCount: action.followingCount, isScholar: action.isScholar, scholarData: action.scholarData, hasPendingApplication: action.hasPendingApplication };
     case 'FOLLOW_CHANGE': return { ...state, following: action.following, followersCount: Math.max(0, state.followersCount + action.delta) };
     case 'BLOCK': return { ...state, blocked: true, following: false };
     case 'UNBLOCK': return { ...state, blocked: false };
@@ -424,15 +424,15 @@ export default function ProfileScreen({ route, navigation }) {
           ? supabase.from('scholar_applications').select('*').eq('user_id', userId).order('submitted_at', { ascending: false }).limit(1).maybeSingle()
           : supabase.from('scholar_applications').select('id').eq('user_id', userId).eq('status', 'pending').maybeSingle(),
       ]);
-      dispatchProfile({ type: 'SET_PROFILE', profile: data });
-      dispatchProfile({ type: 'SET_FOLLOW_COUNTS', followersCount: frsCount ?? 0, followingCount: fngCount ?? 0 });
-      if (data.is_scholar) {
-        dispatchProfile({ type: 'SET_SCHOLAR', isScholar: true, scholarData: scholarResult.data ?? null });
-        dispatchProfile({ type: 'SET_PENDING_APPLICATION', hasPendingApplication: false });
-      } else {
-        dispatchProfile({ type: 'SET_SCHOLAR', isScholar: false, scholarData: null });
-        dispatchProfile({ type: 'SET_PENDING_APPLICATION', hasPendingApplication: !!scholarResult.data });
-      }
+      dispatchProfile({
+        type: 'SET_ALL_PROFILE',
+        profile: data,
+        followersCount: frsCount ?? 0,
+        followingCount: fngCount ?? 0,
+        isScholar: data.is_scholar === true,
+        scholarData: data.is_scholar ? (scholarResult.data ?? null) : null,
+        hasPendingApplication: data.is_scholar ? false : !!scholarResult.data,
+      });
       dispatchUI({ type: 'SET_LOADING', loading: false });
     }
   }
