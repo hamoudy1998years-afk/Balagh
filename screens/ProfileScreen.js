@@ -372,7 +372,26 @@ export default function ProfileScreen({ route, navigation }) {
         loadProfile(viewingId),
         loadVideos(viewingId, ownProfile),
         loadLivestreams(viewingId),
-      ]).catch(async (e) => {
+      ]).then(([profileResult, videoResult, _]) => {
+        if (profileResult) {
+          const { data, frsCount, fngCount, scholarResult } = profileResult;
+          dispatchProfile({
+            type: 'SET_ALL_PROFILE',
+            profile: data,
+            followersCount: frsCount ?? 0,
+            followingCount: fngCount ?? 0,
+            isScholar: data.is_scholar === true,
+            scholarData: data.is_scholar ? (scholarResult.data ?? null) : null,
+            hasPendingApplication: data.is_scholar ? false : !!scholarResult.data,
+          });
+        }
+        if (videoResult) {
+          const { pubVideos, privVideos } = videoResult;
+          dispatchVideo({ type: 'SET_PUBLIC', videos: pubVideos, totalLikes: pubVideos.reduce((sum, v) => sum + (v.likes_count ?? 0), 0) });
+          dispatchVideo({ type: 'SET_PRIVATE', videos: privVideos });
+        }
+        dispatchUI({ type: 'SET_LOADING', loading: false });
+      }).catch(async (e) => {
         
         // If API fails, try to use cached data
         try {
@@ -416,37 +435,27 @@ export default function ProfileScreen({ route, navigation }) {
 
   async function loadProfile(userId) {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (data) {
-      const [{ count: frsCount }, { count: fngCount }, scholarResult] = await Promise.all([
-        supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
-        supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId),
-        data.is_scholar
-          ? supabase.from('scholar_applications').select('*').eq('user_id', userId).order('submitted_at', { ascending: false }).limit(1).maybeSingle()
-          : supabase.from('scholar_applications').select('id').eq('user_id', userId).eq('status', 'pending').maybeSingle(),
-      ]);
-      dispatchProfile({
-        type: 'SET_ALL_PROFILE',
-        profile: data,
-        followersCount: frsCount ?? 0,
-        followingCount: fngCount ?? 0,
-        isScholar: data.is_scholar === true,
-        scholarData: data.is_scholar ? (scholarResult.data ?? null) : null,
-        hasPendingApplication: data.is_scholar ? false : !!scholarResult.data,
-      });
-      dispatchUI({ type: 'SET_LOADING', loading: false });
-    }
+    if (!data) return null;
+    const [{ count: frsCount }, { count: fngCount }, scholarResult] = await Promise.all([
+      supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
+      supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId),
+      data.is_scholar
+        ? supabase.from('scholar_applications').select('*').eq('user_id', userId).order('submitted_at', { ascending: false }).limit(1).maybeSingle()
+        : supabase.from('scholar_applications').select('id').eq('user_id', userId).eq('status', 'pending').maybeSingle(),
+    ]);
+    return { data, frsCount, fngCount, scholarResult };
   }
 
   async function loadVideos(userId, isOwner) {
     const { data: pub } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', false)
       .order('is_pinned', { ascending: false }).order('pin_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
     const pubVideos = pub ?? [];
-    
-    dispatchVideo({ type: 'SET_PUBLIC', videos: pubVideos, totalLikes: pubVideos.reduce((sum, v) => sum + (v.likes_count ?? 0), 0) });
+    let privVideos = [];
     if (isOwner) {
       const { data: priv } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', true).order('created_at', { ascending: false });
-      dispatchVideo({ type: 'SET_PRIVATE', videos: priv ?? [] });
+      privVideos = priv ?? [];
     }
+    return { pubVideos, privVideos };
   }
 
   async function loadLivestreams(userId) {
@@ -905,7 +914,9 @@ export default function ProfileScreen({ route, navigation }) {
     );
   }, [activeTab, publicVideos, privateVideos, livestreams, likedVideos, openVideo, handleLongPress, navigation]);
 
-  const renderHeader = useCallback(() => (
+  const renderHeader = useCallback(() => {
+    if (!profile) return null;
+    return (
     <View style={styles.headerSection}>
       <View style={styles.avatarSection}>
         <View style={{ position: 'relative' }}>
@@ -1167,7 +1178,8 @@ export default function ProfileScreen({ route, navigation }) {
         </AnimatedButton>
       </View>
     </View>
-  ), [profile, isScholar, scholarData, hasPendingApplication, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation, isAdmin, isSuperAdmin, targetIsAdmin, adminCount, addingAdmin, handleAddAdmin]);
+    );
+  }, [profile, isScholar, scholarData, hasPendingApplication, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation, isAdmin, isSuperAdmin, targetIsAdmin, adminCount, addingAdmin, handleAddAdmin]);
 
   const activeVideos = activeTab === 'videos' 
     ? publicVideos.filter(v => !v.video_url?.includes('.m3u8'))
