@@ -252,9 +252,7 @@ export default function ProfileScreen({ route, navigation }) {
       
       // Subscribe to network changes
       const unsubscribe = NetInfo.addEventListener(state => {
-        __DEV__ && console.log('[DEBUG] NetInfo listener - isConnected:', state.isConnected, 'isInternetReachable:', state.isInternetReachable);
         const offline = !state.isConnected || state.isInternetReachable === false;
-        __DEV__ && console.log('[DEBUG] NetInfo change - offline:', offline);
         setIsOffline(offline);
       });
       
@@ -280,7 +278,6 @@ export default function ProfileScreen({ route, navigation }) {
       }
       
       // DEBUG: Log focus state
-      __DEV__ && console.log('[DEBUG] Profile focus - current isOffline:', isOffline);
       
       // Check if we need to load a different profile
       const currentId = targetUserId ?? globalUser?.id ?? cachedUser?.id;
@@ -291,18 +288,15 @@ export default function ProfileScreen({ route, navigation }) {
       // Always refresh on focus to get latest data (especially after livestream)
       if (currentId) {
         if (currentId !== lastUserIdRef.current) {
-          __DEV__ && console.log('[ProfileScreen] User changed - loading profile for:', currentId);
           lastUserIdRef.current = currentId;
         }
         
         // Delay fetch slightly to allow background save to complete
         // This ensures new livestreams appear immediately after ending stream
         initTimer = setTimeout(() => {
-          __DEV__ && console.log('[ProfileScreen] Refreshing profile for:', currentId);
           init(currentId);
-        }, 500); // 500ms delay
+        }, 0);
       } else if (activeUser) {
-        __DEV__ && console.log('[ProfileScreen] Loading profile for:', currentId);
         init(currentId);
       }
       
@@ -333,8 +327,6 @@ export default function ProfileScreen({ route, navigation }) {
 
   async function init(viewingId) {
     const user = globalUser || cachedUser;
-    __DEV__ && console.log('[ProfileScreen] init() called - user:', user?.id, 'viewingId:', viewingId, 'isOffline:', isOffline);
-    __DEV__ && console.log('[DEBUG] init() called - isOffline:', isOffline);
     
     // Only reset video state - preserve profile during loading to avoid blank screen
     dispatchVideo({ type: 'RESET' });
@@ -343,7 +335,6 @@ export default function ProfileScreen({ route, navigation }) {
 
     if (user && viewingId) {
       const ownProfile = viewingId === user.id;
-      __DEV__ && console.log('[ProfileScreen] loading profile for userId:', viewingId, 'isOwnProfile:', ownProfile);
       dispatchProfile({ type: 'SET_USER', currentUser: user, isOwnProfile: ownProfile });
       dispatchUI({ type: 'SET_LOADING', loading: false });
 
@@ -367,16 +358,13 @@ export default function ProfileScreen({ route, navigation }) {
 
       // If offline, skip network requests and show cached data only
       if (isOffline) {
-        __DEV__ && console.log('[ProfileScreen] Offline mode - showing cached data only');
         // Try to load from cache if available, but don't fail
         try {
           const cachedProfile = await userCache.get();
-          __DEV__ && console.log('[DEBUG] Cached profile:', cachedProfile ? 'YES' : 'NO', 'Keys:', cachedProfile ? Object.keys(cachedProfile) : 'none');
           if (cachedProfile) {
             dispatchProfile({ type: 'SET_PROFILE', profile: cachedProfile });
           }
         } catch (e) {
-          __DEV__ && console.log('[ProfileScreen] No cached profile data');
         }
         return;
       }
@@ -386,13 +374,10 @@ export default function ProfileScreen({ route, navigation }) {
         loadVideos(viewingId, ownProfile),
         loadLivestreams(viewingId),
       ]).catch(async (e) => {
-        __DEV__ && console.error('Profile load error (offline?):', e);
-        __DEV__ && console.log('[DEBUG] Error in init - error:', e.message);
         
         // If API fails, try to use cached data
         try {
           const cachedProfile = await userCache.get();
-          __DEV__ && console.log('[DEBUG] Error handler - cached profile:', cachedProfile ? 'YES' : 'NO');
           if (cachedProfile) {
             // Keep showing cached data, show offline toast
             dispatchProfile({ type: 'SET_PROFILE', profile: cachedProfile });
@@ -404,7 +389,6 @@ export default function ProfileScreen({ route, navigation }) {
             setTimeout(() => dispatchUI({ type: 'SET_TOAST', toast: null }), 3000);
           }
         } catch (cacheError) {
-          __DEV__ && console.error('Error reading cache:', cacheError);
         }
       });
 
@@ -464,7 +448,6 @@ export default function ProfileScreen({ route, navigation }) {
       .order('created_at', { ascending: false });
     
     if (error) {
-      __DEV__ && console.error('[ProfileScreen] loadLivestreams error:', error);
     }
     
     console.log('[PROFILE] Fetched livestreams count:', data?.length);
@@ -580,7 +563,6 @@ export default function ProfileScreen({ route, navigation }) {
       dispatchProfile({ type: 'UPDATE_AVATAR', url: cacheBustedUrl });
     } catch (e) {
       setDialog({ visible: true, title: 'Error', message: 'Could not upload avatar. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
-      __DEV__ && console.error('Upload error:', e);
     }
   }
 
@@ -596,7 +578,6 @@ export default function ProfileScreen({ route, navigation }) {
       const uri = result.assets[0].uri;
       navigation.navigate(ROUTES.AVATAR_CROP, { imageUri: uri });
     } catch (e) {
-      __DEV__ && console.error('[ProfileScreen] handleChangeAvatar error:', e);
       setDialog({ visible: true, title: 'Error', message: 'Could not open image picker. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }
@@ -614,7 +595,6 @@ export default function ProfileScreen({ route, navigation }) {
               await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); 
               if (currentUser?.id) loadVideos(currentUser.id, true); 
             } catch (e) {
-              __DEV__ && console.error('[ProfileScreen] Unpin video error:', e);
               setDialog({ visible: true, title: 'Error', message: 'Could not unpin video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           } },
@@ -625,7 +605,6 @@ export default function ProfileScreen({ route, navigation }) {
         if (currentUser?.id) loadVideos(currentUser.id, true);
       }
     } catch (e) {
-      __DEV__ && console.error('[ProfileScreen] handlePinVideo error:', e);
       setDialog({ visible: true, title: 'Error', message: 'Could not pin video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }
@@ -712,7 +691,6 @@ export default function ProfileScreen({ route, navigation }) {
     } catch (e) {
       dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: false, progress: 0 });
       setDialog({ visible: true, title: 'Error', message: 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
-      __DEV__ && console.error('Download error:', e);
     }
   }
 
@@ -791,7 +769,6 @@ export default function ProfileScreen({ route, navigation }) {
     // Check current connection directly, not stale state
     const netInfo = await NetInfo.fetch();
     const currentlyOffline = !netInfo.isConnected || netInfo.isInternetReachable === false;
-    __DEV__ && console.log('[DEBUG] onRefresh - NetInfo offline:', currentlyOffline, 'state isOffline:', isOffline);
     
     if (currentlyOffline) {
       dispatchUI({ type: 'SET_TOAST', toast: { message: 'No connection - showing cached data', type: 'offline' } });
@@ -815,9 +792,7 @@ export default function ProfileScreen({ route, navigation }) {
             loadVideos(viewingId, ownProfile),
             loadLivestreams(viewingId),
           ]);
-          __DEV__ && console.log('[ProfileScreen] Refresh successful');
         } catch (e) {
-          __DEV__ && console.log('[ProfileScreen] Refresh failed (offline?), keeping existing data');
           // Don't clear data on refresh failure - keep showing cached data
         }
         
@@ -1009,8 +984,8 @@ export default function ProfileScreen({ route, navigation }) {
         </View>
       ) : (
         <View style={styles.regularInfo}>
-          <Text style={styles.displayName}>{profile?.full_name || profile?.username || globalUser?.user_metadata?.username || 'User'}</Text>
-          <Text style={styles.usernameText}>@{profile?.username || globalUser?.user_metadata?.username || 'username'}</Text>
+          <Text style={styles.displayName}>{profile?.full_name || profile?.username || ''}</Text>
+          <Text style={styles.usernameText}>@{profile?.username || ''}</Text>
           {profile?.bio ? (
             <Text style={styles.bioText}>{profile.bio}</Text>
           ) : isOwnProfile ? (
@@ -1230,7 +1205,6 @@ export default function ProfileScreen({ route, navigation }) {
         if (cached) {
           setCachedUser(cached);
           setIsOffline(true);
-          __DEV__ && console.log('[ProfileScreen] Using cached user (offline mode):', cached.id);
         } else {
           // No cached user, redirect to login
           navigation.replace(ROUTES.LOGIN);
