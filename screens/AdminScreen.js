@@ -934,6 +934,9 @@ export default function AdminScreen({ navigation }) {
             keyExtractor={item => item.id}
             contentContainerStyle={styles.list}
             refreshing={refreshing}
+            initialNumToRender={5}
+            maxToRenderPerBatch={5}
+            windowSize={5}
             onRefresh={() => {
               setRefreshing(true);
               if (activeTab === 'reports') {
