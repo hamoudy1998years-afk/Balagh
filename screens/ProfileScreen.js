@@ -336,7 +336,6 @@ export default function ProfileScreen({ route, navigation }) {
     if (user && viewingId) {
       const ownProfile = viewingId === user.id;
       dispatchProfile({ type: 'SET_USER', currentUser: user, isOwnProfile: ownProfile });
-      dispatchUI({ type: 'SET_LOADING', loading: false });
 
       // Check admin status
       if (ownProfile) {
@@ -425,6 +424,7 @@ export default function ProfileScreen({ route, navigation }) {
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId),
       ]);
       dispatchProfile({ type: 'SET_FOLLOW_COUNTS', followersCount: frsCount ?? 0, followingCount: fngCount ?? 0 });
+      dispatchUI({ type: 'SET_LOADING', loading: false });
     }
   }
 
