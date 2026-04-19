@@ -1290,10 +1290,12 @@ export default function ProfileScreen({ route, navigation }) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gold} progressViewOffset={35} />}
         renderItem={renderItem}
         ListEmptyComponent={
+          !profile ? null : (
           <View style={styles.emptyGrid}>
             <Text style={styles.emptyGridIcon}>{activeTab === 'videos' ? '🎥' : activeTab === 'private' ? '🔒' : activeTab === 'livestreams' ? '🔴' : '❤️'}</Text>
             <Text style={styles.emptyGridText}>{activeTab === 'videos' ? 'No videos yet' : activeTab === 'private' ? 'No private videos' : activeTab === 'livestreams' ? 'No live replays' : 'No liked videos'}</Text>
           </View>
+          )
         }
         contentContainerStyle={{ paddingBottom: insets.bottom + 80, paddingTop: insets.top + 50 }}
         showsVerticalScrollIndicator={false}
