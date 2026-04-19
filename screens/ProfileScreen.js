@@ -417,13 +417,22 @@ export default function ProfileScreen({ route, navigation }) {
   async function loadProfile(userId) {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (data) {
-      dispatchProfile({ type: 'SET_PROFILE', profile: data });
-      checkScholarStatus(userId, data.is_scholar);
-      const [{ count: frsCount }, { count: fngCount }] = await Promise.all([
+      const [{ count: frsCount }, { count: fngCount }, scholarResult] = await Promise.all([
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
         supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId),
+        data.is_scholar
+          ? supabase.from('scholar_applications').select('*').eq('user_id', userId).order('submitted_at', { ascending: false }).limit(1).maybeSingle()
+          : supabase.from('scholar_applications').select('id').eq('user_id', userId).eq('status', 'pending').maybeSingle(),
       ]);
+      dispatchProfile({ type: 'SET_PROFILE', profile: data });
       dispatchProfile({ type: 'SET_FOLLOW_COUNTS', followersCount: frsCount ?? 0, followingCount: fngCount ?? 0 });
+      if (data.is_scholar) {
+        dispatchProfile({ type: 'SET_SCHOLAR', isScholar: true, scholarData: scholarResult.data ?? null });
+        dispatchProfile({ type: 'SET_PENDING_APPLICATION', hasPendingApplication: false });
+      } else {
+        dispatchProfile({ type: 'SET_SCHOLAR', isScholar: false, scholarData: null });
+        dispatchProfile({ type: 'SET_PENDING_APPLICATION', hasPendingApplication: !!scholarResult.data });
+      }
       dispatchUI({ type: 'SET_LOADING', loading: false });
     }
   }
