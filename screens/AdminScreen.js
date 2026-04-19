@@ -449,7 +449,7 @@ export default function AdminScreen({ navigation }) {
     });
   };
 
-  const renderAppeal = ({ item }) => (
+  const renderAppeal = useCallback(({ item }) => (
     <View style={styles.reportCard}>
       <View style={styles.reportHeader}>
         <View style={styles.userInfo}>
@@ -509,9 +509,9 @@ export default function AdminScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     </View>
-  );
+  ), []);
 
-  const renderMessage = ({ item }) => (
+  const renderMessage = useCallback(({ item }) => (
     <View style={styles.reportCard}>
       <View style={styles.reportHeader}>
         <View style={styles.userInfo}>
@@ -603,9 +603,9 @@ export default function AdminScreen({ navigation }) {
         )}
       </View>
     </View>
-  );
+  ), []);
 
-  const renderPendingVideo = ({ item }) => (
+  const renderPendingVideo = useCallback(({ item }) => (
     <Swipeable
       renderRightActions={() => (
         <TouchableOpacity
@@ -688,7 +688,7 @@ export default function AdminScreen({ navigation }) {
         </View>
       </View>
     </Swipeable>
-  );
+  ), [playingVideoId]);
 
   const renderScholarApplication = ({ item }) => (
     <View style={styles.reportCard}>
@@ -763,7 +763,7 @@ export default function AdminScreen({ navigation }) {
     </View>
   );
 
-  const renderReport = ({ item }) => (
+  const renderReport = useCallback(({ item }) => (
     <View style={styles.reportCard}>
       <View style={styles.reportHeader}>
         <View style={styles.userInfo}>
@@ -830,7 +830,7 @@ export default function AdminScreen({ navigation }) {
         )}
       </View>
     </View>
-  );
+  ), []);
 
   useFocusEffect(
     useCallback(() => {
@@ -937,6 +937,8 @@ export default function AdminScreen({ navigation }) {
             initialNumToRender={5}
             maxToRenderPerBatch={5}
             windowSize={5}
+            removeClippedSubviews={true}
+            updateCellsBatchingPeriod={10}
             onRefresh={() => {
               setRefreshing(true);
               if (activeTab === 'reports') {
