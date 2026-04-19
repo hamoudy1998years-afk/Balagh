@@ -674,7 +674,7 @@ export default function AdminScreen({ navigation }) {
     <Swipeable
       renderRightActions={() => (
         <TouchableOpacity
-          style={{ backgroundColor: '#dc2626', justifyContent: 'center', alignItems: 'center', width: 80, borderRadius: 16, marginBottom: 14 }}
+          style={{ backgroundColor: '#dc2626', justifyContent: 'center', alignItems: 'center', width: s(80), borderRadius: s(16), marginBottom: s(14) }}
           onPress={() => handleRejectVideo(item)}
         >
           <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>Reject</Text>
@@ -682,7 +682,7 @@ export default function AdminScreen({ navigation }) {
       )}
       renderLeftActions={() => (
         <TouchableOpacity
-          style={{ backgroundColor: '#16a34a', justifyContent: 'center', alignItems: 'center', width: 80, borderRadius: 16, marginBottom: 14 }}
+          style={{ backgroundColor: '#16a34a', justifyContent: 'center', alignItems: 'center', width: s(80), borderRadius: s(16), marginBottom: s(14) }}
           onPress={() => handleApproveVideo(item)}
         >
           <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>Approve</Text>
@@ -699,8 +699,8 @@ export default function AdminScreen({ navigation }) {
             {new Date(item.created_at).toLocaleDateString()}
           </Text>
           {item.uploader?.rejection_count >= 5 && (
-            <View style={{ backgroundColor: '#fef2f2', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: '#fecaca', marginLeft: 8 }}>
-              <Text style={{ fontSize: 11, fontWeight: '800', color: '#dc2626' }}>⚠️ {item.uploader.rejection_count} rejections</Text>
+            <View style={{ backgroundColor: '#fef2f2', borderRadius: s(8), paddingHorizontal: s(8), paddingVertical: s(4), borderWidth: 1, borderColor: '#fecaca', marginLeft: s(8) }}>
+              <Text style={{ fontSize: ms(11), fontWeight: '800', color: '#dc2626' }}>⚠️ {item.uploader.rejection_count} rejections</Text>
             </View>
           )}
         </View>
@@ -725,7 +725,8 @@ export default function AdminScreen({ navigation }) {
                 </View>
               )}
               <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}>
-                <View style={{ backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 30, width: 50, height: 50, justifyContent: 'center', alignItems: 'center' }}>
+                <View style={{ backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: s(30), width: s(50), height: s(50), justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontSize: ms(20) }}>▶</Text>
                   <Text style={{ color: '#fff', fontSize: 20 }}>▶</Text>
                 </View>
               </View>
@@ -797,32 +798,32 @@ export default function AdminScreen({ navigation }) {
   );
 
   const renderStats = () => (
-    <View style={{ padding: 8 }}>
-      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-        <View style={{ flex: 1, backgroundColor: '#f0fdf4', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#bbf7d0' }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: '#16a34a' }}>{stats.approved}</Text>
-          <Text style={{ fontSize: 12, color: '#16a34a', fontWeight: '600', marginTop: 4 }}>Approved</Text>
+    <View style={{ padding: s(8) }}>
+      <View style={{ flexDirection: 'row', gap: s(12), marginBottom: s(12) }}>
+        <View style={{ flex: 1, backgroundColor: '#f0fdf4', borderRadius: s(16), padding: s(16), borderWidth: 1, borderColor: '#bbf7d0' }}>
+          <Text style={{ fontSize: ms(28), fontWeight: '800', color: '#16a34a' }}>{stats.approved}</Text>
+          <Text style={{ fontSize: ms(12), color: '#16a34a', fontWeight: '600', marginTop: s(4) }}>Approved</Text>
         </View>
-        <View style={{ flex: 1, backgroundColor: '#fef2f2', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#fecaca' }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: '#dc2626' }}>{stats.rejected}</Text>
-          <Text style={{ fontSize: 12, color: '#dc2626', fontWeight: '600', marginTop: 4 }}>Rejected</Text>
-        </View>
-      </View>
-      <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-        <View style={{ flex: 1, backgroundColor: '#fff7ed', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#fed7aa' }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: '#ea580c' }}>{stats.pending}</Text>
-          <Text style={{ fontSize: 12, color: '#ea580c', fontWeight: '600', marginTop: 4 }}>Pending</Text>
-        </View>
-        <View style={{ flex: 1, backgroundColor: '#f0f9ff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#bae6fd' }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: '#0284c7' }}>{stats.appeals}</Text>
-          <Text style={{ fontSize: 12, color: '#0284c7', fontWeight: '600', marginTop: 4 }}>Appeals</Text>
+        <View style={{ flex: 1, backgroundColor: '#fef2f2', borderRadius: s(16), padding: s(16), borderWidth: 1, borderColor: '#fecaca' }}>
+          <Text style={{ fontSize: ms(28), fontWeight: '800', color: '#dc2626' }}>{stats.rejected}</Text>
+          <Text style={{ fontSize: ms(12), color: '#dc2626', fontWeight: '600', marginTop: s(4) }}>Rejected</Text>
         </View>
       </View>
-      <View style={{ backgroundColor: '#fafafa', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#e2e8f0' }}>
-        <Text style={{ fontSize: 13, color: '#94a3b8', fontWeight: '600', marginBottom: 4 }}>TOTAL REVIEWED</Text>
-        <Text style={{ fontSize: 32, fontWeight: '800', color: '#1a2e44' }}>{stats.totalReviewed}</Text>
-        <Text style={{ fontSize: 13, color: '#94a3b8', fontWeight: '600', marginTop: 12, marginBottom: 4 }}>APPROVAL RATE</Text>
-        <Text style={{ fontSize: 32, fontWeight: '800', color: COLORS.gold }}>{stats.approvalRate}%</Text>
+      <View style={{ flexDirection: 'row', gap: s(12), marginBottom: s(12) }}>
+        <View style={{ flex: 1, backgroundColor: '#fff7ed', borderRadius: s(16), padding: s(16), borderWidth: 1, borderColor: '#fed7aa' }}>
+          <Text style={{ fontSize: ms(28), fontWeight: '800', color: '#ea580c' }}>{stats.pending}</Text>
+          <Text style={{ fontSize: ms(12), color: '#ea580c', fontWeight: '600', marginTop: s(4) }}>Pending</Text>
+        </View>
+        <View style={{ flex: 1, backgroundColor: '#f0f9ff', borderRadius: s(16), padding: s(16), borderWidth: 1, borderColor: '#bae6fd' }}>
+          <Text style={{ fontSize: ms(28), fontWeight: '800', color: '#0284c7' }}>{stats.appeals}</Text>
+          <Text style={{ fontSize: ms(12), color: '#0284c7', fontWeight: '600', marginTop: s(4) }}>Appeals</Text>
+        </View>
+      </View>
+      <View style={{ backgroundColor: '#fafafa', borderRadius: s(16), padding: s(16), borderWidth: 1, borderColor: '#e2e8f0' }}>
+        <Text style={{ fontSize: ms(13), color: '#94a3b8', fontWeight: '600', marginBottom: s(4) }}>TOTAL REVIEWED</Text>
+        <Text style={{ fontSize: ms(32), fontWeight: '800', color: '#1a2e44' }}>{stats.totalReviewed}</Text>
+        <Text style={{ fontSize: ms(13), color: '#94a3b8', fontWeight: '600', marginTop: s(12), marginBottom: s(4) }}>APPROVAL RATE</Text>
+        <Text style={{ fontSize: ms(32), fontWeight: '800', color: COLORS.gold }}>{stats.approvalRate}%</Text>
       </View>
     </View>
   );

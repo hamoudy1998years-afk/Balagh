@@ -257,7 +257,7 @@ export default function MyUploadsScreen({ navigation }) {
                 <Text style={styles.appealButtonText}>Appeal</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.appealButton, { borderColor: '#94a3b8', backgroundColor: '#f1f5f9' }]}
+                style={[styles.appealButton, { borderColor: '#94a3b8', backgroundColor: '#f1f5f9', paddingVertical: s(8), paddingHorizontal: s(14) }]}
                 onPress={() => setContactModal({ visible: true, videoId: item.id, caption: item.caption })}
               >
                 <Text style={[styles.appealButtonText, { color: '#475569' }]}>Contact Admin</Text>
