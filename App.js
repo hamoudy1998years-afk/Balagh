@@ -39,6 +39,8 @@ import ResetPasswordScreen from './screens/ResetPasswordScreen';
 import AdminScreen from './screens/AdminScreen';
 import AgeGateScreen from './screens/AgeGateScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
+import MyUploadsScreen from './screens/MyUploadsScreen';
+import ContactAdminScreen from './screens/ContactAdminScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import * as Sentry from '@sentry/react-native';
 import { loadBannedWords } from './utils/moderation';
@@ -511,6 +513,8 @@ function App() {
                       <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
                       <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
                       <Stack.Screen name="Admin" component={AdminScreen} />
+                      <Stack.Screen name="MyUploads" component={MyUploadsScreen} />
+                      <Stack.Screen name="ContactAdmin" component={ContactAdminScreen} />
                     </Stack.Navigator>
                     <GlobalVideoOptionsSheet />
                   </NavigationContainer>

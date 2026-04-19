@@ -92,7 +92,10 @@ const NotificationItem = React.memo(function NotificationItem({ item, onDelete, 
   const getIcon = () => {
     switch (item.type) {
       case 'like': return '❤️'; case 'follow': return '👤';
-      case 'comment': return '💬'; case 'reply': return '↩️'; default: return '🔔';
+      case 'comment': return '💬'; case 'reply': return '↩️';
+      case 'video_approved': return '✅'; case 'video_rejected': return '❌';
+      case 'appeal_approved': return '🎉'; case 'appeal_rejected': return '⚠️';
+      default: return '🔔';
     }
   };
 
@@ -103,6 +106,10 @@ const NotificationItem = React.memo(function NotificationItem({ item, onDelete, 
       case 'follow':  return `${name} started following you`;
       case 'comment': return `${name} commented on your video`;
       case 'reply':   return `${name} replied to your comment`;
+      case 'video_approved': return 'Your video has been approved! 🎉';
+      case 'video_rejected': return 'Your video was rejected. Tap to view reason.';
+      case 'appeal_approved': return 'Your appeal was approved! Video is now live 🎉';
+      case 'appeal_rejected': return 'Your appeal was rejected. Decision is final.';
       default:        return `${name} interacted with you`;
     }
   };

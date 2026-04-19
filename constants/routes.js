@@ -30,6 +30,8 @@ export const ROUTES = {
   // Other
   AVATAR_CROP: 'AvatarCrop',
   ADMIN: 'Admin',
+  MY_UPLOADS: 'MyUploads',
+  CONTACT_ADMIN: 'ContactAdmin',
 };
 
 // Tab indices for navigation

@@ -32,6 +32,8 @@ export default function UploadScreen({ navigation }) {
   const [category, setCategory] = useState('');
   const [uploading, setUploading] = useState(false);
   const [isScholar, setIsScholar] = useState(null);
+  const [isTrusted, setIsTrusted] = useState(false);
+  const [isBanned, setIsBanned] = useState(false);
   const [scholarChecked, setScholarChecked] = useState(true);
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
@@ -67,12 +69,22 @@ export default function UploadScreen({ navigation }) {
     const cached = await userCache.get();
     if (cached?.is_scholar !== undefined) {
       setIsScholar(cached.is_scholar);
-      setScholarChecked(true);
+    }
+    if (cached?.trusted_user !== undefined) {
+      setIsTrusted(cached.trusted_user);
+    }
+    if (cached?.is_banned !== undefined) {
+      setIsBanned(cached.is_banned);
     }
     const user = authUser;
-    if (!user) return;
-    const { data } = await supabase.from('profiles').select('is_scholar').eq('id', user.id).single();
+    if (!user) {
+      setScholarChecked(true);
+      return;
+    }
+    const { data } = await supabase.from('profiles').select('is_scholar, trusted_user, is_banned').eq('id', user.id).single();
     setIsScholar(data?.is_scholar ?? false);
+    setIsTrusted(data?.trusted_user ?? false);
+    setIsBanned(data?.is_banned ?? false);
     setScholarChecked(true);
   }, []);
 
@@ -298,6 +310,10 @@ export default function UploadScreen({ navigation }) {
       setProgressPercent(100);
       setProgressLabel('Saving...');
 
+      // Check auto-approval eligibility
+      const autoApproved = isScholar === true || isTrusted === true;
+      const uploadStatus = isBanned ? 'rejected' : (autoApproved ? 'approved' : 'pending');
+
       // 4. SAVE TO DATABASE
       const { error: dbError } = await supabase.from('videos').insert({
         user_id: user.id,
@@ -308,6 +324,7 @@ export default function UploadScreen({ navigation }) {
         is_private: false,
         views_count: 0,
         likes_count: 0,
+        status: uploadStatus,
       });
 
       if (dbError) throw dbError;
@@ -322,13 +339,31 @@ export default function UploadScreen({ navigation }) {
       setCaption('');
       setCategory('');
 
-      setDialog({
-        visible: true,
-        title: 'Success! 🎉',
-        message: 'Your video has been uploaded to Bushrann!',
-        type: 'success',
-        buttons: [{ text: 'OK' }]
-      });
+      if (isBanned) {
+        setDialog({
+          visible: true,
+          title: 'Upload Rejected',
+          message: 'You are banned from uploading videos. Contact admin for support.',
+          type: 'error',
+          buttons: [{ text: 'OK' }]
+        });
+      } else if (autoApproved) {
+        setDialog({
+          visible: true,
+          title: 'Video Published! 🎉',
+          message: 'Your video has been published to Bushrann!',
+          type: 'success',
+          buttons: [{ text: 'OK' }]
+        });
+      } else {
+        setDialog({
+          visible: true,
+          title: 'Video Uploaded! ⏳',
+          message: 'Your video is pending review. You will be notified once it is approved.',
+          type: 'info',
+          buttons: [{ text: 'OK' }]
+        });
+      }
 
     } catch (error) {
       setUploading(false);

@@ -657,7 +657,7 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="SUPPORT" />
       <Card>
         <Row icon="❓" label="FAQ" sublabel="Frequently asked questions" onPress={handleNavigateFaq} />
-        <Row icon="📩" label="Contact Us" sublabel="Report a problem or send feedback" onPress={handleNavigateContact} last />
+        <Row icon="📩" label="Contact Admin" sublabel="Report a problem or send feedback" onPress={() => navigation.navigate(ROUTES.CONTACT_ADMIN)} last />
       </Card>
       <GroupLabel text="LEGAL" />
       <Card>

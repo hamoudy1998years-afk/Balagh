@@ -77,7 +77,7 @@ export default function VideoDetailScreen({ navigation }) {
       if (videoData.user_id) {
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
-          .select('id, username, avatar_url')
+          .select('id, username, avatar_url, is_scholar, trusted_user')
           .eq('id', videoData.user_id)
           .single();
           

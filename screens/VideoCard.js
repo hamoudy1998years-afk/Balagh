@@ -45,6 +45,8 @@ function VideoCard({
   onFollowChange, navigation, cardHeight,
   username: usernameProp,
   avatarUrl: avatarUrlProp,
+  isScholar: isScholarProp,
+  isTrusted: isTrustedProp,
   onBlocked,
 }) {
   const { width } = useWindowDimensions();
@@ -213,6 +215,8 @@ function VideoCard({
 
   const username = usernameProp ?? 'user';
   const avatarUrl = avatarUrlProp ?? null;
+  const isScholar = isScholarProp ?? item.profiles?.is_scholar ?? false;
+  const isTrusted = isTrustedProp ?? item.profiles?.trusted_user ?? false;
 
   useEffect(() => { setLiked(initialLiked); }, [initialLiked]);
   useEffect(() => { setFollowed(initialFollowed); }, [item.user_id]);
@@ -624,12 +628,41 @@ function VideoCard({
         })
       }]}>
         <AnimatedButton onPress={handleNavigateUserProfile}>
-          <Text style={styles.username}>@{username}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.username}>@{username}</Text>
+            {isScholar && (
+              <View style={styles.goldBadge}>
+                <Text style={styles.goldBadgeText}>✓ Scholar</Text>
+              </View>
+            )}
+            {!isScholar && isTrusted && (
+              <View style={styles.blueBadge}>
+                <Text style={styles.blueBadgeText}>✓ Trusted</Text>
+              </View>
+            )}
+            {!isScholar && !isTrusted && (
+              <View style={[styles.blueBadge, { backgroundColor: '#2563eb' }]}>
+                <Text style={styles.blueBadgeText}>Community</Text>
+              </View>
+            )}
+          </View>
         </AnimatedButton>
         {captionText ? <Text style={styles.caption} numberOfLines={3} ellipsizeMode="tail">{captionText}</Text> : null}
         {hashtags.length > 0 && (
           <View style={styles.hashtagsRow}>
             {hashtags.map((tag, i) => <Text key={i} style={styles.hashtag}>{tag}</Text>)}
+          </View>
+        )}
+        {currentUserId === item.user_id && item.status && (
+          <View style={styles.statusBadge}>
+            <Text style={[
+              styles.statusBadgeText,
+              item.status === 'approved' && styles.statusApproved,
+              item.status === 'pending' && styles.statusPending,
+              item.status === 'rejected' && styles.statusRejected,
+            ]}>
+              {item.status === 'approved' ? '✓ Live' : item.status === 'pending' ? '⏳ Pending' : '✗ Rejected'}
+            </Text>
           </View>
         )}
       </Animated.View>
@@ -856,6 +889,44 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
+  goldBadge: {
+    backgroundColor: '#B76E79',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  goldBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  blueBadge: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  blueBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  statusBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  statusBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statusApproved: { color: '#4ade80' },
+  statusPending: { color: '#fbbf24' },
+  statusRejected: { color: '#f87171' },
   creatorContainer: { alignItems: 'center', marginBottom: 16 },
   creatorAvatar: {
     width: s(52),

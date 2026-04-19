@@ -22,6 +22,7 @@ import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 
 const useDownloadedVideos = () => {
   const downloadedRef = useRef(new Set());
@@ -203,6 +204,12 @@ export default function ProfileScreen({ route, navigation }) {
   const [videoState, dispatchVideo] = useReducer(videoReducer, initialVideoState);
   const [uiState, dispatchUI] = useReducer(uiReducer, initialUIState);
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [targetIsAdmin, setTargetIsAdmin] = useState(false);
+  const [adminCount, setAdminCount] = useState(0);
+  const [addingAdmin, setAddingAdmin] = useState(false);
+
   const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData, hasPendingApplication } = profileState;
   const { publicVideos, privateVideos, likedVideos, livestreams, totalLikes, activeTab } = videoState;
   const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress, toast } = uiState;
@@ -339,6 +346,24 @@ export default function ProfileScreen({ route, navigation }) {
       __DEV__ && console.log('[ProfileScreen] loading profile for userId:', viewingId, 'isOwnProfile:', ownProfile);
       dispatchProfile({ type: 'SET_USER', currentUser: user, isOwnProfile: ownProfile });
       dispatchUI({ type: 'SET_LOADING', loading: false });
+
+      // Check admin status
+      if (ownProfile) {
+        const { data: adminData } = await supabase.from('admins').select('id, role').eq('user_id', user.id).limit(1).single();
+        console.log('ADMIN DEBUG:', { userId: user.id, adminData, isAdmin: !!adminData, isSuperAdmin: adminData?.role === 'super_admin' });
+        setIsAdmin(!!adminData);
+        setIsSuperAdmin(adminData?.role === 'super_admin');
+      } else {
+        // Check if current user is super_admin
+        const { data: myAdminData } = await supabase.from('admins').select('role').eq('user_id', user.id).maybeSingle();
+        setIsSuperAdmin(myAdminData?.role === 'super_admin');
+        // Check if target user is admin
+        const { data: targetAdminData } = await supabase.from('admins').select('id').eq('user_id', viewingId).maybeSingle();
+        setTargetIsAdmin(!!targetAdminData);
+        // Get admin count
+        const { count } = await supabase.from('admins').select('*', { count: 'exact', head: true });
+        setAdminCount(count || 0);
+      }
 
       // If offline, skip network requests and show cached data only
       if (isOffline) {
@@ -496,6 +521,34 @@ export default function ProfileScreen({ route, navigation }) {
       navigation.goBack();
     }
   }
+
+  const handleAddAdmin = useCallback(async () => {
+    if (!currentUser || isOwnProfile || !isSuperAdmin || targetIsAdmin || adminCount >= 10) return;
+    setAddingAdmin(true);
+    try {
+      const { error } = await supabase.from('admins').insert({
+        user_id: targetUserId,
+        role: 'admin',
+        added_by: currentUser.id,
+      });
+      if (error) {
+        if (error.message?.includes('duplicate') || error.code === '23505') {
+          setDialog({ visible: true, title: 'Already Admin', message: 'This user is already an admin.', type: 'warning', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+        } else {
+          setDialog({ visible: true, title: 'Error', message: error.message || 'Failed to add admin.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+        }
+        setAddingAdmin(false);
+        return;
+      }
+      setTargetIsAdmin(true);
+      setAdminCount(prev => prev + 1);
+      setDialog({ visible: true, title: 'Admin Added!', message: `Admin added! @${profile?.username || 'user'} is now an admin.`, type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+    } catch (e) {
+      setDialog({ visible: true, title: 'Error', message: 'Could not add admin. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+    } finally {
+      setAddingAdmin(false);
+    }
+  }, [currentUser, isOwnProfile, isSuperAdmin, targetIsAdmin, adminCount, targetUserId, profile?.username]);
 
   async function handleFollow() {
     if (!currentUser || isOwnProfile) return;
@@ -901,6 +954,11 @@ export default function ProfileScreen({ route, navigation }) {
           )}
         </View>
         {isScholar && <View style={styles.scholarBadge} accessibilityLabel="Verified scholar badge" accessibilityRole="image" accessible={true}><Text style={styles.scholarBadgeText}>✓ Scholar</Text></View>}
+        {!isScholar && profile?.trusted_user && (
+          <View style={[styles.scholarBadge, { backgroundColor: '#3b82f6' }]}>
+            <Text style={styles.scholarBadgeText}>⭐ Trusted</Text>
+          </View>
+        )}
       </View>
 
       {isScholar ? (
@@ -987,29 +1045,45 @@ export default function ProfileScreen({ route, navigation }) {
 
       {isOwnProfile ? (
         <>
-          {!isScholar && !hasPendingApplication && (
+          {!isScholar && !hasPendingApplication && !isAdmin && (
             <View style={styles.actionButtons}>
               <AnimatedButton style={styles.scholarApplyBtn} onPress={handleNavigateApplyScholar}>
                 <Text style={styles.scholarApplyBtnText}>🎓 Apply as Scholar</Text>
               </AnimatedButton>
             </View>
           )}
-          {!isScholar && hasPendingApplication && (
+          {!isScholar && hasPendingApplication && !isAdmin && (
             <View style={styles.actionButtons}>
-              <AnimatedButton 
-                style={[styles.scholarApplyBtn, { backgroundColor: '#94a3b8' }]} 
+              <AnimatedButton
+                style={[styles.scholarApplyBtn, { backgroundColor: '#94a3b8' }]}
                 disabled={true}
               >
                 <Text style={styles.scholarApplyBtnText}>🎓 Application Pending</Text>
               </AnimatedButton>
             </View>
           )}
-          {currentUser?.id === process.env.EXPO_PUBLIC_ADMIN_USER_ID && (
-            <TouchableOpacity 
+
+          {/* Show My Uploads + Help & Support for normal users and scholars (NOT admins) */}
+          {!isAdmin && (
+            <View style={[styles.actionButtons, { flexDirection: 'row', gap: 10 }]}>
+              {!isScholar && (
+                <AnimatedButton style={styles.myUploadsBtn} onPress={() => navigation.navigate(ROUTES.MY_UPLOADS)}>
+                  <Text style={styles.myUploadsBtnText}>📁 My Uploads</Text>
+                </AnimatedButton>
+              )}
+              <AnimatedButton style={[styles.contactBtn, isScholar && { flex: 1 }]} onPress={() => navigation.navigate(ROUTES.CONTACT_ADMIN)}>
+                <Text style={styles.contactBtnText}>🆘 Help & Support</Text>
+              </AnimatedButton>
+            </View>
+          )}
+
+          {/* Show Admin button only for admins */}
+          {isAdmin && (
+            <TouchableOpacity
               style={styles.adminButton}
               onPress={() => navigation.navigate(ROUTES.ADMIN)}
             >
-              <Text style={styles.adminButtonText}> Admin Panel</Text>
+              <Text style={styles.adminButtonText}>🛡️ Admin Panel</Text>
             </TouchableOpacity>
           )}
         </>
@@ -1039,6 +1113,38 @@ export default function ProfileScreen({ route, navigation }) {
               <Text style={styles.blockBtnText}>{blocked ? '🚫 Blocked' : 'Block'}</Text>
             </AnimatedButton>
           </View>
+          {isSuperAdmin && targetIsAdmin && (
+            <View style={styles.adminBadge}>
+              <Ionicons name="shield-checkmark" size={16} color={COLORS.gold} />
+              <Text style={styles.adminBadgeText}>✓ Admin</Text>
+            </View>
+          )}
+          {isSuperAdmin && !targetIsAdmin && adminCount < 10 && (
+            <AnimatedButton
+              style={[styles.addAdminBtn, addingAdmin && styles.addAdminBtnDisabled]}
+              onPress={() => {
+                setDialog({
+                  visible: true,
+                  title: 'Add as Admin?',
+                  message: `Make @${profile?.username || 'user'} an admin? They will be able to review videos, handle reports, and reply to user messages. (${adminCount}/10 admins)`,
+                  type: 'confirm',
+                  buttons: [
+                    { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
+                    { text: 'Confirm', onPress: () => { setDialog(d => ({ ...d, visible: false })); handleAddAdmin(); } },
+                  ]
+                });
+              }}
+              disabled={addingAdmin}
+            >
+              <Ionicons name="shield-checkmark" size={18} color="#ffffff" />
+              <Text style={styles.addAdminBtnText}>Add as Admin</Text>
+            </AnimatedButton>
+          )}
+          {isSuperAdmin && !targetIsAdmin && adminCount >= 10 && (
+            <View style={styles.adminLimitBadge}>
+              <Text style={styles.adminLimitText}>Admin limit reached ({adminCount}/10)</Text>
+            </View>
+          )}
         </View>
       )}
 
@@ -1077,7 +1183,7 @@ export default function ProfileScreen({ route, navigation }) {
         </AnimatedButton>
       </View>
     </View>
-  ), [profile, isScholar, scholarData, hasPendingApplication, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation]);
+  ), [profile, isScholar, scholarData, hasPendingApplication, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation, isAdmin, isSuperAdmin, targetIsAdmin, adminCount, addingAdmin, handleAddAdmin]);
 
   const activeVideos = activeTab === 'videos' 
     ? publicVideos.filter(v => !v.video_url?.includes('.m3u8'))
@@ -1513,6 +1619,91 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 14,
     fontWeight: '700',
+  },
+  myUploadsBtn: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    flex: 1,
+  },
+  myUploadsBtnText: {
+    color: '#1a2e44',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  contactBtn: {
+    backgroundColor: '#fff7ed',
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#fed7aa',
+    flex: 1,
+  },
+  contactBtnText: {
+    color: '#c2410c',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  addAdminBtn: {
+    backgroundColor: COLORS.gold,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  addAdminBtnDisabled: {
+    backgroundColor: COLORS.goldDark,
+    opacity: 0.7,
+  },
+  addAdminBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  adminBadge: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: COLORS.gold + '15',
+    borderRadius: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: COLORS.gold + '40',
+  },
+  adminBadgeText: {
+    color: COLORS.gold,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  adminLimitBadge: {
+    marginTop: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  adminLimitText: {
+    color: '#94a3b8',
+    fontWeight: '700',
+    fontSize: 13,
   },
   offlineIndicator: { 
     backgroundColor: 'rgba(0,0,0,0.7)', 

@@ -222,7 +222,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
     let query = supabase
       .from('videos')
-      .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+      .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)')
       .in('user_id', followingIds)
       .neq('user_id', user.id);
     
@@ -345,7 +345,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
       let query = supabase
         .from('videos')
-        .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+        .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)')
         .in('user_id', followingIds)
         .neq('user_id', user.id);
       
@@ -379,7 +379,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
       let query = supabase
         .from('videos')
-        .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)');
+        .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)');
       
       if (blockedIds.length > 0) {
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
@@ -666,7 +666,7 @@ export default function HomeScreen({ navigation }) {
 
       let query = supabase
         .from('videos')
-        .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url)')
+        .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)')
         .in('user_id', followingIds)
         .neq('user_id', user.id);
       
