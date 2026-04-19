@@ -38,7 +38,7 @@ export default function AdminScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [reports, setReports] = useState([]);
   const [scholarApps, setScholarApps] = useState([]);
-  const [activeTab, setActiveTab] = useState('reports');
+  const [activeTab, setActiveTab] = useState('pending');
   const [pendingVideos, setPendingVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -103,28 +103,13 @@ export default function AdminScreen({ navigation }) {
 
       const { data, error } = await supabase
         .from('appeals')
-        .select('*')
+        .select('*, video:videos!video_id(caption, thumbnail_url, user_id, rejection_reason), sender:profiles!user_id(username)')
         .eq('status', 'pending')
         .neq('reviewed_by', adminData?.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      const enriched = await Promise.all((data || []).map(async (appeal) => {
-        const { data: videoData } = await supabase
-          .from('videos')
-          .select('caption, thumbnail_url, user_id, rejection_reason')
-          .eq('id', appeal.video_id)
-          .single();
-        const { data: userData } = await supabase
-          .from('profiles')
-          .select('username')
-          .eq('id', appeal.user_id)
-          .single();
-        return { ...appeal, video: videoData, sender: userData };
-      }));
-
-      setAppeals(enriched);
+      setAppeals(data || []);
     } catch (error) {
       setDialog({ visible: true, title: 'Error', message: 'Failed to load appeals', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
@@ -137,21 +122,11 @@ export default function AdminScreen({ navigation }) {
     try {
       const { data, error } = await supabase
         .from('user_messages')
-        .select('*')
+        .select('*, sender:profiles!user_id(username, avatar_url)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      const enriched = await Promise.all((data || []).map(async (msg) => {
-        const { data: userData } = await supabase
-          .from('profiles')
-          .select('username, avatar_url')
-          .eq('id', msg.user_id)
-          .single();
-        return { ...msg, sender: userData || { username: 'Unknown' } };
-      }));
-
-      setMessages(enriched);
+      setMessages(data || []);
     } catch (error) {
       setDialog({ visible: true, title: 'Error', message: 'Failed to load messages', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
@@ -178,28 +153,13 @@ export default function AdminScreen({ navigation }) {
     try {
       const { data, error } = await supabase
         .from('videos')
-        .select('id, caption, thumbnail_url, video_url, user_id, created_at, category, duration')
+        .select('id, caption, thumbnail_url, video_url, user_id, created_at, category, duration, uploader:profiles!user_id(username, avatar_url, rejection_count)')
         .eq('status', 'pending')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      const enrichedVideos = await Promise.all((data || []).map(async (video) => {
-        const { data: userData } = await supabase
-          .from('profiles')
-          .select('username, avatar_url, rejection_count')
-          .eq('id', video.user_id)
-          .single();
-
-        return {
-          ...video,
-          uploader: userData || { username: 'Unknown' }
-        };
-      }));
-
-      setPendingVideos(enrichedVideos);
+      setPendingVideos(data || []);
     } catch (error) {
-      console.error('Error loading pending videos:', error);
       setDialog({ visible: true, title: 'Error', message: 'Failed to load pending videos', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
       setLoading(false);
@@ -209,48 +169,15 @@ export default function AdminScreen({ navigation }) {
 
   const loadReports = useCallback(async () => {
     try {
-      const { data: reportsData, error: reportsError } = await supabase
+      const { data, error } = await supabase
         .from('reports')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
-      if (reportsError) throw reportsError;
-      
-      const enrichedReports = await Promise.all((reportsData || []).map(async (report) => {
-        const { data: reporter } = await supabase
-          .from('profiles')
-          .select('username')
-          .eq('id', report.reporter_id)
-          .single();
-          
-        const { data: reportedUser } = await supabase
-          .from('profiles')
-          .select('username')
-          .eq('id', report.reported_user_id)
-          .single();
-          
-        let video = null;
-        if (report.video_id) {
-          const { data: videoData } = await supabase
-            .from('videos')
-            .select('id, caption, thumbnail_url, video_url')
-            .eq('id', report.video_id)
-            .single();
-          video = videoData;
-        }
-        
-        return {
-          ...report,
-          reporter: reporter || { username: 'Unknown' },
-          reported_user: reportedUser || { username: 'Unknown' },
-          video
-        };
-      }));
-
-      setReports(enrichedReports);
+      if (error) throw error;
+      setReports(data || []);
     } catch (error) {
-      console.error('Error loading reports:', error);
       setDialog({ visible: true, title: 'Error', message: 'Failed to load reports', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
       setLoading(false);
@@ -259,24 +186,22 @@ export default function AdminScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
+    if (!isAdmin) return;
+    Promise.all([
+      loadPendingVideos(),
+      loadReports(),
+      loadScholarApplications(),
+      loadMessages(),
+      loadAppeals(),
+      loadStats(),
+    ]).finally(() => {
+      setLoading(false);
+    });
+  }, [isAdmin]);
+
+  useEffect(() => {
     setPlayingVideoId(null);
-    if (activeTab === 'reports') {
-      loadReports();
-    } else if (activeTab === 'scholars') {
-      loadScholarApplications();
-      setLoading(false);
-    } else if (activeTab === 'pending') {
-      loadPendingVideos();
-      setLoading(false);
-    } else if (activeTab === 'messages') {
-      loadMessages();
-    } else if (activeTab === 'appeals') {
-      loadAppeals();
-    } else if (activeTab === 'stats') {
-      loadStats();
-      setLoading(false);
-    }
-  }, [activeTab, loadReports, loadScholarApplications, loadPendingVideos, loadMessages, loadAppeals, loadStats]);
+  }, [activeTab]);
 
   const handleDismiss = async (reportId) => {
     try {
