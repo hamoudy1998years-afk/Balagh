@@ -2,7 +2,7 @@ import {
   View, Text, StyleSheet,
   Image, Modal, Alert, useWindowDimensions,
   RefreshControl, Animated, Pressable,
-  TouchableOpacity,
+  TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import React, { useReducer, useEffect as useEffectHook, useRef, useState } from 'react';
@@ -915,7 +915,11 @@ export default function ProfileScreen({ route, navigation }) {
   }, [activeTab, publicVideos, privateVideos, livestreams, likedVideos, openVideo, handleLongPress, navigation]);
 
   const renderHeader = useCallback(() => {
-    if (!profile) return null;
+    if (!profile) return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 120 }}>
+        <ActivityIndicator color={COLORS.gold} size="large" />
+      </View>
+    );
     return (
     <View style={styles.headerSection}>
       <View style={styles.avatarSection}>
