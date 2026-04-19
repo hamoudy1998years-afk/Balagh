@@ -328,10 +328,11 @@ export default function ProfileScreen({ route, navigation }) {
   async function init(viewingId) {
     const user = globalUser || cachedUser;
     
-    // Only reset video state - preserve profile during loading to avoid blank screen
-    dispatchVideo({ type: 'RESET' });
-    // Note: We don't dispatch RESET for profile here to avoid blank screen
-    // Profile will be updated when data loads, or preserved if offline
+    // Only reset videos if switching to a different user
+    const previousId = lastUserIdRef.current;
+    if (viewingId !== previousId) {
+      dispatchVideo({ type: 'RESET' });
+    }
 
     if (user && viewingId) {
       const ownProfile = viewingId === user.id;
