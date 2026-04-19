@@ -52,7 +52,6 @@ export function UserProvider({ children }) {
             .map(b => b.blocked_id)
             .filter(id => id && id !== freshUser.id);
           setBlockedUsers(new Set(blockedIds));
-          console.log('[UserContext] Loaded blocked users:', blockedIds.length);
         }
       }
     } catch (e) {

@@ -42,7 +42,6 @@ class VideoCache {
     const fileInfo = await FileSystem.getInfoAsync(cacheFile);
     
     if (fileInfo.exists) {
-      console.log('[VideoCache] Using cached:', cacheFile);
       return cacheFile;
     }
     

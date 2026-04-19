@@ -340,7 +340,6 @@ export default function ProfileScreen({ route, navigation }) {
       // Check admin status
       if (ownProfile) {
         const { data: adminData } = await supabase.from('admins').select('id, role').eq('user_id', user.id).limit(1).single();
-        console.log('ADMIN DEBUG:', { userId: user.id, adminData, isAdmin: !!adminData, isSuperAdmin: adminData?.role === 'super_admin' });
         setIsAdmin(!!adminData);
         setIsSuperAdmin(adminData?.role === 'super_admin');
       } else {
@@ -467,9 +466,6 @@ export default function ProfileScreen({ route, navigation }) {
     
     if (error) {
     }
-    
-    console.log('[PROFILE] Fetched livestreams count:', data?.length);
-    console.log('[PROFILE] First livestream:', data?.[0]);
     
     dispatchVideo({ type: 'SET_LIVESTREAMS', videos: data ?? [] });
   }
@@ -861,25 +857,10 @@ export default function ProfileScreen({ route, navigation }) {
       return normalized;
     });
     
-    console.log('[PROFILE] Combined content:', normalizedVideos?.length);
-    console.log('[PROFILE] Content items:', normalizedVideos?.map(item => ({
-      id: item.id,
-      type: item.type,
-      hasThumbnail: !!item.thumbnail_uri,
-      thumbnail_uri: item.thumbnail_uri,
-      thumbnail: item.thumbnail,
-      thumbnailUrl: item.thumbnailUrl
-    })));
-    
     navigation.navigate(ROUTES.PROFILE_VIDEOS, { videos: normalizedVideos, startIndex: index });
   }, [navigation]);
 
   const renderItem = useCallback(({ item, index }) => {
-    console.log('[PROFILE] Rendering item:', { 
-      id: item.id, 
-      type: item.video_url && !item.video_uri ? 'livestream' : 'video', 
-      thumbnail: item.thumbnail_url || item.thumbnail_uri 
-    });
     
     const isLivestream = activeTab === 'livestreams';
     
@@ -1194,8 +1175,6 @@ export default function ProfileScreen({ route, navigation }) {
         : likedVideos;
   
   // Debug: Log which array is being used for current tab
-  console.log('[PROFILE] Active tab:', activeTab, '| Active videos count:', activeVideos?.length);
-  console.log('[PROFILE] All arrays - public:', publicVideos?.length, '| livestreams:', livestreams?.length, '| private:', privateVideos?.length);
 
   // Check for cached user when globalUser is null (offline scenario)
   const [cachedUser, setCachedUser] = useState(null);
