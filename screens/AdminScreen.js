@@ -916,7 +916,7 @@ export default function AdminScreen({ navigation }) {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <Text style={styles.title}>Admin Panel</Text>
         
-        <View style={styles.tabContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16, flexGrow: 0 }} contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingRight: 40, paddingVertical: 8 }}>
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'pending' && styles.activeTab]}
             onPress={() => setActiveTab('pending')}
@@ -950,6 +950,14 @@ export default function AdminScreen({ navigation }) {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity 
+            style={[styles.tab, activeTab === 'appeals' && styles.activeTab]}
+            onPress={() => setActiveTab('appeals')}
+          >
+            <Text style={[styles.tabText, activeTab === 'appeals' && styles.activeTabText]}>
+              Appeals ({appeals.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
             style={[styles.tab, activeTab === 'stats' && styles.activeTab]}
             onPress={() => setActiveTab('stats')}
           >
@@ -957,7 +965,7 @@ export default function AdminScreen({ navigation }) {
               Stats
             </Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
         
         {activeTab === 'stats' ? (
           <ScrollView contentContainerStyle={{ padding: 16 }}>
@@ -1177,18 +1185,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#ea580c',
   },
-  tabContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 16,
-    gap: 12,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
+    tab: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     backgroundColor: '#f1f5f9',
     alignItems: 'center',
+    justifyContent: 'center',
+    height: 36,
+    minWidth: 100,
   },
   activeTab: {
     backgroundColor: COLORS.gold,
