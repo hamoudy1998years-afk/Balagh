@@ -191,16 +191,43 @@ export default function AdminScreen({ navigation }) {
 
   useEffect(() => {
     if (!isAdmin) return;
-    Promise.all([
-      loadPendingVideos(),
-      loadReports(),
-      loadScholarApplications(),
-      loadMessages(),
-      loadAppeals(),
-      loadStats(),
-    ]).finally(() => {
+    const promises = [];
+    if (pendingVideos.length === 0) promises.push(loadPendingVideos());
+    if (reports.length === 0) promises.push(loadReports());
+    if (scholarApps.length === 0) promises.push(loadScholarApplications());
+    if (messages.length === 0) promises.push(loadMessages());
+    if (appeals.length === 0) promises.push(loadAppeals());
+    promises.push(loadStats());
+    Promise.all(promises).finally(() => {
       setLoading(false);
     });
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const channel = supabase
+      .channel('admin-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, () => {
+        loadPendingVideos();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => {
+        loadReports();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scholar_applications' }, () => {
+        loadScholarApplications();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_messages' }, () => {
+        loadMessages();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appeals' }, () => {
+        loadAppeals();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [isAdmin]);
 
   useEffect(() => {
