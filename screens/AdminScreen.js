@@ -688,8 +688,7 @@ export default function AdminScreen({ navigation }) {
               )}
               <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}>
                 <View style={{ backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: s(30), width: s(50), height: s(50), justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontSize: ms(20) }}>▶</Text>
-                  <Text style={{ color: '#fff', fontSize: 20 }}>▶</Text>
+                  <Text style={{ color: '#fff', fontSize: ms(20) }}>▶</Text>
                 </View>
               </View>
             </TouchableOpacity>
