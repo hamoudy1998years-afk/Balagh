@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -48,6 +48,10 @@ export default function AdminScreen({ navigation }) {
   const [appeals, setAppeals] = useState([]);
   const [stats, setStats] = useState({ totalReviewed: 0, approved: 0, rejected: 0, pending: 0, appeals: 0, approvalRate: 0 });
   const [playingVideoId, setPlayingVideoId] = useState(null);
+  const TABS = ['pending', 'reports', 'scholars', 'messages', 'appeals', 'stats'];
+  const touchStartX = useRef(0);
+  const tabScrollRef = useRef(null);
+  const tabWidths = useRef({});
   const [dialog, setDialog] = useState({
     visible: false, 
     title: '', 
@@ -201,6 +205,12 @@ export default function AdminScreen({ navigation }) {
 
   useEffect(() => {
     setPlayingVideoId(null);
+    const index = TABS.indexOf(activeTab);
+    let offset = 0;
+    for (let i = 0; i < index; i++) {
+      offset += (tabWidths.current[i] || 116) + 8;
+    }
+    tabScrollRef.current?.scrollTo({ x: Math.max(0, offset - 16), animated: true });
   }, [activeTab]);
 
   const handleDismiss = async (reportId) => {
@@ -842,10 +852,11 @@ export default function AdminScreen({ navigation }) {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <Text style={styles.title}>Admin Panel</Text>
         
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16, flexGrow: 0 }} contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingRight: 40, paddingVertical: 8 }}>
+        <ScrollView ref={tabScrollRef} horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16, flexGrow: 0 }} contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingRight: 40, paddingVertical: 8 }}>
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'pending' && styles.activeTab]}
             onPress={() => setActiveTab('pending')}
+            onLayout={e => { tabWidths.current[0] = e.nativeEvent.layout.width; }}
           >
             <Text style={[styles.tabText, activeTab === 'pending' && styles.activeTabText]}>
               Pending ({pendingVideos.length})
@@ -854,6 +865,7 @@ export default function AdminScreen({ navigation }) {
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'reports' && styles.activeTab]}
             onPress={() => setActiveTab('reports')}
+            onLayout={e => { tabWidths.current[1] = e.nativeEvent.layout.width; }}
           >
             <Text style={[styles.tabText, activeTab === 'reports' && styles.activeTabText]}>
               Reports ({reports.length})
@@ -862,6 +874,7 @@ export default function AdminScreen({ navigation }) {
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'scholars' && styles.activeTab]}
             onPress={() => setActiveTab('scholars')}
+            onLayout={e => { tabWidths.current[2] = e.nativeEvent.layout.width; }}
           >
             <Text style={[styles.tabText, activeTab === 'scholars' && styles.activeTabText]}>
               Scholars ({scholarApps.length})
@@ -870,6 +883,7 @@ export default function AdminScreen({ navigation }) {
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'messages' && styles.activeTab]}
             onPress={() => setActiveTab('messages')}
+            onLayout={e => { tabWidths.current[3] = e.nativeEvent.layout.width; }}
           >
             <Text style={[styles.tabText, activeTab === 'messages' && styles.activeTabText]}>
               Messages ({messages.length})
@@ -878,6 +892,7 @@ export default function AdminScreen({ navigation }) {
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'appeals' && styles.activeTab]}
             onPress={() => setActiveTab('appeals')}
+            onLayout={e => { tabWidths.current[4] = e.nativeEvent.layout.width; }}
           >
             <Text style={[styles.tabText, activeTab === 'appeals' && styles.activeTabText]}>
               Appeals ({appeals.length})
@@ -886,6 +901,7 @@ export default function AdminScreen({ navigation }) {
           <TouchableOpacity 
             style={[styles.tab, activeTab === 'stats' && styles.activeTab]}
             onPress={() => setActiveTab('stats')}
+            onLayout={e => { tabWidths.current[5] = e.nativeEvent.layout.width; }}
           >
             <Text style={[styles.tabText, activeTab === 'stats' && styles.activeTabText]}>
               Stats
@@ -893,6 +909,18 @@ export default function AdminScreen({ navigation }) {
           </TouchableOpacity>
         </ScrollView>
         
+        <View
+          style={{ flex: 1 }}
+          onTouchStart={e => { touchStartX.current = e.nativeEvent.pageX; }}
+          onTouchEnd={e => {
+            if (activeTab === 'pending') return;
+            const diff = touchStartX.current - e.nativeEvent.pageX;
+            if (Math.abs(diff) < 50) return;
+            const currentIndex = TABS.indexOf(activeTab);
+            if (diff > 0 && currentIndex < TABS.length - 1) setActiveTab(TABS[currentIndex + 1]);
+            if (diff < 0 && currentIndex > 0) setActiveTab(TABS[currentIndex - 1]);
+          }}
+        >
         {activeTab === 'stats' ? (
           <ScrollView contentContainerStyle={{ padding: 16 }}>
             {renderStats()}
@@ -928,6 +956,7 @@ export default function AdminScreen({ navigation }) {
           />
         ) : null}
 
+        </View>
         <ModernDialog
           visible={dialog.visible}
           title={dialog.title}
