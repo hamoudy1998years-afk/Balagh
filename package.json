@@ -2,7 +2,8 @@
   "name": "balagh-root",
   "version": "1.0.0",
   "scripts": {
-    "start": "cd server && node server.js"
+    "start": "cd server && node server.js",
+    "postinstall": "node scripts/patch-expo-build.js"
   },
   "engines": {
     "node": "18.x"
