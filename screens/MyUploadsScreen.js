@@ -61,7 +61,7 @@ export default function MyUploadsScreen({ navigation }) {
       setProfileStatus({ is_banned: isBanned, rejection_count: rejectionCount });
       const { data: videosData, error: videosError } = await supabase
         .from('videos')
-        .select('id, caption, category, thumbnail_url, created_at, status, rejection_reason, rejection_count, is_banned')
+        .select('id, caption, category, thumbnail_url, created_at, status, rejection_reason')
         .eq('user_id', currentUser.id)
         .eq('status', activeTab)
         .order('created_at', { ascending: false });

@@ -447,7 +447,7 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   async function loadVideos(userId, isOwner) {
-    const { data: pub } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', false)
+    const { data: pub } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', false).eq('status', 'approved')
       .order('is_pinned', { ascending: false }).order('pin_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
     const pubVideos = pub ?? [];
     let privVideos = [];
