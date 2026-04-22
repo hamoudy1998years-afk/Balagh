@@ -162,16 +162,34 @@ export default function UploadScreen({ navigation }) {
     });
     if (!result.canceled) {
       // Check file size (100MB max)
-      if (result.assets[0].fileSize > 100 * 1024 * 1024) {
-        setDialog({
-          visible: true,
-          title: 'File too large',
-          message: 'Maximum file size is 100MB. Please select a shorter video.',
-          type: 'warning',
-          buttons: [{ text: 'OK' }]
-        });
-        return;
-      }
+      if (result.assets[0].fileSize > 500 * 1024 * 1024) {
+  setDialog({
+    visible: true,
+    title: 'File Too Large',
+    message: 'Maximum file size is 500MB. Please select a shorter video.',
+    type: 'warning',
+    buttons: [{ text: 'OK' }]
+  });
+  return;
+}
+
+if (result.assets[0].fileSize > 150 * 1024 * 1024) {
+  setDialog({
+    visible: true,
+    title: 'Large File Warning ⚠️',
+    message: 'This video is over 150MB. Upload may take a while depending on your WiFi or mobile data speed. You can still proceed.',
+    type: 'warning',
+    buttons: [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Continue Anyway', onPress: async () => {
+        const compressedUri = await compressVideo(result.assets[0].uri, result.assets[0].fileSize);
+        setVideo({ ...result.assets[0], uri: compressedUri });
+        await generateThumbnailPreview(compressedUri);
+      }}
+    ]
+  });
+  return;
+}
       
       // NEW: Compress video if needed
       const compressedUri = await compressVideo(result.assets[0].uri, result.assets[0].fileSize);
