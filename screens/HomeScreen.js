@@ -224,7 +224,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       .from('videos')
       .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)')
       .in('user_id', followingIds)
-      .neq('user_id', user.id);
+      .neq('user_id', user.id)
+      .eq('status', 'approved');
     
     if (blockedIds.length > 0) {
       query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
@@ -347,7 +348,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         .from('videos')
         .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)')
         .in('user_id', followingIds)
-        .neq('user_id', user.id);
+        .neq('user_id', user.id)
+        .eq('status', 'approved');
       
       if (blockedIds.length > 0) {
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
@@ -379,7 +381,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
       let query = supabase
         .from('videos')
-        .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)');
+        .select('*, likes_count, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)')
+        .eq('status', 'approved');
       
       if (blockedIds.length > 0) {
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
@@ -438,9 +441,10 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   }
 
   async function onRefresh() {
-    setRefreshing(true);
-    await Promise.all([loadVideos(), loadMyInteractions()]);
-    setRefreshing(false);
+      clearFeedCache();
+      setRefreshing(true);
+      await Promise.all([loadVideos(), loadMyInteractions()]);
+      setRefreshing(false);
   }
 
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
@@ -668,7 +672,8 @@ export default function HomeScreen({ navigation }) {
         .from('videos')
         .select('*, profiles!videos_user_id_profiles_fkey(id, username, avatar_url, is_scholar, trusted_user)')
         .in('user_id', followingIds)
-        .neq('user_id', user.id);
+        .neq('user_id', user.id)
+        .eq('status', 'approved');
       
       if (blockedIds.length > 0) {
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);

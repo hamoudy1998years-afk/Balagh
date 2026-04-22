@@ -400,11 +400,12 @@ export default function AdminScreen({ navigation }) {
           onPress: async () => {
             setDialog(d => ({ ...d, visible: false }));
             try {
-              await supabase
+              const { error: approveError } = await supabase
                 .from('videos')
                 .update({ status: 'approved', reviewed_at: new Date().toISOString() })
                 .eq('id', video.id);
-              
+
+              if (approveError) throw new Error(approveError.message);
               setPendingVideos(prev => prev.filter(v => v.id !== video.id));
               await supabase.from('profiles').update({ rejection_count: 0 }).eq('id', video.user_id);
               await supabase.from('notifications').insert({ user_id: video.user_id, actor_id: authUser.id, video_id: video.id, type: 'video_approved' });
