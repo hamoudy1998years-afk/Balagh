@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "cd server && node server.js",
-    "postinstall": "node scripts/patch-expo-build.js"
+    "postinstall": "patch-package"
   },
   "engines": {
     "node": "18.x"
@@ -25,6 +25,7 @@
     "expo": "^55.0.8",
     "expo-asset": "~55.0.10",
     "expo-auth-session": "~55.0.7",
+    "expo-build-properties": "~55.0.13",
     "expo-camera": "~55.0.9",
     "expo-crypto": "~55.0.9",
     "expo-file-system": "~55.0.10",
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.10",
+    "patch-package": "^8.0.1",
     "sharp": "^0.34.5",
     "typescript": "~5.9.2"
   }

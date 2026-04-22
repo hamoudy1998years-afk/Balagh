@@ -4,7 +4,7 @@
     "slug": "Balagh",
     "scheme": "bushrann",
     "version": "1.6.1",
-    "privacyPolicyUrl": "https://sites.google.com/view/bushrann/privacy-policy",
+    "privacyPolicyUrl": "https://sites.google.com/view/bushrann/privacy-policy ",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -67,6 +67,16 @@
           }
         }
       ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinCompilerArgs": [
+              "-opt-in=kotlin.RequiresOptIn"
+            ]
+          }
+        }
+      ],
       "expo-secure-store",
       [
         "expo-notifications",
@@ -106,6 +116,6 @@
         "projectId": "5804d13c-1244-4972-8b7a-083f99fbb885"
       }
     },
-    "termsOfServiceUrl": "https://sites.google.com/view/bushrann/terms"
+    "termsOfServiceUrl": "https://sites.google.com/view/bushrann/terms "
   }
 }
