@@ -222,7 +222,11 @@ function VideoCard({
   useEffect(() => { setFollowed(initialFollowed); }, [item.user_id]);
   // Sync state to refs so PanResponder always reads latest values
   useEffect(() => { durationRef.current = duration; }, [duration]);
-  useEffect(() => { playerRef.current = player.current; }, [player.current]);
+  useEffect(() => { 
+    if (player?.current) {
+      playerRef.current = player.current; 
+    }
+  }, [player?.current]);
   // TikTok-style: fade in/out progress bar based on paused or dragging
   useEffect(() => {
     if (paused || isDragging) {

@@ -96,7 +96,6 @@ function LiveFeed({ navigation }) {
 
     return () => {
       appStateSub.remove();
-      channel.unsubscribe();
       clearInterval(intervalRef.current);
     };
   }, []);
@@ -692,6 +691,17 @@ export default function HomeScreen({ navigation }) {
     followingRef.current?.setActive(isFocused && index === 0);
     foryouRef.current?.setActive(isFocused && index === 1);
   }, [isFocused, index]);
+
+  // Refresh feed when returning to home screen
+  useEffect(() => {
+    if (isFocused) {
+      if (index === 0) {
+        followingRef.current?.refresh?.();
+      } else if (index === 1) {
+        foryouRef.current?.refresh?.();
+      }
+    }
+  }, [isFocused]);
 
   useEffect(() => {
     homeRefreshRef.current = () => {
