@@ -549,9 +549,12 @@ export default function LoginScreen({ navigation }) {
       suppressDropdown.current = false;
       return;
     }
-    if (savedAccounts.length > 0) {
-      setShowDropdown(true);
-    }
+    const text = identifier.toLowerCase();
+    const hasMatches = savedAccounts.some(a =>
+      (a.email || '').toLowerCase().includes(text) ||
+      (a.identifier || '').toLowerCase().includes(text)
+    );
+    if (hasMatches) setShowDropdown(true);
   };
 
   const handleIdentifierBlur = () => {
@@ -560,9 +563,12 @@ export default function LoginScreen({ navigation }) {
 
   const handleIdentifierChange = (text) => {
     setIdentifier(text);
-    if (savedAccounts.length > 0) {
-      setShowDropdown(true);
-    }
+    const lower = text.toLowerCase();
+    const hasMatches = savedAccounts.some(a =>
+      (a.email || '').toLowerCase().includes(lower) ||
+      (a.identifier || '').toLowerCase().includes(lower)
+    );
+    setShowDropdown(hasMatches);
   };
 
   const biometricIcon = biometricType === 'face' ? 'face-recognition' : 'fingerprint';
