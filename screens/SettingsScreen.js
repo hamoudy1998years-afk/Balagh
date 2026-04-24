@@ -552,11 +552,6 @@ export default function SettingsScreen({ navigation }) {
           <Row icon="📱" label="Phone Number" sublabel={phone || 'Tap to add a phone number'} onPress={handleStartEditPhone} last />
         )}
       </Card>
-      <GroupLabel text="LINKED ACCOUNTS" />
-      <Card>
-        <Row icon="🔄" label="Switch Account" sublabel="Manage multiple accounts" onPress={handleSwitchAccountAlert} />
-        <Row icon="➕" label="Add Account" sublabel="Log in to another account" onPress={handleAddAccountAlert} last />
-      </Card>
       <GroupLabel text="DANGER ZONE" />
       <Card>
         <Row icon="🚪" label="Log Out" onPress={handleLogout} danger />
