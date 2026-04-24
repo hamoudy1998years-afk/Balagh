@@ -7,6 +7,8 @@ const UserContext = createContext();
 export function UserProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [availableAccounts, setAvailableAccounts] = useState([]);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const [following, setFollowing] = useState(new Set());
   const [blockedUsers, setBlockedUsers] = useState(new Set());
 
@@ -40,6 +42,16 @@ export function UserProvider({ children }) {
         const mergedUser = { ...cached, ...freshUser, ...profile };
         setUser(mergedUser);
         await userCache.set(mergedUser);
+        await userCache.savedAccounts.add({
+          id: mergedUser.id,
+          email: mergedUser.email,
+          username: mergedUser.username ?? mergedUser.user_metadata?.username,
+          full_name: mergedUser.full_name ?? mergedUser.user_metadata?.full_name,
+          avatar_url: mergedUser.avatar_url,
+          refresh_token: (await supabase.auth.getSession()).data.session?.refresh_token,
+        });
+        const accounts = await userCache.savedAccounts.getAll();
+        setAvailableAccounts(accounts);
         
         // Load blocked users from database
         const { data: blockedData } = await supabase
@@ -60,6 +72,38 @@ export function UserProvider({ children }) {
       setLoading(false);
     }
   }
+
+  const switchToAccount = useCallback(async (account) => {
+    if (!account?.refresh_token) return { success: false, error: 'No saved session for this account.' };
+    setSwitchingAccount(true);
+    try {
+      const { data, error } = await supabase.auth.refreshSession({ refresh_token: account.refresh_token });
+      if (error || !data?.session) return { success: false, error: error?.message ?? 'Session expired. Please log in again.' };
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .single();
+      const mergedUser = { ...data.user, ...profile };
+      setUser(mergedUser);
+      await userCache.set(mergedUser);
+      await userCache.savedAccounts.add({
+        id: mergedUser.id,
+        email: mergedUser.email,
+        username: mergedUser.username ?? mergedUser.user_metadata?.username,
+        full_name: mergedUser.full_name ?? mergedUser.user_metadata?.full_name,
+        avatar_url: mergedUser.avatar_url,
+        refresh_token: data.session.refresh_token,
+      });
+      const accounts = await userCache.savedAccounts.getAll();
+      setAvailableAccounts(accounts);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    } finally {
+      setSwitchingAccount(false);
+    }
+  }, []);
 
   const isFollowing = useCallback((userId) => {
     return following.has(userId);
@@ -171,6 +215,9 @@ export function UserProvider({ children }) {
       setUser, 
       loading, 
       refreshUser: loadUser,
+      availableAccounts,
+      switchToAccount,
+      switchingAccount,
       following,
       setFollowing,
       isFollowing,

@@ -313,6 +313,13 @@ export default function ProfileScreen({ route, navigation }) {
   }, []);
 
   useEffectHook(() => {
+    if (globalUser?.id) {
+      lastUserIdRef.current = null;
+      init(globalUser.id);
+    }
+  }, [globalUser?.id]);
+
+  useEffectHook(() => {
     livestreamIdsRef.current = new Set(livestreams.map(v => v.id));
   }, [livestreams]);
 
@@ -1073,16 +1080,6 @@ export default function ProfileScreen({ route, navigation }) {
               onPress={() => navigation.navigate(ROUTES.ADMIN)}
             >
               <Text style={styles.adminButtonText}>🛡️ Admin Panel</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Switch Account button */}
-          {(availableAccounts?.length ?? 0) > 1 && (
-            <TouchableOpacity
-              style={[styles.adminButton, { backgroundColor: '#6366f1', marginTop: 10 }]}
-              onPress={() => setSwitchModalVisible(true)}
-            >
-              <Text style={styles.adminButtonText}>🔄 Switch Account</Text>
             </TouchableOpacity>
           )}
         </>

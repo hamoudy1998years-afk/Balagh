@@ -34,6 +34,34 @@ export const userCache = {
     }
   },
 
+  savedAccounts: {
+    getAll: async () => {
+      try {
+        const raw = await AsyncStorage.getItem('bushrann_saved_accounts');
+        return raw ? JSON.parse(raw) : [];
+      } catch { return []; }
+    },
+    add: async (account) => {
+      try {
+        const raw = await AsyncStorage.getItem('bushrann_saved_accounts');
+        const list = raw ? JSON.parse(raw) : [];
+        const filtered = list.filter(a => a.id !== account.id);
+        filtered.unshift(account);
+        await AsyncStorage.setItem('bushrann_saved_accounts', JSON.stringify(filtered));
+      } catch (e) { __DEV__ && console.log('savedAccounts.add error:', e); }
+    },
+    remove: async (id) => {
+      try {
+        const raw = await AsyncStorage.getItem('bushrann_saved_accounts');
+        const list = raw ? JSON.parse(raw) : [];
+        await AsyncStorage.setItem('bushrann_saved_accounts', JSON.stringify(list.filter(a => a.id !== id)));
+      } catch (e) { __DEV__ && console.log('savedAccounts.remove error:', e); }
+    },
+    clear: async () => {
+      try { await AsyncStorage.removeItem('bushrann_saved_accounts'); } catch {}
+    },
+  },
+
   update: async (updates) => {
     try {
       const current = await userCache.get();

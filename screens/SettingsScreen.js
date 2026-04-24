@@ -162,7 +162,7 @@ function SavingBanner({ visible }) {
 
 export default function SettingsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { user: currentUser, setUser } = useUser();
+  const { user: currentUser, setUser, availableAccounts, switchToAccount, switchingAccount } = useUser() ?? {};
   const [screen, setScreen] = useState(null);
 
   const [profile,     setProfile]     = useState(null);
@@ -197,8 +197,9 @@ export default function SettingsScreen({ navigation }) {
 
 
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [switchModalVisible, setSwitchModalVisible] = useState(false);
 
-  useEffect(() => { init(); }, []);
+  useEffect(() => { init(); }, [currentUser?.id]);
 
   useEffect(() => {
     const backAction = () => {
@@ -459,6 +460,62 @@ export default function SettingsScreen({ navigation }) {
             <AnimatedButton label="Log Out" danger  onPress={confirmLogout} />
           </View>
         </View>
+      </View>
+    </Modal>
+  );
+
+  const switchAccountModal = (
+    <Modal visible={switchModalVisible} transparent animationType="slide" onRequestClose={() => setSwitchModalVisible(false)}>
+      <Pressable style={styles.modalOverlay} onPress={() => setSwitchModalVisible(false)} />
+      <View style={[styles.switchSheet, { paddingBottom: insets.bottom + 20 }]}>
+        <Text style={styles.switchTitle}>Switch Account</Text>
+        {(availableAccounts ?? []).map((account, idx) => {
+          const isCurrent = account.email === currentUser?.email;
+          return (
+            <TouchableOpacity
+              key={idx}
+              style={[styles.switchOption, isCurrent && { backgroundColor: '#f1f5f9' }]}
+              onPress={async () => {
+                if (isCurrent) { setSwitchModalVisible(false); return; }
+                setSwitchModalVisible(false);
+                const result = await switchToAccount?.(account);
+                if (result && !result.success) {
+                  setDialog({
+                    visible: true,
+                    title: 'Switch Failed',
+                    message: result.reason === 'NO_PASSWORD' ? 'Please log in with password first.' : result.error || 'Could not switch account.',
+                    type: 'error',
+                    buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
+                  });
+                }
+              }}
+              disabled={switchingAccount}
+            >
+              <View style={styles.switchAvatar}>
+                {account.avatar_url
+                  ? <Image source={{ uri: account.avatar_url }} style={{ width: 38, height: 38, borderRadius: 19 }} />
+                  : <Text style={styles.switchAvatarText}>{(account.username || account.email || '?')[0].toUpperCase()}</Text>
+                }
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.switchName, isCurrent && { fontWeight: '700' }]}>
+                  {account.full_name || account.username || account.email}{isCurrent ? ' ✓' : ''}
+                </Text>
+                <Text style={styles.switchEmail}>@{account.username || account.email}</Text>
+              </View>
+              {isCurrent && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: ACCENT }} />}
+            </TouchableOpacity>
+          );
+        })}
+        <TouchableOpacity
+          style={[styles.switchOption, { borderTopWidth: 1, borderTopColor: BORDER, marginTop: 8 }]}
+          onPress={() => { setSwitchModalVisible(false); navigation.navigate(ROUTES.LOGIN); }}
+        >
+          <Text style={[styles.switchName, { color: '#6366f1' }]}>➕ Add Another Account</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.switchOption} onPress={() => setSwitchModalVisible(false)}>
+          <Text style={[styles.switchName, { color: DANGER }]}>Cancel</Text>
+        </TouchableOpacity>
       </View>
     </Modal>
   );
@@ -812,6 +869,7 @@ export default function SettingsScreen({ navigation }) {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {logoutModal}
+      {switchAccountModal}
 
       <View style={styles.header}>
         <TouchableOpacity onPress={navigation.goBack} style={styles.backBtn}>
@@ -822,23 +880,30 @@ export default function SettingsScreen({ navigation }) {
       </View>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 40 }]}>
         <View style={styles.profileCard}>
-          <View style={styles.profileAvatarWrap}>
-            {profile?.avatar_url ? (
-              <Image source={{ uri: profile.avatar_url }} style={styles.profileAvatar} />
-            ) : (
-              <View style={styles.profileAvatarFallback}>
-                <Text style={{ fontSize: 30, color: '#fff' }}>{profile?.username?.[0]?.toUpperCase() ?? '?'}</Text>
-              </View>
-            )}
-            <View style={styles.profileOnline} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+            <View style={styles.profileAvatarWrap}>
+              {profile?.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.profileAvatar} />
+              ) : (
+                <View style={styles.profileAvatarFallback}>
+                  <Text style={{ fontSize: 30, color: '#fff' }}>{profile?.username?.[0]?.toUpperCase() ?? '?'}</Text>
+                </View>
+              )}
+              <View style={styles.profileOnline} />
+            </View>
+            <View style={styles.profileInfo}>
+              <Text style={styles.profileName}>{profile?.full_name || profile?.username || currentUser?.user_metadata?.username || 'Your Name'}</Text>
+              <Text style={styles.profileHandle}>@{profile?.username || currentUser?.user_metadata?.username || 'yourhandle'}</Text>
+            </View>
           </View>
-          <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{profile?.full_name || profile?.username || currentUser?.user_metadata?.username || 'Your Name'}</Text>
-            <Text style={styles.profileHandle}>@{profile?.username || currentUser?.user_metadata?.username || 'yourhandle'}</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity style={styles.profileBtnOutline} onPress={handleNavigateEditProfileFromProfile}>
+              <Text style={styles.profileBtnOutlineText}>Edit Profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.profileBtnFilled} onPress={() => setSwitchModalVisible(true)}>
+              <Text style={styles.profileBtnFilledText}>Switch Account</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.profileEditBtn} onPress={handleNavigateEditProfileFromProfile}>
-            <Text style={styles.profileEditText}>Edit Profile</Text>
-          </TouchableOpacity>
         </View>
         <GroupLabel text="PREFERENCES" />
         <Card>
@@ -886,8 +951,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: '800', color: TEXT, letterSpacing: -0.3 },
   scroll:      { paddingHorizontal: 16, paddingTop: 20 },
   profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: CARD,
     borderRadius: 20,
     padding: 16,
@@ -1018,6 +1081,42 @@ const styles = StyleSheet.create({
   modalBtnText:        { fontSize: 15, fontWeight: '700', color: '#fff' },
   modalBtnTextDanger:  { color: '#fff' },
   modalBtnTextOutline: { color: SUBTEXT },
+  switchSheet: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 16,
+    borderTopWidth: 0.5,
+    borderColor: BORDER,
+  },
+  switchTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  switchOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    gap: 12,
+  },
+  switchAvatar: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  switchAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
+  switchName: { fontSize: 15, color: TEXT, fontWeight: '500' },
+  switchEmail: { fontSize: 12, color: SUBTEXT, marginTop: 2 },
+  profileBtnOutline:     { flex: 1, paddingVertical: 9, borderRadius: 20, borderWidth: 1.5, borderColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  profileBtnOutlineText: { fontSize: 13, fontWeight: '600', color: ACCENT },
+  profileBtnFilled:      { flex: 1, paddingVertical: 9, borderRadius: 20, backgroundColor: '#6366f1', alignItems: 'center', justifyContent: 'center' },
+  profileBtnFilledText:  { fontSize: 13, fontWeight: '600', color: '#fff' },
   
   // iOS Style Unblock Modal
   unblockModalOverlay: {
