@@ -247,17 +247,26 @@ function VideoCard({
   }, [paused, isDragging]);
 
   useEffect(() => {
-    const loadCachedVideo = async () => {
-      const cachedUri = await videoCache.getCachedVideo(item.video_url);
-      if (cachedUri) {
+  const loadCachedVideo = async () => {
+    const cachedUri = await videoCache.getCachedVideo(item.video_url);
+    if (cachedUri) {
+      // Verify the file actually exists before using it
+      const fileInfo = await FileSystem.getInfoAsync(cachedUri);
+      if (fileInfo.exists) {
         setVideoUri(cachedUri);
       } else {
+        // File is gone — delete bad cache entry and use remote URL
+        await videoCache.removeCachedVideo(item.video_url);
         setVideoUri(item.video_url);
         videoCache.cacheVideo(item.video_url);
       }
-    };
-    loadCachedVideo();
-  }, [item.video_url]);
+    } else {
+      setVideoUri(item.video_url);
+      videoCache.cacheVideo(item.video_url);
+    }
+  };
+  loadCachedVideo();
+}, [item.video_url]);
 
   useEffect(() => {
     const channel = supabase
@@ -758,8 +767,6 @@ function VideoCard({
         onDismiss={() => setShowReportSheet(false)}
       />
 
-
-
       <CommentsModal
         visible={showComments}
         onClose={() => setShowComments(false)}
@@ -779,28 +786,36 @@ function VideoCard({
         onDismiss={() => setDialog({ ...dialog, visible: false })}
       />
 
-      {/* TikTok-style Progress Bar - always mounted, opacity controls visibility */}
+      {/* =====================================================
+          TikTok-style Progress Bar — UPDATED with duration
+          ===================================================== */}
       <Animated.View 
         style={[
           styles.progressContainer, 
           { 
-            bottom: safeBottom + s(55), 
+            bottom: safeBottom + s(65),   // ← changed from s(55)
             zIndex: 10, 
-            height: 40, 
+            height: 60,                   // ← changed from 40
             justifyContent: 'center',
-            opacity: barOpacity // Bound to animation value
+            opacity: barOpacity
           }
         ]}
         onLayout={onProgressBarLayout}
         {...panResponder.panHandlers}
       >
+        {/* ✅ NEW: TikTok-style current time / total duration */}
+        <View style={styles.timeRow}>
+          <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+          <Text style={styles.timeText}>{formatTime(duration)}</Text>
+        </View>
+
         {/* Invisible hit slop area */}
         <View style={{ paddingVertical: 15, width: '100%' }}>
           <View
             ref={progressBarRef}
             style={[
               styles.progressBarBg, 
-              { height: isDragging ? 6 : 4 } // Thicker when dragging (TikTok style)
+              { height: isDragging ? 6 : 4 }
             ]}
           >
             <Animated.View 
@@ -849,7 +864,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     zIndex: 2, 
     pointerEvents: 'none',
-    // No background blur - transparent
   },
 
   overlay: { position: 'absolute', left: s(16), right: s(80), zIndex: 3 },

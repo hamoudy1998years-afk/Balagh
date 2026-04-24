@@ -42,6 +42,10 @@ class VideoCache {
     const fileInfo = await FileSystem.getInfoAsync(cacheFile);
     
     if (fileInfo.exists) {
+      if (!fileInfo.size || fileInfo.size < 1000) {
+        await FileSystem.deleteAsync(cacheFile, { idempotent: true });
+        return null;
+      }
       return cacheFile;
     }
     
@@ -93,12 +97,20 @@ class VideoCache {
         fileStats.sort((a, b) => a.modificationTime - b.modificationTime);
         const toDelete = Math.ceil(files.length * 0.2);
         for (let i = 0; i < toDelete; i++) {
-          await FileSystem.deleteAsync(fileStats[i].path);
+          await FileSystem.deleteAsync(fileStats[i].path, { idempotent: true });
         }
       }
     } catch (error) {
       console.error('[VideoCache] Cleanup error:', error);
     }
+  }
+
+  async removeCachedVideo(url) {
+    if (!url) return;
+    const cacheFile = this.getCacheFileName(url);
+    try {
+      await FileSystem.deleteAsync(cacheFile, { idempotent: true });
+    } catch (e) {}
   }
 
   async clearCache() {
