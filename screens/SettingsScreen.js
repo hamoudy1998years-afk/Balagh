@@ -183,6 +183,10 @@ export default function SettingsScreen({ navigation }) {
   const [editingPhone, setEditingPhone] = useState(false);
   const [savingPhone,  setSavingPhone]  = useState(false);
 
+  const [newEmail,     setNewEmail]     = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailSent,    setEmailSent]    = useState(false);
+
   const [blockedUsers,   setBlockedUsers]   = useState([]);
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [unblockModalVisible, setUnblockModalVisible] = useState(false);
@@ -204,6 +208,7 @@ export default function SettingsScreen({ navigation }) {
   useEffect(() => {
     const backAction = () => {
       if (screen === 'blocked') { setScreen(null); return true; }
+      if (screen === 'changeEmail') { setScreen('account'); return true; }
       if (screen === 'faq' || screen === 'contact' || screen === 'terms' || screen === 'privacypolicy') { setScreen('help'); return true; }
       if (screen !== null) { setScreen(null); return true; }
       return false;
@@ -330,8 +335,34 @@ export default function SettingsScreen({ navigation }) {
   }, [navigation]);
 
   const handleChangeEmailAlert = React.useCallback(() => {
-    setDialog({ visible: true, title: 'Email', message: 'To change your email, please contact support.', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+    setNewEmail('');
+    setEmailSent(false);
+    setScreen('changeEmail');
   }, []);
+
+  async function handleSendEmailVerification() {
+    if (!newEmail.trim()) {
+      setDialog({ visible: true, title: 'Empty Field', message: 'Please enter a new email address.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail.trim())) {
+      setDialog({ visible: true, title: 'Invalid Email', message: 'Please enter a valid email address.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      return;
+    }
+    if (newEmail.trim().toLowerCase() === currentUser?.email?.toLowerCase()) {
+      setDialog({ visible: true, title: 'Same Email', message: 'The new email is the same as your current email.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      return;
+    }
+    setEmailLoading(true);
+    const { error } = await supabase.auth.updateUser({ email: newEmail.trim() });
+    setEmailLoading(false);
+    if (error) {
+      setDialog({ visible: true, title: 'Error', message: error.message || 'Failed to send verification email.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      return;
+    }
+    setEmailSent(true);
+  }
 
   const handleCancelEditPhone = React.useCallback(() => {
     setPhoneInput(phone);
@@ -518,6 +549,84 @@ export default function SettingsScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     </Modal>
+  );
+
+  if (screen === 'changeEmail') return (
+    <SubScreen title="Change Email" onBack={() => setScreen('account')} insets={insets}>
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+      />
+
+      {emailSent ? (
+        <View style={styles.emailSentWrap}>
+          <View style={styles.emailSentIconWrap}>
+            <Text style={styles.emailSentEmoji}>✉️</Text>
+          </View>
+          <Text style={styles.emailSentTitle}>Check your inbox</Text>
+          <Text style={styles.emailSentDesc}>
+            We sent a verification link to{'\n'}
+            <Text style={styles.emailSentAddress}>{newEmail.trim()}</Text>
+          </Text>
+          <Text style={styles.emailSentNote}>
+            Tap the link in the email to confirm your new address. Your email won't change until you verify it.
+          </Text>
+          <TouchableOpacity style={styles.emailResendBtn} onPress={() => setEmailSent(false)}>
+            <Text style={styles.emailResendText}>Use a different email</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          <GroupLabel text="CURRENT EMAIL" />
+          <Card>
+            <View style={styles.emailCurrentWrap}>
+              <View style={[styles.rowIcon, { backgroundColor: ACCENT_DIM }]}>
+                <Text style={{ fontSize: 17 }}>📧</Text>
+              </View>
+              <Text style={styles.emailCurrentText}>{currentUser?.email ?? 'Not set'}</Text>
+            </View>
+          </Card>
+
+          <GroupLabel text="NEW EMAIL" />
+          <Card>
+            <View style={styles.emailInputWrap}>
+              <TextInput
+                style={styles.emailInput}
+                value={newEmail}
+                onChangeText={setNewEmail}
+                placeholder="Enter new email address"
+                placeholderTextColor={SUBTEXT}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+              />
+            </View>
+          </Card>
+
+          <View style={styles.emailInfoBox}>
+            <Text style={styles.emailInfoText}>
+              🔒  We'll send a verification link to your new address. Your email won't change until you confirm it.
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.emailSubmitBtn, emailLoading && { opacity: 0.7 }]}
+            onPress={handleSendEmailVerification}
+            disabled={emailLoading}
+            activeOpacity={0.85}
+          >
+            {emailLoading
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={styles.emailSubmitText}>Send Verification Link</Text>
+            }
+          </TouchableOpacity>
+        </>
+      )}
+    </SubScreen>
   );
 
   if (screen === 'account') return (
@@ -1180,4 +1289,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+  emailCurrentWrap:  { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
+  emailCurrentText:  { fontSize: 15, color: SUBTEXT, fontWeight: '500' },
+  emailInputWrap:    { paddingHorizontal: 16, paddingVertical: 12 },
+  emailInput:        { fontSize: 16, color: TEXT, paddingVertical: 6 },
+  emailInfoBox:      { backgroundColor: ACCENT_DIM, borderRadius: 14, padding: 14, marginBottom: 24, borderWidth: 0.5, borderColor: ACCENT + '30' },
+  emailInfoText:     { fontSize: 13, color: ACCENT, lineHeight: 20 },
+  emailSubmitBtn:    { backgroundColor: ACCENT, borderRadius: 16, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
+  emailSubmitText:   { color: '#fff', fontSize: 16, fontWeight: '700' },
+  emailSentWrap:     { flex: 1, alignItems: 'center', paddingTop: 40, paddingHorizontal: 24 },
+  emailSentIconWrap: { width: 80, height: 80, borderRadius: 40, backgroundColor: ACCENT_DIM, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  emailSentEmoji:    { fontSize: 36 },
+  emailSentTitle:    { fontSize: 22, fontWeight: '800', color: TEXT, marginBottom: 12 },
+  emailSentDesc:     { fontSize: 15, color: SUBTEXT, textAlign: 'center', lineHeight: 23, marginBottom: 16 },
+  emailSentAddress:  { color: TEXT, fontWeight: '700' },
+  emailSentNote:     { fontSize: 13, color: SUBTEXT, textAlign: 'center', lineHeight: 20, marginBottom: 32 },
+  emailResendBtn:    { paddingVertical: 12, paddingHorizontal: 24, borderRadius: 20, borderWidth: 1.5, borderColor: ACCENT },
+  emailResendText:   { color: ACCENT, fontWeight: '600', fontSize: 14 },
 });
