@@ -981,9 +981,13 @@ export default function LoginScreen({ navigation }) {
                         style={styles.keypadButton}
                         onPress={() => handlePinKeyPress(key)}
                       >
-                        <Text style={styles.keypadButtonText}>
-                          {key === 'back' ? '⌫' : key === 'enter' ? '→' : key}
-                        </Text>
+                        {key === 'back' ? (
+                          <MaterialCommunityIcons name="backspace-outline" size={ms(26)} color="#ffffff" />
+                        ) : key === 'enter' ? (
+                          <MaterialCommunityIcons name="arrow-right-circle-outline" size={ms(26)} color={COLORS.gold} />
+                        ) : (
+                          <Text style={styles.keypadButtonText}>{key}</Text>
+                        )}
                       </TouchableOpacity>
                     ))}
                   </View>

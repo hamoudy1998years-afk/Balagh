@@ -23,7 +23,6 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useBiometricAuth } from './hooks/useBiometricAuth';
 import FollowListScreen from './screens/FollowListScreen';
 import SettingsScreen from './screens/SettingsScreen';
-import AvatarCropScreen from './screens/AvatarCropScreen';
 import VideoDetailScreen from './screens/VideoDetailScreen';
 import { useEffect, useState, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -509,7 +508,6 @@ function App() {
                       <Stack.Screen name="FollowList" component={FollowListScreen} />
                       <Stack.Screen name="Settings" component={SettingsScreen} />
                       <Stack.Screen name="UserProfile" component={ProfileScreen} />
-                      <Stack.Screen name="AvatarCrop" component={AvatarCropScreen} />
                       <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
                       <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
                       <Stack.Screen name="Admin" component={AdminScreen} />

@@ -184,7 +184,7 @@ function DownloadProgressOverlay({ visible, progress }) {
 export default function ProfileScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const targetUserId = route?.params?.profileUserId ?? null;
-  const { user: globalUser, loading: userLoading, blockUser } = useUser();
+  const { user: globalUser, loading: userLoading, blockUser, availableAccounts, refreshAccounts, switchToAccount, switchingAccount } = useUser() ?? {};
 
   useEffectHook(() => {
     if (!navigation) return;
@@ -206,6 +206,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [switchModalVisible, setSwitchModalVisible] = useState(false);
   const [targetIsAdmin, setTargetIsAdmin] = useState(false);
   const [adminCount, setAdminCount] = useState(0);
   const [addingAdmin, setAddingAdmin] = useState(false);
@@ -213,17 +214,6 @@ export default function ProfileScreen({ route, navigation }) {
   const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData, hasPendingApplication } = profileState;
   const { publicVideos, privateVideos, likedVideos, livestreams, totalLikes, activeTab } = videoState;
   const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress, toast } = uiState;
-
-  useEffectHook(() => {
-    const unsubscribe = navigation.addListener('focus', async () => {
-      const croppedUri = route?.params?.croppedUri;
-      if (croppedUri) {
-        navigation.setParams({ croppedUri: null });
-        await uploadCroppedAvatar(croppedUri);
-      }
-    });
-    return unsubscribe;
-  }, [navigation, route?.params?.croppedUri]);
 
   useEffectHook(() => {
     const { DeviceEventEmitter } = require('react-native');
@@ -245,7 +235,7 @@ export default function ProfileScreen({ route, navigation }) {
   // Track timeouts for cleanup
   const timeoutsRef = useRef([]);
 
-  useFocusEffect(
+    useFocusEffect(
     useCallback(() => {
       // Don't fetch here - rely on listener which is more reliable
       // The listener continuously monitors connection state
@@ -302,6 +292,7 @@ export default function ProfileScreen({ route, navigation }) {
       
       // Dark icons for light/white background
       const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      refreshAccounts?.();
       
       return () => {
         unsubscribe();
@@ -584,16 +575,33 @@ export default function ProfileScreen({ route, navigation }) {
   async function handleChangeAvatar() {
     try {
       dispatchUI({ type: 'SET_AVATAR_MODAL', open: false });
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 1,
+      const ImageCropPicker = require('react-native-image-crop-picker').default;
+      const image = await ImageCropPicker.openPicker({
+        width: 500,
+        height: 500,
+        cropping: true,
+        cropperCircleOverlay: true,
+        compressImageQuality: 0.85,
+        cropperActiveWidgetColor: COLORS.gold,
+        cropperStatusBarColor: '#000000',
+        cropperToolbarColor: '#000000',
+        cropperToolbarWidgetColor: '#ffffff',
+        cropperToolbarTitle: 'Move and Scale',
+        showCropGuidelines: false,
+        showCropFrame: false,
+        hideBottomControls: false,
       });
-      if (result.canceled) return;
-      const uri = result.assets[0].uri;
-      navigation.navigate(ROUTES.AVATAR_CROP, { imageUri: uri });
+      await uploadCroppedAvatar(image.path);
     } catch (e) {
-      setDialog({ visible: true, title: 'Error', message: 'Could not open image picker. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      if (e.code !== 'E_PICKER_CANCELLED') {
+        setDialog({
+          visible: true,
+          title: 'Error',
+          message: 'Could not open image picker. Please try again.',
+          type: 'error',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
+        });
+      }
     }
   }
 
@@ -1058,7 +1066,7 @@ export default function ProfileScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* Show Admin button only for admins */}
+                    {/* Show Admin button only for admins */}
           {isAdmin && (
             <TouchableOpacity
               style={styles.adminButton}
@@ -1067,7 +1075,18 @@ export default function ProfileScreen({ route, navigation }) {
               <Text style={styles.adminButtonText}>🛡️ Admin Panel</Text>
             </TouchableOpacity>
           )}
+
+          {/* Switch Account button */}
+          {(availableAccounts?.length ?? 0) > 1 && (
+            <TouchableOpacity
+              style={[styles.adminButton, { backgroundColor: '#6366f1', marginTop: 10 }]}
+              onPress={() => setSwitchModalVisible(true)}
+            >
+              <Text style={styles.adminButtonText}>🔄 Switch Account</Text>
+            </TouchableOpacity>
+          )}
         </>
+
       ) : (
         <View style={styles.actionButtons}>
           <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -1354,6 +1373,71 @@ export default function ProfileScreen({ route, navigation }) {
             </View>
           </View>
         </Modal>
+
+              {/* Switch Account Modal */}
+      <Modal visible={switchModalVisible} transparent animationType="slide" onRequestClose={() => setSwitchModalVisible(false)} statusBarTranslucent>
+        <Pressable style={styles.modalBackdrop} onPress={() => setSwitchModalVisible(false)} />
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
+          <Text style={styles.modalTitle}>Switch Account</Text>
+          {(availableAccounts ?? []).map((account, idx) => {
+            const isCurrent = account.email === (currentUser?.email || profile?.email);
+            return (
+              <TouchableOpacity
+                key={idx}
+                style={[styles.modalOption, isCurrent && { backgroundColor: '#f1f5f9' }]}
+                onPress={async () => {
+                  if (isCurrent) {
+                    setSwitchModalVisible(false);
+                    return;
+                  }
+                  setSwitchModalVisible(false);
+                  const result = await switchToAccount(account);
+                  if (!result.success) {
+                    setDialog({
+                      visible: true,
+                      title: 'Switch Failed',
+                      message: result.reason === 'NO_PASSWORD' ? 'Please log in with password first.' : result.error || 'Could not switch account.',
+                      type: 'error',
+                      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
+                    });
+                  }
+                }}
+                disabled={switchingAccount}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
+                    <Text style={styles.dropdownAvatarText}>
+                      {account.provider === 'google' ? 'G' : (account.identifier || account.email)[0].toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.modalOptionText, isCurrent && { fontWeight: '700' }]}>
+                      {account.identifier || account.email}
+                      {isCurrent && ' (Current)'}
+                    </Text>
+                    {account.identifier && account.identifier !== account.email && (
+                      <Text style={{ fontSize: 12, color: '#94a3b8' }}>{account.email}</Text>
+                    )}
+                  </View>
+                  {isCurrent && <Text style={{ fontSize: 14, color: COLORS.gold }}>✓</Text>}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+          <TouchableOpacity
+            style={[styles.modalOption, { borderTopWidth: 1, borderTopColor: '#f1f5f9', marginTop: 8 }]}
+            onPress={() => {
+              setSwitchModalVisible(false);
+              navigation.navigate(ROUTES.LOGIN);
+            }}
+          >
+            <Text style={[styles.modalOptionText, { color: '#6366f1' }]}>➕ Add Another Account</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.modalOption} onPress={() => setSwitchModalVisible(false)}>
+            <Text style={[styles.modalOptionText, { color: '#ef4444' }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
         <ModernDialog
           visible={dialog.visible}
@@ -1710,6 +1794,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+    dropdownAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  dropdownAvatarGoogle: { backgroundColor: '#1a73e8' },
+  dropdownAvatarText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   toastContainer: {
   position: 'absolute',
   top: '50%',

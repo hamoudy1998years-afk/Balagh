@@ -176,7 +176,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const { width, height } = useWindowDimensions();
 
   // ── FIX: initialize to null so we wait for real measured height ──
-  const [listHeight, setListHeight] = useState(null);
+  const [listHeight, setListHeight] = useState(height);
 
   const [myLikes, setMyLikes] = useState(() => feedCache.likes ?? []);
   const [myFollows, setMyFollows] = useState(() => feedCache.follows ?? []);
@@ -581,6 +581,7 @@ export default function HomeScreen({ navigation }) {
   const isFocused = useIsFocused();
   const followingRef = useRef(null);
   const foryouRef = useRef(null);
+  const hasMountedRef = useRef(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -694,14 +695,15 @@ export default function HomeScreen({ navigation }) {
 
   // Refresh feed when returning to home screen
   useEffect(() => {
-    if (isFocused) {
-      if (index === 0) {
-        followingRef.current?.refresh?.();
-      } else if (index === 1) {
-        foryouRef.current?.refresh?.();
-      }
-    }
-  }, [isFocused]);
+  if (!hasMountedRef.current) {
+    hasMountedRef.current = true;
+    return;
+  }
+  if (isFocused) {
+    if (index === 0) followingRef.current?.refresh?.();
+    else if (index === 1) foryouRef.current?.refresh?.();
+  }
+}, [isFocused]);
 
   useEffect(() => {
     homeRefreshRef.current = () => {
