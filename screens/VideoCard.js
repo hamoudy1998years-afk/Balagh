@@ -136,6 +136,8 @@ function VideoCard({
   const progressBarRef = useRef(null);  // Ref for measure()
   const progressBarPageX = useRef(0);   // Absolute screen X position
   const lastSeekTime = useRef(0);  // Throttle video seek during drag
+  const dragStartPageX = useRef(0);
+  const dragStartPct = useRef(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
@@ -332,36 +334,39 @@ function VideoCard({
       onPanResponderTerminationRequest: () => false,
 
       onPanResponderGrant: (evt) => {
-        setIsDragging(true); // Forces bar to show
+        setIsDragging(true);
         isSeeking.current = true;
         manualPauseRef.current = true;
-        setPaused(true); // Pause while dragging
+        setPaused(true);
 
-        const pct = pageXToPercentage(evt.nativeEvent.pageX);
-        updateProgressBarUI(pct);
-        seekToPosition(pct);
+        // Record where finger started and where scrubber currently is
+        dragStartPageX.current = evt.nativeEvent.pageX;
+        dragStartPct.current = progressAnim._value;
       },
 
       onPanResponderMove: (evt) => {
-        const pct = pageXToPercentage(evt.nativeEvent.pageX);
-        updateProgressBarUI(pct);
+        // Calculate delta from start position, apply 50% speed ratio
+        const delta = (evt.nativeEvent.pageX - dragStartPageX.current) / progressBarWidth.current;
+        const newPct = Math.max(0, Math.min(1, dragStartPct.current + delta * 1.0));
+        updateProgressBarUI(newPct);
 
         const now = Date.now();
         if (now - lastSeekTime.current > 100) {
-          seekToPosition(pct);
+          seekToPosition(newPct);
           lastSeekTime.current = now;
         }
       },
 
       onPanResponderRelease: (evt) => {
-        const pct = pageXToPercentage(evt.nativeEvent.pageX);
-        updateProgressBarUI(pct);
-        seekToPosition(pct);
+        const delta = (evt.nativeEvent.pageX - dragStartPageX.current) / progressBarWidth.current;
+        const newPct = Math.max(0, Math.min(1, dragStartPct.current + delta * 1.0));
+        updateProgressBarUI(newPct);
+        seekToPosition(newPct);
 
         isSeeking.current = false;
         manualPauseRef.current = false;
-        setPaused(false); // Resume playback
-        setIsDragging(false); // Hide bar (fade out handled by useEffect)
+        setPaused(false);
+        setIsDragging(false);
       },
 
       onPanResponderTerminate: () => {
