@@ -737,19 +737,18 @@ function VideoCard({
           </View>
           <Text style={styles.actionCount}>Share</Text>
         </AnimatedButton>
-        {currentUserId && currentUserId !== item.user_id && (
-          <AnimatedButton 
-            onPress={handleOpenReportSheet} 
-            style={styles.actionBtn}
-            accessibilityLabel="Report video"
-            accessibilityRole="button"
-          >
-            <View style={{ shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } }}>
-              <Ionicons name="flag-outline" size={24} color="#ffffff" />
-            </View>
-            <Text style={styles.actionCount}>Report</Text>
-          </AnimatedButton>
-        )}
+        <AnimatedButton 
+          onPress={handleOpenReportSheet} 
+          style={[styles.actionBtn, { opacity: currentUserId && currentUserId !== item.user_id ? 1 : 0 }]}
+          disabled={!currentUserId || currentUserId === item.user_id}
+          accessibilityLabel="Report video"
+          accessibilityRole="button"
+        >
+          <View style={{ shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 4, shadowOffset: { width: 0, height: 1 } }}>
+            <Ionicons name="flag-outline" size={24} color="#ffffff" />
+          </View>
+          <Text style={styles.actionCount}>Report</Text>
+        </AnimatedButton>
       </View>
 
       <ModernDialog
