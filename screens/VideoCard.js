@@ -635,11 +635,7 @@ function VideoCard({
 
       {/* Bottom UI - fades out when dragging (TikTok style) */}
       <Animated.View style={[styles.overlay, { 
-        bottom: safeBottom + s(80),
-        opacity: barOpacity.interpolate({
-          inputRange: [0, 1],
-          outputRange: [1, 0]
-        })
+        bottom: safeBottom + s(95),
       }]}>
 
         {/* Username row — always on top */}
