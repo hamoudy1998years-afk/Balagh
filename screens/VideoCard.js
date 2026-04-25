@@ -645,7 +645,7 @@ function VideoCard({
         {/* Username row — always on top */}
         <AnimatedButton onPress={handleNavigateUserProfile}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={styles.username}>@{username}</Text>
+            <Text style={styles.username}>{username}</Text>
             {isScholar && (
               <View style={styles.goldBadge}>
                 <Text style={styles.goldBadgeText}>✓ Scholar</Text>
