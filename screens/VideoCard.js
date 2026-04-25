@@ -793,7 +793,7 @@ function VideoCard({
         style={[
           styles.progressContainer, 
           { 
-            bottom: safeBottom + s(58),   // ← changed from s(55)
+            bottom: safeBottom + s(58),  // ← changed from s(55)
             zIndex: 10, 
             height: s(40),                   // ← changed from 40
             justifyContent: 'center',
