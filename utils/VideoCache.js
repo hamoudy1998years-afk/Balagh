@@ -42,7 +42,8 @@ class VideoCache {
     const fileInfo = await FileSystem.getInfoAsync(cacheFile);
     
     if (fileInfo.exists) {
-      if (!fileInfo.size || fileInfo.size < 1000) {
+      if (!fileInfo.size || fileInfo.size < 50000) {
+        console.warn('[VideoCache] Corrupt/incomplete cached file — discarding:', cacheFile);
         await FileSystem.deleteAsync(cacheFile, { idempotent: true });
         return null;
       }
@@ -55,7 +56,7 @@ class VideoCache {
   async cacheVideo(url) {
     if (!url) return;
     
-    // ✅ Skip caching for HLS streams
+    // Skip caching for HLS streams
     if (this.isHLSStream(url)) {
       console.log('[VideoCache] HLS stream - skipping cache');
       return;
@@ -69,12 +70,27 @@ class VideoCache {
     try {
       console.log('[VideoCache] Downloading:', url);
       await this.cleanupCacheIfNeeded();
-      await FileSystem.downloadAsync(url, cacheFile, {
-        headers: {
-          'Accept': 'video/mp4,video/*',
-        }
+
+      const result = await FileSystem.downloadAsync(url, cacheFile, {
+        headers: { 'Accept': 'video/mp4,video/*' }
       });
-      console.log('[VideoCache] Cached successfully:', cacheFile);
+
+      // Verify the download actually completed with a valid status
+      if (result.status !== 200) {
+        console.warn('[VideoCache] Bad status', result.status, '— discarding:', cacheFile);
+        await FileSystem.deleteAsync(cacheFile, { idempotent: true });
+        return;
+      }
+
+      // Verify the file is large enough to be a real MP4 (min 50KB)
+      const saved = await FileSystem.getInfoAsync(cacheFile);
+      if (!saved.exists || !saved.size || saved.size < 50000) {
+        console.warn('[VideoCache] File too small or missing — discarding:', cacheFile);
+        await FileSystem.deleteAsync(cacheFile, { idempotent: true });
+        return;
+      }
+
+      console.log('[VideoCache] Cached successfully:', cacheFile, `(${(saved.size / 1024 / 1024).toFixed(2)} MB)`);
     } catch (error) {
       console.error('[VideoCache] Download failed:', error.message);
       try {
@@ -82,7 +98,6 @@ class VideoCache {
       } catch (e) {}
     }
   }
-
   async cleanupCacheIfNeeded() {
     try {
       const files = await FileSystem.readDirectoryAsync(CACHE_DIR);

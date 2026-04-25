@@ -252,7 +252,6 @@ function App() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Add any pre-load tasks here if needed
       } catch (e) {
         console.warn(e);
       } finally {
