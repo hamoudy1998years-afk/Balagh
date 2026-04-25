@@ -797,9 +797,9 @@ function VideoCard({
         style={[
           styles.progressContainer, 
           { 
-            bottom: safeBottom + s(65),   // ← changed from s(55)
+            bottom: safeBottom + s(58),   // ← changed from s(55)
             zIndex: 10, 
-            height: 60,                   // ← changed from 40
+            height: s(40),                   // ← changed from 40
             justifyContent: 'center',
             opacity: barOpacity
           }
@@ -814,7 +814,7 @@ function VideoCard({
         </View>
 
         {/* Invisible hit slop area */}
-        <View style={{ paddingVertical: 15, width: '100%' }}>
+        <View style={{ paddingVertical: 2, width: '100%' }}>
           <View
             ref={progressBarRef}
             style={[
