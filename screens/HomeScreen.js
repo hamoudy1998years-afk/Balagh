@@ -172,11 +172,14 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [loading, setLoading] = useState(() => !feedCache[type]);
   const [refreshing, setRefreshing] = useState(false);
   const [feedError, setFeedError] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const { width, height } = useWindowDimensions();
 
   // ── FIX: initialize to null so we wait for real measured height ──
-  const [listHeight, setListHeight] = useState(height);
+  const [listHeight, setListHeight] = useState(null);
 
   const [myLikes, setMyLikes] = useState(() => feedCache.likes ?? []);
   const [myFollows, setMyFollows] = useState(() => feedCache.follows ?? []);
@@ -263,9 +266,12 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     if (videos.length === 0) return;
     if (isRefreshingRef.current) return;
     if (prevIndexRef.current === -1) prevIndexRef.current = 0;
-    playerPool.loadVideo('current', videos[0].video_url);
-    setActiveIndex(0);
-  }, [videos]);
+    // Only reset to 0 on initial load, NOT when paginating or refreshing
+    if (videos.length <= 20 && offset <= 20) {
+      playerPool.loadVideo('current', videos[0].video_url);
+      setActiveIndex(0);
+    }
+  }, [videos, offset]);
 
   useEffect(() => {
     if (videos.length === 0) return;
@@ -309,7 +315,10 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       setMyLikes(feedCache.likes ?? []);
       setMyFollows(feedCache.follows ?? []);
       setLoading(false);
-      loadVideos(true);
+      // Don't background refresh if we already have paginated data
+      if (feedCache[type]?.length <= 20) {
+        loadVideos(true);
+      }
       loadMyInteractions(true);
     } else {
       loadVideos();
@@ -317,7 +326,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     }
   }, [type]);
 
-  async function loadVideos(background = false) {
+  async function loadVideos(background = false, loadMore = false) {
     if (!background) { setLoading(true); setFeedError(null); }
 
     if (type === 'following') {
@@ -354,16 +363,26 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
       }
       
+      const currentOffset = loadMore ? offset : 0;
       const { data, error } = await query
         .order('created_at', { ascending: false })
-        .limit(20);
+        .range(currentOffset, currentOffset + 19);
 
       if (error) { __DEV__ && console.warn('Following feed error:', error.message); setFeedError('Could not load your feed.'); setLoading(false); return; }
-      const result = data ?? [];
-      feedCache.following = result;
-      feedCache.ts.following = Date.now();
-      if (result[0]?.id !== videos[0]?.id) {
-        setVideos(result);
+            const newVideos = data ?? [];
+      setHasMore(newVideos.length === 20);
+      
+      if (loadMore) {
+        const combined = [...videos, ...newVideos];
+        feedCache.following = combined;
+        feedCache.ts.following = Date.now();
+        setVideos(combined);
+        setOffset(currentOffset + 20);
+      } else {
+        feedCache.following = newVideos;
+        feedCache.ts.following = Date.now();
+        setVideos(newVideos);
+        setOffset(20);
       }
 
     } else {
@@ -387,9 +406,10 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
       }
       
+      const currentOffset = loadMore ? offset : 0;
       const { data, error } = await query
         .order('created_at', { ascending: false })
-        .limit(20);
+        .range(currentOffset, currentOffset + 19);
 
       if (error) console.error('[HOME FEED] Error:', error.message);
 
@@ -399,15 +419,32 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         setLoading(false); 
         return; 
       }
-      const arr = [...(data ?? [])];
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
+            const newVideos = data ?? [];
+      setHasMore(newVideos.length === 20);
+      
+            if (loadMore) {
+        // Only shuffle the NEW batch, then append to existing order
+        const newArr = [...newVideos];
+        for (let i = newArr.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+        }
+        const combined = [...videos, ...newArr];
+        feedCache.foryou = combined;
+        feedCache.ts.foryou = Date.now();
+        setVideos(combined);
+        setOffset(currentOffset + 20);
+      } else {
+        const arr = [...newVideos];
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        feedCache.foryou = arr;
+        feedCache.ts.foryou = Date.now();
+        setVideos(arr);
+        setOffset(20);
       }
-      const shuffled = arr;
-      feedCache.foryou = shuffled;
-      feedCache.ts.foryou = Date.now();
-      setVideos(shuffled);
     }
 
     setLoading(false);
@@ -439,8 +476,17 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     else setMyFollows(prev => prev.filter(id => id !== userId));
   }
 
+  const onEndReached = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    await loadVideos(true, true);
+    setLoadingMore(false);
+  }, [loadingMore, hasMore, offset]);
+
   async function onRefresh() {
       clearFeedCache();
+      setOffset(0);
+      setHasMore(true);
       setRefreshing(true);
       await Promise.all([loadVideos(), loadMyInteractions()]);
       setRefreshing(false);
@@ -546,6 +592,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
           windowSize={3}
           maxToRenderPerBatch={2}
           initialNumToRender={1}
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.5}
           removeClippedSubviews={true}
           refreshControl={
             <RefreshControl
@@ -692,6 +740,16 @@ export default function HomeScreen({ navigation }) {
     followingRef.current?.setActive(isFocused && index === 0);
     foryouRef.current?.setActive(isFocused && index === 1);
   }, [isFocused, index]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        // Screen lost focus — force pause both feeds
+        followingRef.current?.setActive(false);
+        foryouRef.current?.setActive(false);
+      };
+    }, [])
+  );
 
   // Refresh feed when returning to home screen
   useEffect(() => {
