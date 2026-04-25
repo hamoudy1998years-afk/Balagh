@@ -134,7 +134,6 @@ function VideoCard({
   const isVideoReadyRef = useRef(false);
   const isSeeking = useRef(false);
   const progressBarRef = useRef(null);  // Ref for measure()
-  const progressBarPageX = useRef(0);   // Absolute screen X position
   const lastSeekTime = useRef(0);  // Throttle video seek during drag
   const dragStartPageX = useRef(0);
   const dragStartPct = useRef(0);
@@ -314,18 +313,9 @@ function VideoCard({
   const onProgressBarLayout = (e) => {
     const { width } = e.nativeEvent.layout;
     progressBarWidth.current = width;
-
-    // measure() gives true pageX after layout
-    progressBarRef.current?.measure((fx, fy, w, h, pageX, pageY) => {
-      progressBarPageX.current = pageX;
-    });
   };
 
   // Convert any touch's pageX into 0-1 percentage along the bar
-  const pageXToPercentage = (pageX) => {
-    const offset = pageX - progressBarPageX.current;
-    return Math.max(0, Math.min(1, offset / progressBarWidth.current));
-  };
 
   const panResponder = useRef(
     PanResponder.create({
