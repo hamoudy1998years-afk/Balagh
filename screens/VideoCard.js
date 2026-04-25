@@ -139,6 +139,7 @@ function VideoCard({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
+  const [showFullCaption, setShowFullCaption] = useState(false);
   const manualPauseRef = useRef(false);
 
   // Check if video owner is blocked (from context)
@@ -637,9 +638,11 @@ function VideoCard({
         bottom: safeBottom + s(120),
         opacity: barOpacity.interpolate({
           inputRange: [0, 1],
-          outputRange: [1, 0] // Fade out UI when bar shows
+          outputRange: [1, 0]
         })
       }]}>
+
+        {/* Username row — always on top */}
         <AnimatedButton onPress={handleNavigateUserProfile}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={styles.username}>@{username}</Text>
@@ -660,22 +663,23 @@ function VideoCard({
             )}
           </View>
         </AnimatedButton>
-        {captionText ? <Text style={styles.caption} numberOfLines={3} ellipsizeMode="tail">{captionText}</Text> : null}
+
+        {/* Caption — 2 lines max with more/less toggle */}
+        {captionText ? (
+          <Pressable onPress={() => setShowFullCaption(prev => !prev)} style={{ marginBottom: 4 }}>
+            <Text style={styles.caption} numberOfLines={showFullCaption ? undefined : 2} ellipsizeMode="tail">
+              {captionText}
+            </Text>
+            {captionText.length > 80 && (
+              <Text style={styles.captionMore}>{showFullCaption ? 'less ↑' : 'more ↓'}</Text>
+            )}
+          </Pressable>
+        ) : null}
+
+        {/* Hashtags — always at the bottom */}
         {hashtags.length > 0 && (
           <View style={styles.hashtagsRow}>
             {hashtags.map((tag, i) => <Text key={i} style={styles.hashtag}>{tag}</Text>)}
-          </View>
-        )}
-        {currentUserId === item.user_id && item.status && (
-          <View style={styles.statusBadge}>
-            <Text style={[
-              styles.statusBadgeText,
-              item.status === 'approved' && styles.statusApproved,
-              item.status === 'pending' && styles.statusPending,
-              item.status === 'rejected' && styles.statusRejected,
-            ]}>
-              {item.status === 'approved' ? '✓ Live' : item.status === 'pending' ? '⏳ Pending' : '✗ Rejected'}
-            </Text>
           </View>
         )}
       </Animated.View>
@@ -894,6 +898,12 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
+  captionMore: {
+    color: COLORS.gold,
+    fontSize: ms(12),
+    fontWeight: '700',
+    marginTop: 2,
+  },
   actions: { position: 'absolute', right: s(12), alignItems: 'center', width: s(56), zIndex: 10 },
   actionBtn: { alignItems: 'center', marginBottom: 20 },
   actionIcon: { fontSize: ms(32) },
@@ -929,22 +939,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
-  statusBadge: {
-    marginTop: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  statusBadgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  statusApproved: { color: '#4ade80' },
-  statusPending: { color: '#fbbf24' },
-  statusRejected: { color: '#f87171' },
   creatorContainer: { alignItems: 'center', marginBottom: 16 },
   creatorAvatar: {
     width: s(52),
