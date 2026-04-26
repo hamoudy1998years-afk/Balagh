@@ -279,7 +279,22 @@ router.post('/donate', async (req, res) => {
     );
 
     const checkoutUrl = response.data.data.attributes.checkout_url;
+    const paymentLinkId = response.data.data.id;
     console.log('[PAYMONGO] Payment link created:', checkoutUrl);
+
+    // Save donation record to database
+    const { donorId, scholarId } = req.body;
+    if (donorId && scholarId) {
+      await supabase.from('donations').insert({
+        donor_id: donorId,
+        scholar_id: scholarId,
+        stream_id: streamId,
+        amount: amount,
+        status: 'pending',
+        payment_link_id: paymentLinkId,
+      });
+    }
+
     res.json({ checkoutUrl });
 
   } catch (error) {

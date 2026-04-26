@@ -387,8 +387,10 @@ export default function WatchLiveScreen({ navigation, route }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         amount,
-        scholarName: stream.user?.name || 'Scholar',
+        scholarName: stream.profiles?.username || 'Scholar',
         streamId: stream.id,
+        donorId: currentUser?.id,
+        scholarId: stream.user_id,
       }),
     });
     const data = await res.json();
