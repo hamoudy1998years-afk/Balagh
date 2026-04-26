@@ -68,7 +68,20 @@ router.post('/egress/start', async (req, res) => {
     const apiSecret = process.env.LIVEKIT_API_SECRET;
     const livekitUrl = process.env.LIVEKIT_URL?.replace('wss://', 'https://');
 
-    // Create egress via LiveKit REST API
+    // ─── DEBUG: Log AWS credentials status ───────────────────────
+    console.log('[EGRESS] S3 Config:', {
+      bucket: process.env.S3_BUCKET_NAME,
+      region: process.env.S3_REGION,
+      hasAccessKey: !!process.env.AWS_ACCESS_KEY,
+      hasAccessKeyId: !!process.env.AWS_ACCESS_KEY_ID,
+      hasSecretKey: !!process.env.AWS_SECRET_KEY,
+      hasSecretAccessKey: !!process.env.AWS_SECRET_ACCESS_KEY,
+    });
+
+    // ─── Use whichever AWS key variable exists ────────────────────
+    const awsAccessKey = process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
+    const awsSecretKey = process.env.AWS_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
+
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: apiKey,
@@ -89,8 +102,8 @@ router.post('/egress/start', async (req, res) => {
         file: {
           filepath: filename,
           s3: {
-            access_key: process.env.AWS_ACCESS_KEY,
-            secret: process.env.AWS_SECRET_KEY,
+            access_key: awsAccessKey,
+            secret: awsSecretKey,
             region: process.env.S3_REGION || 'ap-southeast-2',
             bucket: process.env.S3_BUCKET_NAME,
           }
@@ -132,7 +145,6 @@ router.post('/egress/stop', async (req, res) => {
     };
     const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
 
-    // Stop the egress
     await axios.post(
       `${livekitUrl}/twirp/livekit.Egress/StopEgress`,
       { egress_id: egressId },
@@ -144,10 +156,8 @@ router.post('/egress/stop', async (req, res) => {
       }
     );
 
-    // Build the S3 video URL
     const videoUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.S3_REGION || 'ap-southeast-2'}.amazonaws.com/${filename}`;
 
-    // Save replay to Supabase
     if (userId) {
       const { error } = await supabase.from('livestreams').insert({
         user_id: userId,
