@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
-const { EgressClient, EncodedFileOutput, S3Upload } = require('livekit-server-sdk');
+const { EgressClient } = require('livekit-server-sdk');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -74,24 +74,17 @@ router.post('/egress/start', async (req, res) => {
 
     console.log('[EGRESS] Starting with AWS key:', awsAccessKey?.substring(0, 8));
 
-    const output = new EncodedFileOutput({
-      filepath: filename,
-      output: {
-        case: 's3',
-        value: new S3Upload({
+    const egress = await egressClient.startRoomCompositeEgress(roomName, {
+      file: {
+        filepath: filename,
+        s3: {
           accessKey: awsAccessKey,
           secret: awsSecretKey,
           region: process.env.S3_REGION || 'ap-southeast-2',
           bucket: process.env.S3_BUCKET_NAME,
-        })
+        }
       }
-    });
-
-    const egress = await egressClient.startRoomCompositeEgress(
-      roomName,
-      { file: output },
-      { layout: 'speaker' }
-    );
+    }, { layout: 'speaker' });
 
     console.log('[EGRESS] Recording started:', egress.egressId);
     res.json({ egressId: egress.egressId, filename });
