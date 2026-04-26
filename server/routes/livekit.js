@@ -212,11 +212,31 @@ async function processRecording(recordId, filename, egressId) {
       console.error('[PROCESS] Thumbnail error:', thumbErr.message);
     }
 
-    // Update database record with public URL and thumbnail
+    // Update livestreams record
     const { error: updateError } = await supabase
       .from('livestreams')
       .update({ video_url: publicUrl, thumbnail_url: thumbnailUrl })
       .eq('id', recordId);
+
+    // Also insert into videos table so it shows in the main feed
+    const { data: livestreamRecord } = await supabase
+      .from('livestreams')
+      .select('user_id, title')
+      .eq('id', recordId)
+      .single();
+
+    if (livestreamRecord) {
+      await supabase.from('videos').insert({
+        user_id: livestreamRecord.user_id,
+        video_url: publicUrl,
+        thumbnail_url: thumbnailUrl,
+        title: livestreamRecord.title || 'Live Stream Replay',
+        type: 'livestream',
+        status: 'approved',
+        is_public: true,
+      });
+      console.log('[PROCESS] Added to main feed!');
+    }
 
     if (updateError) {
       console.error('[PROCESS] DB update error:', updateError);
