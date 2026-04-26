@@ -431,6 +431,7 @@ if (egressIdRef.current) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         egressId: egressIdRef.current,
+        filename: egressFilenameRef.current,
         userId: currentUser.id,
         title,
         thumbnailUrl: profile?.avatar_url || null,

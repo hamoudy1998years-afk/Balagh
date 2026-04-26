@@ -74,22 +74,8 @@ function VideoCard({
           return;
         }
 
-        // Livestream without signed URL — fetch one
+        // Livestream — use direct Supabase URL
         if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) {
-          console.log('[VIDEOCARD] Fetching signed URL for livestream:', item.id);
-          try {
-            const response = await fetch(
-              `${process.env.EXPO_PUBLIC_SERVER_URL}/api/recording/livestreams/${item.id}/play`
-            );
-            const data = await response.json();
-            if (data.signedUrl) {
-              console.log('[VIDEOCARD] Got signed URL from server');
-              setVideoUri(data.signedUrl);
-              return;
-            }
-          } catch (error) {
-            console.error('[VIDEOCARD] Failed to fetch signed URL:', error);
-          }
           setVideoUri(item.video_url);
           return;
         }

@@ -29,12 +29,9 @@ export default function VideoDetailScreen({ navigation }) {
       fetchVideoById(videoId);
     } else if (route.params?.video) {
       const videoData = route.params.video;
-      if (videoData.type === 'livestream') {
-        getSignedUrl(videoData);
-      } else {
-        setVideo(videoData);
-        setLoading(false);
-      }
+      setVideo(videoData);
+      setSignedUrlReady(true);
+      setLoading(false);
     }
   }, [videoId]);
 
