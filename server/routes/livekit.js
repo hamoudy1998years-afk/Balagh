@@ -169,10 +169,53 @@ async function processRecording(recordId, filename, egressId) {
       return;
     }
 
-    // Update database record with public URL
+    // Generate thumbnail from video
+    let thumbnailUrl = null;
+    try {
+      const ffmpeg = require('fluent-ffmpeg');
+      ffmpeg.setFfmpegPath(require('ffmpeg-static'));
+      const fs = require('fs');
+      const tempVideoPath = `/tmp/${egressId}.mp4`;
+      const tempThumbPath = `/tmp/${egressId}.jpg`;
+
+      // Download video
+      const videoResponse = await fetch(publicUrl);
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+      fs.writeFileSync(tempVideoPath, videoBuffer);
+
+      // Extract frame at 1 second
+      await new Promise((resolve, reject) => {
+        ffmpeg(tempVideoPath)
+          .screenshots({ timestamps: ['1'], filename: `${egressId}.jpg`, folder: '/tmp', size: '720x?' })
+          .on('end', resolve)
+          .on('error', reject);
+      });
+
+      // Upload thumbnail
+      const thumbBuffer = fs.readFileSync(tempThumbPath);
+      const { error: thumbError } = await supabase.storage
+        .from('thumbnails')
+        .upload(`${egressId}_thumb.jpg`, thumbBuffer, { contentType: 'image/jpeg', upsert: true });
+
+      if (!thumbError) {
+        const { data: { publicUrl: thumbUrl } } = supabase.storage
+          .from('thumbnails')
+          .getPublicUrl(`${egressId}_thumb.jpg`);
+        thumbnailUrl = thumbUrl;
+        console.log('[PROCESS] Thumbnail generated:', thumbnailUrl);
+      }
+
+      // Cleanup
+      try { fs.unlinkSync(tempVideoPath); } catch(e) {}
+      try { fs.unlinkSync(tempThumbPath); } catch(e) {}
+    } catch (thumbErr) {
+      console.error('[PROCESS] Thumbnail error:', thumbErr.message);
+    }
+
+    // Update database record with public URL and thumbnail
     const { error: updateError } = await supabase
       .from('livestreams')
-      .update({ video_url: publicUrl })
+      .update({ video_url: publicUrl, thumbnail_url: thumbnailUrl })
       .eq('id', recordId);
 
     if (updateError) {
