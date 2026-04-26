@@ -3,7 +3,6 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
-const { EgressClient } = require('livekit-server-sdk');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -65,38 +64,45 @@ router.post('/egress/start', async (req, res) => {
       return res.status(400).json({ error: 'Missing roomName' });
     }
 
-    const awsAccessKey = process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
-    const awsSecretKey = process.env.AWS_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL?.replace('wss://', 'https://');
 
-    console.log('[EGRESS] Starting recording for room:', roomName);
-    console.log('[EGRESS] AWS Key exists:', !!awsAccessKey);
-    console.log('[EGRESS] AWS Secret exists:', !!awsSecretKey);
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: apiKey,
+      sub: apiKey,
+      iat: now,
+      exp: now + 3600,
+      video: { roomCreate: true, roomRecord: true }
+    };
+    const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
 
-    const egressClient = new EgressClient(
-      process.env.LIVEKIT_URL,
-      process.env.LIVEKIT_API_KEY,
-      process.env.LIVEKIT_API_SECRET
-    );
+    const filename = `${roomName}_${Date.now()}.mp4`;
 
-    const filename = `livestreams/${roomName}_${Date.now()}.mp4`;
-
-    const egress = await egressClient.startRoomCompositeEgress(roomName, {
-      file: {
-        filepath: filename,
-        s3: {
-          accessKey: awsAccessKey,
-          secret: awsSecretKey,
-          region: process.env.S3_REGION || 'ap-southeast-2',
-          bucket: process.env.S3_BUCKET_NAME,
+    // Use LiveKit's own storage (no S3 needed)
+    const response = await axios.post(
+      `${livekitUrl}/twirp/livekit.Egress/StartRoomCompositeEgress`,
+      {
+        room_name: roomName,
+        layout: 'speaker',
+        file: {
+          filepath: filename,
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         }
       }
-    });
+    );
 
-    console.log('[EGRESS] Recording started:', egress.egressId);
-    res.json({ egressId: egress.egressId, filename });
+    console.log('[EGRESS] Recording started:', response.data.egress_id);
+    res.json({ egressId: response.data.egress_id, filename });
 
   } catch (error) {
-    console.error('[EGRESS] Start error:', error);
+    console.error('[EGRESS] Start error:', error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -104,40 +110,114 @@ router.post('/egress/start', async (req, res) => {
 // ─── STOP EGRESS AND SAVE REPLAY ─────────────────────────────────
 router.post('/egress/stop', async (req, res) => {
   try {
-    const { egressId, userId, title, thumbnailUrl, filename } = req.body;
+    const { egressId, userId, title, thumbnailUrl } = req.body;
 
-    console.log('[EGRESS] Stopping egress:', egressId);
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL?.replace('wss://', 'https://');
 
-    const egressClient = new EgressClient(
-      process.env.LIVEKIT_URL,
-      process.env.LIVEKIT_API_KEY,
-      process.env.LIVEKIT_API_SECRET
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: apiKey,
+      sub: apiKey,
+      iat: now,
+      exp: now + 3600,
+      video: { roomCreate: true, roomRecord: true }
+    };
+    const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
+
+    // Stop the egress
+    const stopResponse = await axios.post(
+      `${livekitUrl}/twirp/livekit.Egress/StopEgress`,
+      { egress_id: egressId },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      }
     );
 
-    await egressClient.stopEgress(egressId);
+    console.log('[EGRESS] Stopped:', egressId);
 
-    const videoUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.S3_REGION || 'ap-southeast-2'}.amazonaws.com/${filename}`;
+    // Get the download URL from LiveKit
+    const egressInfo = stopResponse.data;
+    const downloadUrl = egressInfo?.file_results?.[0]?.download_url 
+      || egressInfo?.file?.download_url
+      || null;
 
-    if (userId) {
-      const { error } = await supabase.from('livestreams').insert({
+    console.log('[EGRESS] Download URL from LiveKit:', downloadUrl);
+
+    if (downloadUrl && userId) {
+      // Download the file from LiveKit
+      console.log('[EGRESS] Downloading MP4 from LiveKit...');
+      const videoResponse = await axios.get(downloadUrl, { 
+        responseType: 'arraybuffer',
+        timeout: 300000 // 5 min timeout for large files
+      });
+
+      const buffer = Buffer.from(videoResponse.data);
+      const fileName = `${egressId}_${Date.now()}.mp4`;
+
+      console.log('[EGRESS] Uploading to Supabase Storage...');
+
+      // Upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('livestreams')
+        .upload(fileName, buffer, {
+          contentType: 'video/mp4',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('[EGRESS] Supabase upload error:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload to Supabase' });
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('livestreams')
+        .getPublicUrl(fileName);
+
+      console.log('[EGRESS] Public URL:', publicUrl);
+
+      // Save to database
+      const { error: dbError } = await supabase.from('livestreams').insert({
         user_id: userId,
-        video_url: videoUrl,
+        video_url: publicUrl,
         thumbnail_url: thumbnailUrl || null,
         title: title || 'Live Stream',
         is_public: true,
       });
 
-      if (error) {
-        console.error('[EGRESS] DB save error:', error);
+      if (dbError) {
+        console.error('[EGRESS] DB save error:', dbError);
       } else {
-        console.log('[EGRESS] Replay saved to DB:', videoUrl);
+        console.log('[EGRESS] Replay saved to DB!');
+      }
+
+      return res.json({ success: true, videoUrl: publicUrl });
+    }
+
+    // If no download URL yet, save as processing
+    if (userId) {
+      const { error: dbError } = await supabase.from('livestreams').insert({
+        user_id: userId,
+        video_url: 'processing',
+        thumbnail_url: thumbnailUrl || null,
+        title: title || 'Live Stream',
+        is_public: true,
+      });
+
+      if (dbError) {
+        console.error('[EGRESS] DB save error:', dbError);
       }
     }
 
-    res.json({ success: true, videoUrl });
+    res.json({ success: true, videoUrl: 'processing' });
 
   } catch (error) {
-    console.error('[EGRESS] Stop error:', error);
+    console.error('[EGRESS] Stop error:', error.response?.data || error.message);
     res.status(500).json({ error: error.message });
   }
 });
