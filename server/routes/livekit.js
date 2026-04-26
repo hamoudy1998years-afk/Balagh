@@ -148,9 +148,40 @@ router.post('/egress/stop', async (req, res) => {
 
     // Get the download URL from LiveKit
     const egressInfo = stopResponse.data;
-    const downloadUrl = egressInfo?.file_results?.[0]?.download_url 
-      || egressInfo?.file?.download_url
-      || null;
+    // Poll LiveKit for the download URL
+let downloadUrl = null;
+let attempts = 0;
+const maxAttempts = 20;
+
+while (!downloadUrl && attempts < maxAttempts) {
+  attempts++;
+  console.log(`[EGRESS] Polling for download URL (attempt ${attempts})...`);
+  
+  await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+  
+  const listResponse = await axios.post(
+    `${livekitUrl}/twirp/livekit.Egress/ListEgress`,
+    { egress_id: egressId },
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      }
+    }
+  );
+  
+  const egress = listResponse.data?.items?.[0];
+  downloadUrl = egress?.file_results?.[0]?.download_url 
+    || egress?.file?.download_url 
+    || null;
+    
+  console.log(`[EGRESS] Status: ${egress?.status}, Download URL: ${downloadUrl}`);
+  
+  if (egress?.status === 'EGRESS_FAILED') {
+    console.error('[EGRESS] Egress failed!');
+    break;
+  }
+}
 
     console.log('[EGRESS] Download URL from LiveKit:', downloadUrl);
 
