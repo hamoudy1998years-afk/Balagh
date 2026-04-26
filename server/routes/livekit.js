@@ -88,6 +88,12 @@ router.post('/egress/start', async (req, res) => {
         layout: 'speaker',
         file: {
           filepath: filename,
+          s3: {
+            access_key: process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID,
+            secret: process.env.AWS_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY,
+            region: process.env.S3_REGION || 'ap-southeast-2',
+            bucket: process.env.S3_BUCKET_NAME,
+          }
         }
       },
       {
