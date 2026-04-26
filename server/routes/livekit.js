@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
+const { EgressClient } = require('livekit-server-sdk');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -64,64 +65,38 @@ router.post('/egress/start', async (req, res) => {
       return res.status(400).json({ error: 'Missing roomName' });
     }
 
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    const livekitUrl = process.env.LIVEKIT_URL?.replace('wss://', 'https://');
-
-    // ─── DEBUG: Log AWS credentials status ───────────────────────
-    console.log('[EGRESS] S3 Config:', {
-      bucket: process.env.S3_BUCKET_NAME,
-      region: process.env.S3_REGION,
-      hasAccessKey: !!process.env.AWS_ACCESS_KEY,
-      hasAccessKeyId: !!process.env.AWS_ACCESS_KEY_ID,
-      hasSecretKey: !!process.env.AWS_SECRET_KEY,
-      hasSecretAccessKey: !!process.env.AWS_SECRET_ACCESS_KEY,
-    });
-
-    // ─── Use whichever AWS key variable exists ────────────────────
     const awsAccessKey = process.env.AWS_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
     const awsSecretKey = process.env.AWS_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
 
-    const now = Math.floor(Date.now() / 1000);
-    const payload = {
-      iss: apiKey,
-      sub: apiKey,
-      iat: now,
-      exp: now + 3600,
-      video: { roomCreate: true, roomRecord: true }
-    };
-    const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
+    console.log('[EGRESS] Starting recording for room:', roomName);
+    console.log('[EGRESS] AWS Key exists:', !!awsAccessKey);
+    console.log('[EGRESS] AWS Secret exists:', !!awsSecretKey);
+
+    const egressClient = new EgressClient(
+      process.env.LIVEKIT_URL,
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET
+    );
 
     const filename = `livestreams/${roomName}_${Date.now()}.mp4`;
 
-    const response = await axios.post(
-      `${livekitUrl}/twirp/livekit.Egress/StartRoomCompositeEgress`,
-      {
-        room_name: roomName,
-        layout: 'speaker',
-        file: {
-          filepath: filename,
-          s3: {
-            access_key: awsAccessKey,
-            secret: awsSecretKey,
-            region: process.env.S3_REGION || 'ap-southeast-2',
-            bucket: process.env.S3_BUCKET_NAME,
-          }
-        }
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
+    const egress = await egressClient.startRoomCompositeEgress(roomName, {
+      file: {
+        filepath: filename,
+        s3: {
+          accessKey: awsAccessKey,
+          secret: awsSecretKey,
+          region: process.env.S3_REGION || 'ap-southeast-2',
+          bucket: process.env.S3_BUCKET_NAME,
         }
       }
-    );
+    });
 
-    console.log('[EGRESS] Recording started:', response.data.egress_id);
-    res.json({ egressId: response.data.egress_id, filename });
+    console.log('[EGRESS] Recording started:', egress.egressId);
+    res.json({ egressId: egress.egressId, filename });
 
   } catch (error) {
-    console.error('[EGRESS] Start error:', error.response?.data || error.message);
+    console.error('[EGRESS] Start error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -131,30 +106,15 @@ router.post('/egress/stop', async (req, res) => {
   try {
     const { egressId, userId, title, thumbnailUrl, filename } = req.body;
 
-    const apiKey = process.env.LIVEKIT_API_KEY;
-    const apiSecret = process.env.LIVEKIT_API_SECRET;
-    const livekitUrl = process.env.LIVEKIT_URL?.replace('wss://', 'https://');
+    console.log('[EGRESS] Stopping egress:', egressId);
 
-    const now = Math.floor(Date.now() / 1000);
-    const payload = {
-      iss: apiKey,
-      sub: apiKey,
-      iat: now,
-      exp: now + 3600,
-      video: { roomCreate: true, roomRecord: true }
-    };
-    const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
-
-    await axios.post(
-      `${livekitUrl}/twirp/livekit.Egress/StopEgress`,
-      { egress_id: egressId },
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        }
-      }
+    const egressClient = new EgressClient(
+      process.env.LIVEKIT_URL,
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET
     );
+
+    await egressClient.stopEgress(egressId);
 
     const videoUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.S3_REGION || 'ap-southeast-2'}.amazonaws.com/${filename}`;
 
@@ -177,7 +137,7 @@ router.post('/egress/stop', async (req, res) => {
     res.json({ success: true, videoUrl });
 
   } catch (error) {
-    console.error('[EGRESS] Stop error:', error.response?.data || error.message);
+    console.error('[EGRESS] Stop error:', error);
     res.status(500).json({ error: error.message });
   }
 });
