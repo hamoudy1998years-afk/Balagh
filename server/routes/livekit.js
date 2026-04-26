@@ -1,27 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
+const { createClient } = require('@supabase/supabase-js');
 
-// Generate LiveKit token for streaming
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+// ─── GENERATE LIVEKIT TOKEN ──────────────────────────────────────
 router.post('/token', async (req, res) => {
   try {
     const { roomName, userId, isHost } = req.body;
-    
+
     if (!roomName || !userId) {
       return res.status(400).json({ error: 'Missing roomName or userId' });
     }
-    
+
     const apiKey = process.env.LIVEKIT_API_KEY;
     const apiSecret = process.env.LIVEKIT_API_SECRET;
-    
+
     if (!apiKey || !apiSecret) {
       return res.status(500).json({ error: 'LiveKit credentials not configured' });
     }
-    
-    if (process.env.NODE_ENV !== 'production') {
-    console.log('[LIVEKIT] Generating token for:', userId, 'room:', roomName);
-  }
-    
+
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: apiKey,
@@ -37,11 +40,10 @@ router.post('/token', async (req, res) => {
         canPublishData: true,
       }
     };
-    
+
     const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
-    
     console.log('[LIVEKIT] Token generated successfully');
-    
+
     res.json({
       token,
       url: process.env.LIVEKIT_URL,
@@ -50,6 +52,162 @@ router.post('/token', async (req, res) => {
   } catch (error) {
     console.error('[LIVEKIT] Token error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── START EGRESS RECORDING ──────────────────────────────────────
+router.post('/egress/start', async (req, res) => {
+  try {
+    const { roomName } = req.body;
+
+    if (!roomName) {
+      return res.status(400).json({ error: 'Missing roomName' });
+    }
+
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL?.replace('wss://', 'https://');
+
+    // Create egress via LiveKit REST API
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: apiKey,
+      sub: apiKey,
+      iat: now,
+      exp: now + 3600,
+      video: { roomCreate: true, roomRecord: true }
+    };
+    const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
+
+    const filename = `livestreams/${roomName}_${Date.now()}.mp4`;
+
+    const response = await axios.post(
+      `${livekitUrl}/twirp/livekit.Egress/StartRoomCompositeEgress`,
+      {
+        room_name: roomName,
+        layout: 'speaker',
+        file: {
+          filepath: filename,
+          s3: {
+            access_key: process.env.AWS_ACCESS_KEY,
+            secret: process.env.AWS_SECRET_KEY,
+            region: process.env.S3_REGION || 'ap-southeast-2',
+            bucket: process.env.S3_BUCKET_NAME,
+          }
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+
+    console.log('[EGRESS] Recording started:', response.data.egress_id);
+    res.json({ egressId: response.data.egress_id, filename });
+
+  } catch (error) {
+    console.error('[EGRESS] Start error:', error.response?.data || error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── STOP EGRESS AND SAVE REPLAY ─────────────────────────────────
+router.post('/egress/stop', async (req, res) => {
+  try {
+    const { egressId, userId, title, thumbnailUrl, filename } = req.body;
+
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const livekitUrl = process.env.LIVEKIT_URL?.replace('wss://', 'https://');
+
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: apiKey,
+      sub: apiKey,
+      iat: now,
+      exp: now + 3600,
+      video: { roomCreate: true, roomRecord: true }
+    };
+    const token = jwt.sign(payload, apiSecret, { algorithm: 'HS256' });
+
+    // Stop the egress
+    await axios.post(
+      `${livekitUrl}/twirp/livekit.Egress/StopEgress`,
+      { egress_id: egressId },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+
+    // Build the S3 video URL
+    const videoUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.S3_REGION || 'ap-southeast-2'}.amazonaws.com/${filename}`;
+
+    // Save replay to Supabase
+    if (userId) {
+      const { error } = await supabase.from('livestreams').insert({
+        user_id: userId,
+        video_url: videoUrl,
+        thumbnail_url: thumbnailUrl || null,
+        title: title || 'Live Stream',
+        is_public: true,
+      });
+
+      if (error) {
+        console.error('[EGRESS] DB save error:', error);
+      } else {
+        console.log('[EGRESS] Replay saved to DB:', videoUrl);
+      }
+    }
+
+    res.json({ success: true, videoUrl });
+
+  } catch (error) {
+    console.error('[EGRESS] Stop error:', error.response?.data || error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── GCASH DONATION VIA PAYMONGO ─────────────────────────────────
+router.post('/donate', async (req, res) => {
+  try {
+    const { amount, scholarName, streamId } = req.body;
+    const amountInCentavos = Math.round(amount * 100);
+
+    if (amountInCentavos < 2000) {
+      return res.status(400).json({ error: 'Minimum donation is ₱20' });
+    }
+
+    const response = await axios.post(
+      'https://api.paymongo.com/v1/links',
+      {
+        data: {
+          attributes: {
+            amount: amountInCentavos,
+            description: `Support ${scholarName} on Balagh`,
+            remarks: `stream_${streamId}`,
+          }
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Basic ${Buffer.from(process.env.PAYMONGO_SECRET_KEY + ':').toString('base64')}`,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
+
+    const checkoutUrl = response.data.data.attributes.checkout_url;
+    console.log('[PAYMONGO] Payment link created:', checkoutUrl);
+    res.json({ checkoutUrl });
+
+  } catch (error) {
+    console.error('[PAYMONGO] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create payment link' });
   }
 });
 
