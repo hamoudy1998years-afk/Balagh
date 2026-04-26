@@ -60,6 +60,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
   // --- UI state ---
   const [showEndModal, setShowEndModal] = useState(false);
+  const [egressId, setEgressId] = useState(null);
+  const egressIdRef = useRef(null);
+  const egressFilenameRef = useRef(null);
   const [isEnding, setIsEnding] = useState(false);
   const [showViewerList, setShowViewerList] = useState(false);
   const [viewerListMode, setViewerListMode] = useState('recent');
@@ -359,6 +362,24 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         }
       }, 5000);
 
+      // Start egress recording
+try {
+  const egressRes = await fetch(`${SERVER_URL}/api/livekit/egress/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roomName }),
+  });
+  const egressData = await egressRes.json();
+  if (egressData.egressId) {
+    egressIdRef.current = egressData.egressId;
+    egressFilenameRef.current = egressData.filename;
+    setEgressId(egressData.egressId);
+    console.log('[EGRESS] Recording started:', egressData.egressId);
+  }
+} catch (e) {
+  console.error('[EGRESS] Failed to start recording:', e);
+}
+
       subscribeToChat(currentStreamId);
       subscribeToQuestions(currentStreamId);
 
@@ -396,25 +417,44 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     setShowEndModal(false);
     setIsEnding(true);
 
-    try {
-      if (currentStreamIdRef.current) {
-        console.log('[END] Deleting stream from Supabase:', currentStreamIdRef.current);
-        const { error: deleteError } = await supabase
-          .from('live_streams')
-          .delete()
-          .eq('id', currentStreamIdRef.current);
+    // Stop egress and save replay
+if (egressIdRef.current) {
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('avatar_url')
+      .eq('id', currentUser.id)
+      .single();
 
-        if (deleteError) {
-          console.error('[END] Supabase delete error:', deleteError);
-        } else {
-          console.log('[END] Stream deleted successfully - storage saved');
-        }
-      } else {
-        console.warn('[END] No stream ID found — nothing to delete');
-      }
-    } catch (e) {
-      console.error('[END] Supabase cleanup error:', e);
-    }
+    await fetch(`${SERVER_URL}/api/livekit/egress/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        egressId: egressIdRef.current,
+        filename: egressFilenameRef.current,
+        userId: currentUser.id,
+        title,
+        thumbnailUrl: profile?.avatar_url || null,
+      }),
+    });
+    console.log('[EGRESS] Replay saved!');
+  } catch (e) {
+    console.error('[EGRESS] Failed to save replay:', e);
+  }
+}
+
+// Delete from live feed
+try {
+  if (currentStreamIdRef.current) {
+    await supabase
+      .from('live_streams')
+      .delete()
+      .eq('id', currentStreamIdRef.current);
+    console.log('[END] Stream deleted from live feed');
+  }
+} catch (e) {
+  console.error('[END] Supabase cleanup error:', e);
+}
 
     await cleanup();
 

@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList,
   Keyboard, Platform, ActivityIndicator,
-  Animated, Dimensions,
+  Animated, Dimensions, Modal, Pressable,
 } from 'react-native';
 import ModernDialog from './ModernDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { Room, RoomEvent, Track } from 'livekit-client';
+import * as WebBrowser from 'expo-web-browser';
 import { registerGlobals, VideoView } from '@livekit/react-native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
@@ -42,6 +43,9 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [retryCount, setRetryCount] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
+  const [donateModal, setDonateModal] = useState(false);
+  const [donateAmount, setDonateAmount] = useState('');
+  const [donating, setDonating] = useState(false);
 
   const roomRef = useRef(null);
   const flatListRef = useRef(null);
@@ -361,6 +365,49 @@ export default function WatchLiveScreen({ navigation, route }) {
     }
   }
 
+  const handleDonate = async () => {
+  const amount = parseFloat(donateAmount);
+  if (!amount || amount < 20) {
+    setDialog({
+      visible: true,
+      title: 'Minimum ₱20',
+      message: 'Please enter at least ₱20 to donate.',
+      type: 'warning',
+      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+    });
+    return;
+  }
+
+  setDonating(true);
+  try {
+    const res = await fetch(`${TOKEN_SERVER_URL}/api/livekit/donate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount,
+        scholarName: stream.user?.name || 'Scholar',
+        streamId: stream.id,
+      }),
+    });
+    const data = await res.json();
+    if (data.checkoutUrl) {
+      setDonateModal(false);
+      setDonateAmount('');
+      await WebBrowser.openBrowserAsync(data.checkoutUrl);
+    }
+  } catch (e) {
+    setDialog({
+      visible: true,
+      title: 'Error',
+      message: 'Could not process donation. Please try again.',
+      type: 'error',
+      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+    });
+  } finally {
+    setDonating(false);
+  }
+};
+
   const handleTabChat = useCallback(() => setActiveTab('chat'), []);
   const handleTabQuestion = useCallback(() => setActiveTab('question'), []);
 
@@ -515,8 +562,55 @@ export default function WatchLiveScreen({ navigation, route }) {
               <Text style={styles.reactionEmoji}>{emoji}</Text>
             </AnimatedButton>
           ))}
+          <AnimatedButton style={styles.donateBtn} onPress={() => setDonateModal(true)}>
+            <Text style={styles.donateEmoji}>💰</Text>
+          </AnimatedButton>
         </View>
       </View>
+
+      {/* DONATION MODAL */}
+<Modal visible={donateModal} transparent animationType="slide" onRequestClose={() => setDonateModal(false)}>
+  <Pressable style={styles.donateBackdrop} onPress={() => setDonateModal(false)} />
+  <View style={styles.donateSheet}>
+    <Text style={styles.donateTitle}>💰 Support this Scholar</Text>
+    <Text style={styles.donateSubtitle}>Help keep this stream going!</Text>
+
+    <View style={styles.donateAmounts}>
+      {[20, 50, 100, 200].map(amt => (
+        <AnimatedButton
+          key={amt}
+          style={[styles.donateAmountBtn, donateAmount === String(amt) && styles.donateAmountBtnActive]}
+          onPress={() => setDonateAmount(String(amt))}
+        >
+          <Text style={[styles.donateAmountText, donateAmount === String(amt) && styles.donateAmountTextActive]}>
+            ₱{amt}
+          </Text>
+        </AnimatedButton>
+      ))}
+    </View>
+
+    <TextInput
+      style={styles.donateInput}
+      value={donateAmount}
+      onChangeText={setDonateAmount}
+      placeholder="Or enter custom amount (₱)"
+      placeholderTextColor="#94a3b8"
+      keyboardType="numeric"
+    />
+
+    <AnimatedButton
+      style={[styles.donateProceedBtn, donating && { opacity: 0.7 }]}
+      onPress={handleDonate}
+      disabled={donating}
+    >
+      <Text style={styles.donateProceedText}>
+        {donating ? 'Processing...' : '💳 Donate via GCash'}
+      </Text>
+    </AnimatedButton>
+
+    <Text style={styles.donateNote}>Powered by PayMongo • Safe & Secure</Text>
+  </View>
+</Modal>
 
       <ModernDialog
         visible={dialog.visible}
@@ -887,6 +981,52 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     letterSpacing: -0.3,
   },
+  donateBtn: {
+  padding: 10, borderRadius: 20,
+  backgroundColor: 'rgba(212,175,55,0.2)',
+  borderWidth: 1, borderColor: COLORS.gold,
+},
+donateEmoji: { fontSize: 24 },
+donateBackdrop: {
+  ...StyleSheet.absoluteFillObject,
+  backgroundColor: 'rgba(0,0,0,0.6)'
+},
+donateSheet: {
+  position: 'absolute', bottom: 0, left: 0, right: 0,
+  backgroundColor: '#111', borderTopLeftRadius: 24,
+  borderTopRightRadius: 24, padding: 24, paddingBottom: 48,
+},
+donateTitle: {
+  color: '#fff', fontSize: 20, fontWeight: '800',
+  textAlign: 'center', marginBottom: 6
+},
+donateSubtitle: {
+  color: '#94a3b8', fontSize: 13,
+  textAlign: 'center', marginBottom: 20
+},
+donateAmounts: {
+  flexDirection: 'row', gap: 10,
+  marginBottom: 16, justifyContent: 'center'
+},
+donateAmountBtn: {
+  flex: 1, paddingVertical: 12, borderRadius: 12,
+  backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center',
+  borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+},
+donateAmountBtnActive: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+donateAmountText: { color: '#94a3b8', fontWeight: '700', fontSize: 15 },
+donateAmountTextActive: { color: '#fff' },
+donateInput: {
+  backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12,
+  padding: 14, color: '#fff', fontSize: 15, marginBottom: 16,
+  borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+},
+donateProceedBtn: {
+  backgroundColor: COLORS.gold, borderRadius: 14,
+  paddingVertical: 16, alignItems: 'center', marginBottom: 12,
+},
+donateProceedText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+donateNote: { color: '#475569', fontSize: 12, textAlign: 'center' },
   disabledText: { 
     color: '#94a3b8', 
     fontSize: 14, 
