@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import * as WebBrowser from 'expo-web-browser';
+import { WebView } from 'react-native-webview';
 import { registerGlobals, VideoView } from '@livekit/react-native';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
@@ -46,6 +47,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [donateModal, setDonateModal] = useState(false);
   const [donateAmount, setDonateAmount] = useState('');
   const [donating, setDonating] = useState(false);
+  const [checkoutUrl, setCheckoutUrl] = useState(null);
 
   const roomRef = useRef(null);
   const flatListRef = useRef(null);
@@ -393,7 +395,7 @@ export default function WatchLiveScreen({ navigation, route }) {
     if (data.checkoutUrl) {
       setDonateModal(false);
       setDonateAmount('');
-      await WebBrowser.openBrowserAsync(data.checkoutUrl);
+      setCheckoutUrl(data.checkoutUrl);
     }
   } catch (e) {
     setDialog({
@@ -620,6 +622,29 @@ export default function WatchLiveScreen({ navigation, route }) {
         buttons={dialog.buttons}
         onDismiss={() => setDialog({ ...dialog, visible: false })}
       />
+
+      {/* GCash WebView Modal */}
+      <Modal visible={!!checkoutUrl} animationType="slide" onRequestClose={() => setCheckoutUrl(null)}>
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#111', paddingTop: insets.top, paddingHorizontal: 16, paddingBottom: 12 }}>
+            <Text style={{ color: '#fff', flex: 1, fontWeight: '700', fontSize: 16 }}>💳 GCash Payment</Text>
+            <AnimatedButton onPress={() => setCheckoutUrl(null)}>
+              <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>✕</Text>
+            </AnimatedButton>
+          </View>
+          {checkoutUrl && (
+            <WebView
+              source={{ uri: checkoutUrl }}
+              style={{ flex: 1 }}
+              onNavigationStateChange={(navState) => {
+                if (navState.url.includes('success') || navState.url.includes('paid')) {
+                  setCheckoutUrl(null);
+                }
+              }}
+            />
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
