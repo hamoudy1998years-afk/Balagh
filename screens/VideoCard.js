@@ -64,44 +64,54 @@ function VideoCard({
   const [videoUri, setVideoUri] = useState(null);
   const [isLoadingSignedUrl, setIsLoadingSignedUrl] = useState(false);
 
-  // Fetch signed URL for livestream videos
-  useEffect(() => {
-    const fetchSignedUrl = async () => {
-
-      // Only fetch signed URL for livestream videos (m3u8 files)
-      if (item.video_url && item.video_url.includes('.m3u8')) {
-        setIsLoadingSignedUrl(true);
-        try {
-          const response = await fetch(
-            `https://balagh-server-production.up.railway.app/api/recording/livestreams/${item.id}/play`
-          );
-          const data = await response.json();
-
-          if (data.signedUrl) {
-
-            setVideoUri(data.signedUrl);
-
-          } else {
-            // Fallback to original URL
-            setVideoUri(item.video_url);
-          }
-        } catch (error) {
-
-          // Fallback to original URL
+    // Set video URI — signed URLs from parent take priority
+    useEffect(() => {
+      const loadVideoUri = async () => {
+        // If parent already provided a signed URL (has query params), use it directly
+        if (item.video_url?.includes('?')) {
+          console.log('[VIDEOCARD] Using signed URL from parent:', item.video_url.substring(0, 80) + '...');
           setVideoUri(item.video_url);
-        } finally {
-          setIsLoadingSignedUrl(false);
+          return;
         }
-      } else {
-        // For regular videos, use original URL
-        setVideoUri(item.video_url);
-      }
-    };
 
-    if (item.id && item.video_url) {
-      fetchSignedUrl();
-    }
-  }, [item.id, item.video_url]);
+        // Livestream without signed URL — fetch one
+        if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) {
+          console.log('[VIDEOCARD] Fetching signed URL for livestream:', item.id);
+          try {
+            const response = await fetch(
+              `${process.env.EXPO_PUBLIC_SERVER_URL}/api/recording/livestreams/${item.id}/play`
+            );
+            const data = await response.json();
+            if (data.signedUrl) {
+              console.log('[VIDEOCARD] Got signed URL from server');
+              setVideoUri(data.signedUrl);
+              return;
+            }
+          } catch (error) {
+            console.error('[VIDEOCARD] Failed to fetch signed URL:', error);
+          }
+          setVideoUri(item.video_url);
+          return;
+        }
+
+        // Regular video — check cache
+        const cachedUri = await videoCache.getCachedVideo(item.video_url);
+        if (cachedUri) {
+          const fileInfo = await FileSystem.getInfoAsync(cachedUri);
+          if (fileInfo.exists) {
+            setVideoUri(cachedUri);
+            return;
+          }
+          await videoCache.removeCachedVideo(item.video_url);
+        }
+        setVideoUri(item.video_url);
+        videoCache.cacheVideo(item.video_url);
+      };
+
+      if (item.id && item.video_url) {
+        loadVideoUri();
+      }
+    }, [item.id, item.video_url, item.type]);
 
   useEffect(() => {
     async function checkBlocked() {
@@ -247,28 +257,6 @@ function VideoCard({
       }).start();
     }
   }, [paused, isDragging]);
-
-  useEffect(() => {
-  const loadCachedVideo = async () => {
-    const cachedUri = await videoCache.getCachedVideo(item.video_url);
-    if (cachedUri) {
-      // Verify the file actually exists before using it
-      const fileInfo = await FileSystem.getInfoAsync(cachedUri);
-      if (fileInfo.exists) {
-        setVideoUri(cachedUri);
-      } else {
-        // File is gone — delete bad cache entry and use remote URL
-        await videoCache.removeCachedVideo(item.video_url);
-        setVideoUri(item.video_url);
-        videoCache.cacheVideo(item.video_url);
-      }
-    } else {
-      setVideoUri(item.video_url);
-      videoCache.cacheVideo(item.video_url);
-    }
-  };
-  loadCachedVideo();
-}, [item.video_url]);
 
   useEffect(() => {
     const channel = supabase
@@ -1017,6 +1005,8 @@ const styles = StyleSheet.create({
 function areEqual(prevProps, nextProps) {
   return (
     prevProps.item.id === nextProps.item.id &&
+    prevProps.item.video_url === nextProps.item.video_url &&
+    prevProps.item.type === nextProps.item.type &&
     prevProps.isActive === nextProps.isActive &&
     prevProps.isVisible === nextProps.isVisible &&
     prevProps.isTabActive === nextProps.isTabActive

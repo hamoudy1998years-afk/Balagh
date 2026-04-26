@@ -332,11 +332,7 @@ router.get('/livestreams/:id/play', async (req, res) => {
       Key: s3Key
     });
     
-    const rawSignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-    // Remove checksum-mode parameter that ExoPlayer doesn't support
-    const signedUrl = rawSignedUrl
-      .replace('&x-amz-checksum-mode=ENABLED', '')
-      .replace('?x-amz-checksum-mode=ENABLED&', '?');
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     
     console.log('[SIGNED URL] Generated successfully');
     

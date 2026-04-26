@@ -17,6 +17,7 @@ export default function VideoDetailScreen({ navigation }) {
   const { user: authUser } = useUser();
   const [video, setVideo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [signedUrlReady, setSignedUrlReady] = useState(false);
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -27,24 +28,39 @@ export default function VideoDetailScreen({ navigation }) {
     if (videoId && !route.params?.video) {
       fetchVideoById(videoId);
     } else if (route.params?.video) {
-      setVideo(route.params.video);
-      setLoading(false);
+      const videoData = route.params.video;
+      if (videoData.type === 'livestream') {
+        getSignedUrl(videoData);
+      } else {
+        setVideo(videoData);
+        setLoading(false);
+      }
     }
   }, [videoId]);
 
   async function getSignedUrl(videoData) {
     try {
       setLoading(true);
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SERVER_URL}/api/recording/livestreams/${videoData.id}/play`);
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SERVER_URL}/api/recording/livestreams/${videoData.id}/play`
+      );
       const data = await response.json();
+      console.log('[SIGNED URL] Response:', JSON.stringify(data));
       if (data.signedUrl) {
-        setVideo({ ...videoData, video_url: data.signedUrl });
+        // Replace the video_url with signed URL BEFORE setting video
+        const videoWithSignedUrl = { 
+          ...videoData, 
+          video_url: data.signedUrl,
+          video_uri: data.signedUrl  // also set video_uri just in case
+        };
+        setVideo(videoWithSignedUrl);
+        setSignedUrlReady(true);
       } else {
         setVideo(videoData);
       }
     } catch (e) {
       console.error('[VideoDetail] Signed URL error:', e);
-      setVideo(videoData); // fallback to original URL
+      setVideo(videoData);
     } finally {
       setLoading(false);
     }
@@ -102,7 +118,7 @@ export default function VideoDetailScreen({ navigation }) {
     }
   }
 
-  if (loading) {
+  if (loading || (video?.type === 'livestream' && !signedUrlReady)) {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={COLORS.gold} size="large" />
