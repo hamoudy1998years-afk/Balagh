@@ -505,6 +505,9 @@ export default function WatchLiveScreen({ navigation, route }) {
           <AnimatedButton style={[styles.tab, activeTab === 'question' && styles.tabActive]} onPress={handleTabQuestion}>
             <Text style={[styles.tabText, activeTab === 'question' && styles.tabTextActive]}>❓ Ask ({questionsLeft} left)</Text>
           </AnimatedButton>
+          <AnimatedButton style={[styles.tab, styles.sadaqahTab]} onPress={() => setDonateModal(true)}>
+            <Text style={styles.sadaqahTabText}>🤲 Sadaqah</Text>
+          </AnimatedButton>
         </View>
 
         {activeTab === 'chat' && (
@@ -576,8 +579,14 @@ export default function WatchLiveScreen({ navigation, route }) {
 <Modal visible={donateModal} transparent animationType="slide" onRequestClose={() => setDonateModal(false)}>
   <Pressable style={styles.donateBackdrop} onPress={() => setDonateModal(false)} />
   <View style={styles.donateSheet}>
-    <Text style={styles.donateTitle}>💰 Support this Scholar</Text>
-    <Text style={styles.donateSubtitle}>Help keep this stream going!</Text>
+    <Text style={styles.donateTitle}>🤲 Give Sadaqah</Text>
+    <View style={styles.donateIslamicBox}>
+      <Text style={styles.donateHadith}>"Charity does not decrease wealth."</Text>
+      <Text style={styles.donateHadithSource}>— Prophet Muhammad ﷺ (Muslim)</Text>
+      <Text style={styles.donateIslamicMsg}>
+        Support this scholar and spread Islamic knowledge. In sha Allah, every peso you give will be rewarded on the Day of Judgment. 🌟
+      </Text>
+    </View>
 
     <View style={styles.donateAmounts}>
       {[20, 50, 100, 200].map(amt => (
@@ -1014,6 +1023,16 @@ const styles = StyleSheet.create({
   borderWidth: 1, borderColor: COLORS.gold,
 },
 donateEmoji: { fontSize: 24 },
+sadaqahTab: {
+  backgroundColor: 'rgba(212,175,55,0.15)',
+  borderWidth: 1,
+  borderColor: COLORS.gold,
+},
+sadaqahTabText: {
+  color: COLORS.gold,
+  fontSize: 13,
+  fontWeight: '700',
+},
 donateBackdrop: {
   ...StyleSheet.absoluteFillObject,
   backgroundColor: 'rgba(0,0,0,0.6)'
@@ -1025,11 +1044,39 @@ donateSheet: {
 },
 donateTitle: {
   color: '#fff', fontSize: 20, fontWeight: '800',
-  textAlign: 'center', marginBottom: 6
+  textAlign: 'center', marginBottom: 12
 },
 donateSubtitle: {
   color: '#94a3b8', fontSize: 13,
   textAlign: 'center', marginBottom: 20
+},
+donateIslamicBox: {
+  backgroundColor: 'rgba(212,175,55,0.08)',
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: 'rgba(212,175,55,0.3)',
+  padding: 16,
+  marginBottom: 20,
+},
+donateHadith: {
+  color: COLORS.gold,
+  fontSize: 15,
+  fontWeight: '700',
+  textAlign: 'center',
+  fontStyle: 'italic',
+  marginBottom: 4,
+},
+donateHadithSource: {
+  color: 'rgba(212,175,55,0.6)',
+  fontSize: 11,
+  textAlign: 'center',
+  marginBottom: 10,
+},
+donateIslamicMsg: {
+  color: 'rgba(255,255,255,0.8)',
+  fontSize: 13,
+  textAlign: 'center',
+  lineHeight: 20,
 },
 donateAmounts: {
   flexDirection: 'row', gap: 10,
