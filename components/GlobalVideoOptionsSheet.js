@@ -442,6 +442,7 @@ export default function GlobalVideoOptionsSheet() {
                   style={styles.loginDialogLogin}
                   onPress={() => {
                     setLoginDialogVisible(false);
+                    hideVideoOptionsSheet();
                     setTimeout(() => navigation?.navigate('Login'), 300);
                   }}
                 >
