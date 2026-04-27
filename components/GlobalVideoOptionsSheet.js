@@ -22,6 +22,29 @@ export default function GlobalVideoOptionsSheet() {
   const [blockConfirmVisible, setBlockConfirmVisible] = useState(false);
   const [blockUserData, setBlockUserData] = useState(null);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
+
+  const animatedScales = useRef({
+    download: new Animated.Value(1),
+    pin: new Animated.Value(1),
+    delete: new Animated.Value(1),
+    block: new Animated.Value(1),
+  }).current;
+
+  const pressIn = (key) => {
+    Animated.spring(animatedScales[key], {
+      toValue: 0.88,
+      useNativeDriver: true,
+      speed: 50,
+    }).start();
+  };
+
+  const pressOut = (key) => {
+    Animated.spring(animatedScales[key], {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+    }).start();
+  };
   
   // TikTok sheet animation
   const tikTokTranslateY = useRef(new Animated.Value(0)).current;
@@ -199,7 +222,7 @@ export default function GlobalVideoOptionsSheet() {
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 0,
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.dy > 0) translateY.setValue(gestureState.dy);
@@ -312,10 +335,13 @@ export default function GlobalVideoOptionsSheet() {
           <Pressable 
             style={[styles.gridItem, hasDownloaded && styles.gridItemDisabled]} 
             onPress={handleDownload}
+            onPressIn={() => pressIn('download')}
+            onPressOut={() => pressOut('download')}
             disabled={hasDownloaded}
           >
-            <View style={[
+            <Animated.View style={[
               styles.gridIcon, 
+              { transform: [{ scale: animatedScales.download }] },
               hasDownloaded ? { backgroundColor: 'rgba(34, 197, 94, 0.15)' } : { backgroundColor: 'rgba(16, 185, 129, 0.15)' }
             ]}>
               <Ionicons 
@@ -323,7 +349,7 @@ export default function GlobalVideoOptionsSheet() {
                 size={24} 
                 color={hasDownloaded ? '#22c55e' : '#10b981'} 
               />
-            </View>
+            </Animated.View>
             <Text style={[styles.gridLabel, hasDownloaded && { color: '#22c55e' }]}>
               {hasDownloaded ? 'Saved' : 'Download'}
             </Text>
@@ -331,13 +357,19 @@ export default function GlobalVideoOptionsSheet() {
 
           {/* Pin - Owner only */}
           {isOwner && (
-            <Pressable style={styles.gridItem} onPress={handlePin}>
-              <View style={[
-                styles.gridIcon, 
+            <Pressable 
+              style={styles.gridItem} 
+              onPress={handlePin}
+              onPressIn={() => pressIn('pin')}
+              onPressOut={() => pressOut('pin')}
+            >
+              <Animated.View style={[
+                styles.gridIcon,
+                { transform: [{ scale: animatedScales.pin }] },
                 video?.is_pinned ? { backgroundColor: 'rgba(183, 110, 121, 0.2)' } : { backgroundColor: 'rgba(255, 255, 255, 0.1)' }
               ]}>
                 <Text style={{ fontSize: 22 }}>📌</Text>
-              </View>
+              </Animated.View>
               <Text style={styles.gridLabel}>
                 {video?.is_pinned ? 'Unpin' : 'Pin'}
               </Text>
@@ -346,20 +378,38 @@ export default function GlobalVideoOptionsSheet() {
 
           {/* Block - Non-owner only */}
           {sheetState.onBlock && (
-            <Pressable style={styles.gridItem} onPress={handleBlock}>
-              <View style={[styles.gridIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+            <Pressable 
+              style={styles.gridItem} 
+              onPress={handleBlock}
+              onPressIn={() => pressIn('block')}
+              onPressOut={() => pressOut('block')}
+            >
+              <Animated.View style={[
+                styles.gridIcon, 
+                { transform: [{ scale: animatedScales.block }] },
+                { backgroundColor: 'rgba(239, 68, 68, 0.15)' }
+              ]}>
                 <Ionicons name="ban-outline" size={24} color="#ef4444" />
-              </View>
+              </Animated.View>
               <Text style={[styles.gridLabel, { color: '#ef4444' }]}>Block</Text>
             </Pressable>
           )}
 
           {/* Delete - Owner only */}
           {isOwner && (
-            <Pressable style={styles.gridItem} onPress={handleDelete}>
-              <View style={[styles.gridIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+            <Pressable 
+              style={styles.gridItem} 
+              onPress={handleDelete}
+              onPressIn={() => pressIn('delete')}
+              onPressOut={() => pressOut('delete')}
+            >
+              <Animated.View style={[
+                styles.gridIcon, 
+                { transform: [{ scale: animatedScales.delete }] },
+                { backgroundColor: 'rgba(239, 68, 68, 0.15)' }
+              ]}>
                 <Ionicons name="trash-outline" size={24} color="#ef4444" />
-              </View>
+              </Animated.View>
               <Text style={[styles.gridLabel, { color: '#ef4444' }]}>Delete</Text>
             </Pressable>
           )}
