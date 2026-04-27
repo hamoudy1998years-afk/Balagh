@@ -336,11 +336,7 @@ export default function GlobalVideoOptionsSheet() {
                 styles.gridIcon, 
                 video?.is_pinned ? { backgroundColor: 'rgba(183, 110, 121, 0.2)' } : { backgroundColor: 'rgba(255, 255, 255, 0.1)' }
               ]}>
-                <Ionicons 
-                  name={video?.is_pinned ? 'pin' : 'pin-outline'} 
-                  size={24} 
-                  color={video?.is_pinned ? '#B76E79' : '#ffffff'} 
-                />
+                <Text style={{ fontSize: 22 }}>📌</Text>
               </View>
               <Text style={styles.gridLabel}>
                 {video?.is_pinned ? 'Unpin' : 'Pin'}

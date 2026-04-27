@@ -614,8 +614,18 @@ export default function ProfileScreen({ route, navigation }) {
 
   async function handlePinVideo(video) {
     if (!isOwnProfile) return;
+    // Get fresh video data from state
+    const freshVideo = publicVideos.find(v => v.id === video.id) || video;
+    video = freshVideo;
+    console.log('[PIN] video.is_pinned:', video.is_pinned, 'video.id:', video.id);
     try {
-      const pinnedCount = (publicVideos || []).filter(v => v.is_pinned).length;
+      const { count: pinnedCountRaw } = await supabase
+        .from('videos')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', currentUser.id)
+        .eq('is_pinned', true);
+      const pinnedCount = pinnedCountRaw ?? 0;
+      console.log('[PIN] current pinned count:', pinnedCount);
       if (video.is_pinned) {
         setDialog({ visible: true, title: 'Unpin Video', message: 'Remove this video from pinned?', type: 'confirm', buttons: [
           { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
@@ -623,7 +633,18 @@ export default function ProfileScreen({ route, navigation }) {
             setDialog(d => ({ ...d, visible: false }));
             try {
               await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); 
-              if (currentUser?.id) loadVideos(currentUser.id, true); 
+                // Update local state immediately
+                const updatedVideos = publicVideos.map(v => v.id === video.id ? { ...v, is_pinned: false, pin_order: null } : v);
+                const sorted = [
+                  ...updatedVideos.filter(v => v.is_pinned).sort((a, b) => (a.pin_order ?? 0) - (b.pin_order ?? 0)),
+                  ...updatedVideos.filter(v => !v.is_pinned).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
+                ];
+                dispatchVideo({
+                  type: 'SET_PUBLIC',
+                  videos: sorted,
+                  totalLikes: sorted.reduce((sum, v) => sum + (v.likes_count ?? 0), 0),
+                });
+                if (currentUser?.id) loadVideos(currentUser.id, true);
             } catch (e) {
               setDialog({ visible: true, title: 'Error', message: 'Could not unpin video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
@@ -632,7 +653,18 @@ export default function ProfileScreen({ route, navigation }) {
       } else {
         if (pinnedCount >= 3) { setDialog({ visible: true, title: 'Limit Reached', message: 'You can only pin up to 3 videos.', type: 'warning', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
         await supabase.from('videos').update({ is_pinned: true, pin_order: pinnedCount + 1 }).eq('id', video.id);
-        if (currentUser?.id) loadVideos(currentUser.id, true);
+          // Update local state immediately
+          const updatedVideos = publicVideos.map(v => v.id === video.id ? { ...v, is_pinned: true, pin_order: pinnedCount + 1 } : v);
+          const sorted = [
+            ...updatedVideos.filter(v => v.is_pinned).sort((a, b) => (a.pin_order ?? 0) - (b.pin_order ?? 0)),
+            ...updatedVideos.filter(v => !v.is_pinned),
+          ];
+          dispatchVideo({
+            type: 'SET_PUBLIC',
+            videos: sorted,
+            totalLikes: sorted.reduce((sum, v) => sum + (v.likes_count ?? 0), 0),
+          });
+          if (currentUser?.id) loadVideos(currentUser.id, true);
       }
     } catch (e) {
       setDialog({ visible: true, title: 'Error', message: 'Could not pin video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
@@ -728,11 +760,12 @@ export default function ProfileScreen({ route, navigation }) {
     if (!showVideoOptionsSheet) return;
     const hasDownloaded = downloadedVideoIds.has(video.id);
     showVideoOptionsSheet(video, isOwnProfile, hasDownloaded, {
-      onPin: handlePinVideo,
-      onDelete: handleDeleteVideo,
+      onPin: isOwnProfile ? handlePinVideo : null,
+      onDelete: isOwnProfile ? handleDeleteVideo : null,
       onDownload: handleDownloadVideo,
-    });
-  }, [showVideoOptionsSheet, isOwnProfile]);
+      onBlock: !isOwnProfile ? () => {} : null,
+    }, currentUser?.id, navigation);
+  }, [showVideoOptionsSheet, isOwnProfile, currentUser, navigation, handlePinVideo, handleDeleteVideo, handleDownloadVideo]);
 
   const handleOpenVideo = useCallback((videos, index) => {
     openVideo(videos, index);
