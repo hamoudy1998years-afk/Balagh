@@ -19,6 +19,7 @@ import ModernDialog from './ModernDialog';
 import { Room, RoomEvent, Track } from 'livekit-client';
 import { registerGlobals, VideoView } from '@livekit/react-native';
 import { Camera } from 'expo-camera';
+import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { supabase } from '../lib/supabase';
@@ -56,6 +57,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
   // --- Pre-stream settings ---
   const [allowQuestions, setAllowQuestions] = useState(true);
+  const [useExternalMic, setUseExternalMic] = useState(false);
   // NOTE: saveToProfile removed — recording not available on free LiveKit plan
 
   // --- UI state ---
@@ -347,6 +349,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           }
         }
       };
+      await applyMicSetting();
       tryEnableCamera();
 
       durationIntervalRef.current = setInterval(() => {
@@ -388,6 +391,18 @@ try {
       setError(err.message);
       setIsConnecting(false);
     }
+  };
+
+  // ─── EXTERNAL MIC ────────────────────────────────────────────────────────────
+  const applyMicSetting = async () => {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: false,
+      interruptionModeIOS: useExternalMic ? 2 : 1,
+      interruptionModeAndroid: useExternalMic ? 2 : 1,
+    });
   };
 
   // ─── SWITCH CAMERA ───────────────────────────────────────────────────────────
@@ -637,6 +652,21 @@ try {
               onValueChange={setAllowQuestions}
               trackColor={{ false: '#767577', true: COLORS.gold }}
               thumbColor={allowQuestions ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>External Mic</Text>
+              <Text style={styles.settingDescription}>
+                Use Bluetooth or wired external microphone
+              </Text>
+            </View>
+            <Switch
+              value={useExternalMic}
+              onValueChange={setUseExternalMic}
+              trackColor={{ false: '#767577', true: COLORS.gold }}
+              thumbColor={useExternalMic ? '#fff' : '#f4f3f4'}
             />
           </View>
 
