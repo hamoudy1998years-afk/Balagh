@@ -12,6 +12,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
 import { registerGlobals, VideoView } from '@livekit/react-native';
 import { supabase } from '../lib/supabase';
+import * as Notifications from 'expo-notifications';
 import AnimatedButton from './AnimatedButton';
 import { useViewerTracking } from '../hooks/useViewerTracking';
 import { useViewerCount } from '../hooks/useViewerCount';
@@ -48,6 +49,10 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [donateAmount, setDonateAmount] = useState('');
   const [donating, setDonating] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState(null);
+  const [likeCount, setLikeCount] = useState(0);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [floatingHearts, setFloatingHearts] = useState([]);
+  const heartId = useRef(0);
 
   const roomRef = useRef(null);
   const flatListRef = useRef(null);
@@ -63,10 +68,30 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   useEffect(() => {
     setup();
+
+    // Suppress push notifications while watching live
+    const originalHandler = Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: false,
+        shouldShowList: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      }),
+    });
+
     return () => {
       if (!isCleaningUp.current) {
         cleanup();
       }
+      // Restore push notifications when leaving live screen
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
     };
   }, []);
 
@@ -210,6 +235,17 @@ export default function WatchLiveScreen({ navigation, route }) {
       subscribeToChat();
       subscribeToQuestions();
       subscribeToStream();
+
+      // Check if already following
+      if (stream?.user_id && currentUser) {
+        const { data: followData } = await supabase
+          .from('follows')
+          .select('id')
+          .eq('follower_id', currentUser.id)
+          .eq('following_id', stream.user_id)
+          .maybeSingle();
+        setIsFollowing(!!followData);
+      }
 
     } catch (e) {
       __DEV__ && console.error('Setup error:', e);
@@ -412,6 +448,41 @@ export default function WatchLiveScreen({ navigation, route }) {
   }
 };
 
+  const spawnHeart = (x, y) => {
+    const id = heartId.current++;
+    const anim = new Animated.Value(0);
+    setFloatingHearts(prev => [...prev, { id, x, y, anim }]);
+    Animated.timing(anim, { toValue: 1, duration: 1200, useNativeDriver: true }).start(() => {
+      setFloatingHearts(prev => prev.filter(h => h.id !== id));
+    });
+  };
+
+  const handleLike = () => {
+    setLikeCount(prev => prev + 1);
+    spawnHeart(width - 60, height * 0.5);
+    if (stream?.id && currentUser) {
+      supabase.from('live_reactions').insert({
+        stream_id: stream.id, user_id: currentUser.id, reaction: '❤️'
+      }).then(() => {});
+    }
+  };
+
+  const handleTapVideo = (e) => {
+    const { locationX, locationY } = e.nativeEvent;
+    spawnHeart(locationX, locationY);
+    handleLike();
+  };
+
+  const handleFollow = async () => {
+    if (!currentUser || !stream?.user_id) return;
+    if (isFollowing) return;
+    setIsFollowing(true);
+    await supabase.from('follows').insert({
+      follower_id: currentUser.id,
+      following_id: stream.user_id,
+    });
+  };
+
   const handleTabChat = useCallback(() => setActiveTab('chat'), []);
   const handleTabQuestion = useCallback(() => setActiveTab('question'), []);
 
@@ -433,11 +504,17 @@ export default function WatchLiveScreen({ navigation, route }) {
 
       {/* Host video - full screen */}
       {hostVideoTrack ? (
-        <VideoView
-          style={StyleSheet.absoluteFill}
-          videoTrack={hostVideoTrack}
-          mirror={false}
-        />
+        <>
+          <VideoView
+            style={StyleSheet.absoluteFill}
+            videoTrack={hostVideoTrack}
+            mirror={false}
+          />
+          <Pressable 
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 250, zIndex: 1 }} 
+            onPress={handleTapVideo} 
+          />
+        </>
       ) : (
         <View style={styles.waitingContainer}>
           <ActivityIndicator color="#ef4444" size="large" />
@@ -463,6 +540,16 @@ export default function WatchLiveScreen({ navigation, route }) {
           </AnimatedButton>
         </View>
       )}
+
+      {/* Floating hearts from tap */}
+      {floatingHearts.map(h => (
+        <Animated.Text key={h.id} style={[styles.floatingHeart, {
+          left: h.x,
+          top: h.y,
+          transform: [{ translateY: h.anim.interpolate({ inputRange: [0, 1], outputRange: [0, -180] }) }],
+          opacity: h.anim.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 1, 0] }),
+        }]}>❤️</Animated.Text>
+      ))}
 
       {/* Floating reactions */}
       {floatingReactions.map(r => (
@@ -495,6 +582,18 @@ export default function WatchLiveScreen({ navigation, route }) {
           <Text style={styles.questionBannerText}>{selectedQuestion.question}</Text>
         </View>
       )}
+
+      {/* Right side buttons */}
+      <View style={[styles.rightButtons, { bottom: 320 + keyboardHeight }]}>
+        <AnimatedButton style={styles.rightBtn} onPress={handleFollow}>
+          <Text style={styles.rightBtnEmoji}>{isFollowing ? '✅' : '➕'}</Text>
+          <Text style={styles.rightBtnText}>{isFollowing ? 'Following' : 'Follow'}</Text>
+        </AnimatedButton>
+        <AnimatedButton style={styles.rightBtn} onPress={handleLike}>
+          <Text style={styles.rightBtnEmoji}>❤️</Text>
+          <Text style={styles.rightBtnText}>{likeCount}</Text>
+        </AnimatedButton>
+      </View>
 
       {/* Bottom panel */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
@@ -569,9 +668,6 @@ export default function WatchLiveScreen({ navigation, route }) {
               <Text style={styles.reactionEmoji}>{emoji}</Text>
             </AnimatedButton>
           ))}
-          <AnimatedButton style={styles.donateBtn} onPress={() => setDonateModal(true)}>
-            <Text style={styles.donateEmoji}>💰</Text>
-          </AnimatedButton>
         </View>
       </View>
 
@@ -1106,5 +1202,33 @@ donateNote: { color: '#475569', fontSize: 12, textAlign: 'center' },
     fontSize: 14, 
     textAlign: 'center',
     lineHeight: 20,
+  },
+  floatingHeart: {
+    position: 'absolute',
+    fontSize: 30,
+    zIndex: 100,
+  },
+  rightButtons: {
+    position: 'absolute',
+    right: 16,
+    bottom: 220,
+    alignItems: 'center',
+    gap: 16,
+    zIndex: 20,
+  },
+  rightBtn: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  rightBtnEmoji: {
+    fontSize: 32,
+  },
+  rightBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 });

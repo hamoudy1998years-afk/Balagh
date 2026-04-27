@@ -23,6 +23,7 @@ import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { supabase } from '../lib/supabase';
+import * as Notifications from 'expo-notifications';
 import AnimatedButton from './AnimatedButton';
 import { useViewerCount } from '../hooks/useViewerCount';
 import { useRecentViewers } from '../hooks/useRecentViewers';
@@ -78,6 +79,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const [chatInput, setChatInput] = useState('');
   const [activeTab, setActiveTab] = useState('chat');
   const [userStrikes, setUserStrikes] = useState({});
+  const [liveNotifs, setLiveNotifs] = useState([]);
+  const notifId = useRef(0);
 
   // --- Refs ---
   const roomRef = useRef(null);
@@ -127,6 +130,16 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       setKeyboardHeight(0);
     });
 
+    // Suppress push notifications while streaming
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: false,
+        shouldShowList: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      }),
+    });
+
     appStateSubscription.current = AppState.addEventListener('change', nextAppState => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
         backgroundTimeRef.current = Date.now();
@@ -146,6 +159,15 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       if (appStateSubscription.current) {
         appStateSubscription.current.remove();
       }
+      // Restore push notifications when stream ends
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
       cleanup();
     };
   }, []);
@@ -385,6 +407,7 @@ try {
 
       subscribeToChat(currentStreamId);
       subscribeToQuestions(currentStreamId);
+      subscribeToLiveFeed(currentStreamId);
 
     } catch (err) {
       console.error('[LIVEKIT] Start stream error:', err);
@@ -403,6 +426,15 @@ try {
       interruptionModeIOS: useExternalMic ? 2 : 1,
       interruptionModeAndroid: useExternalMic ? 2 : 1,
     });
+  };
+
+  // ─── LIVE NOTIFICATIONS ──────────────────────────────────────────────────────
+  const showLiveNotif = (text) => {
+    const id = notifId.current++;
+    setLiveNotifs(prev => [...prev, { id, text }]);
+    setTimeout(() => {
+      setLiveNotifs(prev => prev.filter(n => n.id !== id));
+    }, 3000);
   };
 
   // ─── SWITCH CAMERA ───────────────────────────────────────────────────────────
@@ -481,6 +513,42 @@ try {
 
     navigation.goBack();
   }, [navigation]);
+
+  // ─── LIVE FEED SUBSCRIPTION ──────────────────────────────────────────────────
+  function subscribeToLiveFeed(sid) {
+    supabase
+      .channel(`live_feed_${sid}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public',
+        table: 'live_reactions', filter: `stream_id=eq.${sid}`
+      }, (payload) => {
+          showLiveNotif(`\u2764\uFE0F A viewer liked your stream`);
+        })
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public',
+        table: 'follows', filter: `following_id=eq.${currentUser?.id}`
+      }, (payload) => {
+          showLiveNotif(`\u2795 Someone followed you!`);
+        })
+      .subscribe((status) => {
+        console.log('[LIVEFEED] Subscription status:', status);
+      });
+
+    supabase
+      .channel(`live_follows_${currentUser?.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public',
+        table: 'follows',
+      }, (payload) => {
+        console.log('[LIVEFEED] Follow received:', payload.new);
+        if (payload.new.following_id === currentUser?.id) {
+          showLiveNotif(`\u2795 Someone followed you!`);
+        }
+      })
+      .subscribe((status) => {
+        console.log('[FOLLOWS] Subscription status:', status);
+      });
+  }
 
   // ─── SUPABASE CHAT SUBSCRIPTION ──────────────────────────────────────────────
   function subscribeToChat(sid) {
@@ -718,6 +786,15 @@ try {
           )}
         </View>
       )}
+
+      {/* Live Notifications */}
+      <View style={styles.liveNotifContainer}>
+        {liveNotifs.map(n => (
+          <View key={n.id} style={styles.liveNotif}>
+            <Text style={styles.liveNotifText}>{n.text}</Text>
+          </View>
+        ))}
+      </View>
 
       {/* TOP BAR */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -1474,6 +1551,26 @@ const styles = StyleSheet.create({
   flipBtnBottomText: {
     color: '#fff',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  liveNotifContainer: {
+    position: 'absolute',
+    top: 120,
+    left: 16,
+    zIndex: 50,
+    gap: 8,
+  },
+  liveNotif: {
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  liveNotifText: {
+    color: '#fff',
+    fontSize: 13,
     fontWeight: '600',
   },
   reconnectOverlay: {
