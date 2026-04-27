@@ -315,10 +315,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       setMyLikes(feedCache.likes ?? []);
       setMyFollows(feedCache.follows ?? []);
       setLoading(false);
-      // Don't background refresh if we already have paginated data
-      if (feedCache[type]?.length <= 20) {
-        loadVideos(true);
-      }
+      // Only update interactions in background, don't reshuffle videos
       loadMyInteractions(true);
     } else {
       loadVideos();
@@ -753,15 +750,16 @@ export default function HomeScreen({ navigation }) {
 
   // Refresh feed when returning to home screen
   useEffect(() => {
-  if (!hasMountedRef.current) {
-    hasMountedRef.current = true;
-    return;
-  }
-  if (isFocused) {
-    if (index === 0) followingRef.current?.refresh?.();
-    else if (index === 1) foryouRef.current?.refresh?.();
-  }
-}, [isFocused]);
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    if (isFocused) {
+      // Only refresh if cache is empty — don't reshuffle if videos already loaded
+      if (index === 0 && !isCacheValid('following')) followingRef.current?.refresh?.();
+      else if (index === 1 && !isCacheValid('foryou')) foryouRef.current?.refresh?.();
+    }
+  }, [isFocused]);
 
   useEffect(() => {
     homeRefreshRef.current = () => {
