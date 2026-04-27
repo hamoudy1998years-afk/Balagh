@@ -585,6 +585,8 @@ function VideoCard({
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={handleTap}
+        onLongPress={handleLongPress}
+        delayLongPress={400}
         activeOpacity={1}
       />
 
