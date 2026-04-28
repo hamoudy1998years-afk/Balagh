@@ -50,6 +50,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [donating, setDonating] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState(null);
   const [likeCount, setLikeCount] = useState(0);
+  const [pinnedMessage, setPinnedMessage] = useState(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [floatingHearts, setFloatingHearts] = useState([]);
   const heartId = useRef(0);
@@ -236,6 +237,14 @@ export default function WatchLiveScreen({ navigation, route }) {
       subscribeToQuestions();
       subscribeToStream();
 
+      // Load already pinned message
+      const { data: streamData } = await supabase
+        .from('live_streams')
+        .select('pinned_message')
+        .eq('id', stream.id)
+        .single();
+      if (streamData?.pinned_message) setPinnedMessage(streamData.pinned_message);
+
       // Check if already following
       if (stream?.user_id && currentUser) {
         const { data: followData } = await supabase
@@ -334,6 +343,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         table: 'live_streams', filter: `id=eq.${stream.id}`
       }, (payload) => {
         if (!payload.new.is_live) setStreamEnded(true);
+        setPinnedMessage(payload.new.pinned_message ?? null);
       })
       .subscribe();
   }
@@ -470,7 +480,6 @@ export default function WatchLiveScreen({ navigation, route }) {
   const handleTapVideo = (e) => {
     const { locationX, locationY } = e.nativeEvent;
     spawnHeart(locationX, locationY);
-    handleLike();
   };
 
   const handleFollow = async () => {
@@ -509,10 +518,6 @@ export default function WatchLiveScreen({ navigation, route }) {
             style={StyleSheet.absoluteFill}
             videoTrack={hostVideoTrack}
             mirror={false}
-          />
-          <Pressable 
-            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 250, zIndex: 1 }} 
-            onPress={handleTapVideo} 
           />
         </>
       ) : (
@@ -583,6 +588,14 @@ export default function WatchLiveScreen({ navigation, route }) {
         </View>
       )}
 
+      {/* Pinned message */}
+      {pinnedMessage && (
+        <View style={styles.pinnedMessage}>
+          <Text style={styles.pinnedLabel}>📌 Pinned</Text>
+          <Text style={styles.pinnedText}>@{pinnedMessage.username}: {pinnedMessage.message}</Text>
+        </View>
+      )}
+
       {/* Right side buttons */}
       <View style={[styles.rightButtons, { bottom: 320 + keyboardHeight }]}>
         <AnimatedButton style={styles.rightBtn} onPress={handleFollow}>
@@ -597,6 +610,22 @@ export default function WatchLiveScreen({ navigation, route }) {
 
       {/* Bottom panel */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
+        {activeTab === 'chat' && (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            style={styles.chatList}
+            renderItem={({ item }) => (
+              <View style={styles.chatMessage}>
+                <Text style={styles.chatUsername}>@{item.username} </Text>
+                <Text style={styles.chatText}>{item.message}</Text>
+              </View>
+            )}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+
         <View style={styles.tabs}>
           <AnimatedButton style={[styles.tab, activeTab === 'chat' && styles.tabActive]} onPress={handleTabChat}>
             <Text style={[styles.tabText, activeTab === 'chat' && styles.tabTextActive]}>💬 Chat</Text>
@@ -610,28 +639,13 @@ export default function WatchLiveScreen({ navigation, route }) {
         </View>
 
         {activeTab === 'chat' && (
-          <>
-            <FlatList
-              ref={flatListRef}
-              data={messages}
-              keyExtractor={(item) => item.id}
-              style={styles.chatList}
-              renderItem={({ item }) => (
-                <View style={styles.chatMessage}>
-                  <Text style={styles.chatUsername}>@{item.username} </Text>
-                  <Text style={styles.chatText}>{item.message}</Text>
-                </View>
-              )}
-              showsVerticalScrollIndicator={false}
-            />
-            <View style={[styles.chatInputRow, { marginBottom: Math.max(0, keyboardHeight - 45) }]}>
-              <TextInput style={styles.chatInput} value={chatInput} onChangeText={setChatInput}
-                placeholder="Say something..." placeholderTextColor="#64748b" onSubmitEditing={sendMessage} />
-              <AnimatedButton style={styles.sendBtn} onPress={sendMessage}>
-                <Text style={styles.sendBtnText}>Send</Text>
-              </AnimatedButton>
-            </View>
-          </>
+          <View style={[styles.chatInputRow, { marginBottom: Math.max(0, keyboardHeight - 45) }]}>
+            <TextInput style={styles.chatInput} value={chatInput} onChangeText={setChatInput}
+              placeholder="Say something..." placeholderTextColor="#64748b" onSubmitEditing={sendMessage} />
+            <AnimatedButton style={styles.sendBtn} onPress={sendMessage}>
+              <Text style={styles.sendBtnText}>Send</Text>
+            </AnimatedButton>
+          </View>
         )}
 
         {activeTab === 'question' && (
@@ -1207,6 +1221,32 @@ donateNote: { color: '#475569', fontSize: 12, textAlign: 'center' },
     position: 'absolute',
     fontSize: 30,
     zIndex: 100,
+  },
+  pinnedMessage: {
+    position: 'absolute',
+    top: 150,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 30,
+    borderWidth: 1,
+    borderColor: COLORS.gold,
+    gap: 8,
+  },
+  pinnedLabel: {
+    color: COLORS.gold,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  pinnedText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
   },
   rightButtons: {
     position: 'absolute',

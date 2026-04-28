@@ -55,6 +55,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const [username, setUsername] = useState('');
   const [isFrontCamera, setIsFrontCamera] = useState(true);
   const [streamDuration, setStreamDuration] = useState(0);
+  const streamDurationRef = useRef(0);
 
   // --- Pre-stream settings ---
   const [allowQuestions, setAllowQuestions] = useState(true);
@@ -67,6 +68,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const egressIdRef = useRef(null);
   const egressFilenameRef = useRef(null);
   const [isEnding, setIsEnding] = useState(false);
+  const [streamAnalytics, setStreamAnalytics] = useState(null);
+  const peakViewersRef = useRef(0);
   const [showViewerList, setShowViewerList] = useState(false);
   const [viewerListMode, setViewerListMode] = useState('recent');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -81,6 +84,12 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const [userStrikes, setUserStrikes] = useState({});
   const [liveNotifs, setLiveNotifs] = useState([]);
   const notifId = useRef(0);
+  const [mutedUsers, setMutedUsers] = useState([]);
+  const mutedUsersRef = useRef([]);
+  const [blockedUsers, setBlockedUsers] = useState([]);
+  const blockedUsersRef = useRef([]);
+  const [pinnedMessage, setPinnedMessage] = useState(null);
+  const [moderationMenu, setModerationMenu] = useState(null);
 
   // --- Refs ---
   const roomRef = useRef(null);
@@ -101,6 +110,12 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const { recentViewers } = useRecentViewers(streamId);
   const { engagedViewers } = useEngagedViewers(streamId);
   const { enabled: showEngagedTab } = useFeatureFlag('engaged_viewers_tab');
+
+  useEffect(() => {
+    if (viewerCount > peakViewersRef.current) {
+      peakViewersRef.current = viewerCount;
+    }
+  }, [viewerCount]);
 
   // ─── MOUNT ───────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -188,6 +203,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
   // ─── CLEANUP ─────────────────────────────────────────────────────────────────
   async function cleanup() {
+    console.log('[CLEANUP] Starting cleanup...');
     isMountedRef.current = false;
     isConnectedRef.current = false;
 
@@ -203,22 +219,32 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       clearTimeout(cameraRetryTimeoutRef.current);
       cameraRetryTimeoutRef.current = null;
     }
+    console.log('[CLEANUP] Intervals cleared');
+
     if (chatChannelRef.current) {
-      await supabase.removeChannel(chatChannelRef.current);
+      supabase.removeChannel(chatChannelRef.current).catch(console.warn);
       chatChannelRef.current = null;
     }
     if (questionsChannelRef.current) {
-      await supabase.removeChannel(questionsChannelRef.current);
+      supabase.removeChannel(questionsChannelRef.current).catch(console.warn);
       questionsChannelRef.current = null;
     }
+    console.log('[CLEANUP] Supabase channels removed');
+
     if (roomRef.current) {
+      console.log('[CLEANUP] Disconnecting LiveKit...');
       try {
-        await roomRef.current.disconnect();
+        await Promise.race([
+          roomRef.current.disconnect(),
+          new Promise(resolve => setTimeout(resolve, 1500))
+        ]);
+        console.log('[CLEANUP] LiveKit disconnected');
       } catch (e) {
-        console.error('[LIVEKIT] Disconnect error:', e);
+        console.warn('[LIVEKIT] Disconnect error:', e);
       }
       roomRef.current = null;
     }
+    console.log('[CLEANUP] Cleanup complete!');
   }
 
   // ─── START STREAM ─────────────────────────────────────────────────────────────
@@ -375,7 +401,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       tryEnableCamera();
 
       durationIntervalRef.current = setInterval(() => {
-        setStreamDuration(prev => prev + 1);
+        streamDurationRef.current += 1;
+        setStreamDuration(streamDurationRef.current);
       }, 1000);
 
       pingInterval.current = setInterval(async () => {
@@ -460,43 +487,92 @@ try {
   const confirmEndStream = useCallback(async () => {
     console.log('[END] Starting cleanup - deleting stream to save storage');
     console.log('[END] currentStreamIdRef.current =', currentStreamIdRef.current);
+    console.log('[END] Step 1 - Setting isEnding true');
 
     setShowEndModal(false);
     setIsEnding(true);
 
-    // Stop egress and save replay
+    // Stop egress and save replay (don't await - run in background)
 if (egressIdRef.current) {
-  try {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('avatar_url')
-      .eq('id', currentUser.id)
-      .single();
-
-    await fetch(`${SERVER_URL}/api/livekit/egress/stop`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        egressId: egressIdRef.current,
-        filename: egressFilenameRef.current,
-        userId: currentUser.id,
-        title,
-        thumbnailUrl: profile?.avatar_url || null,
-      }),
+  supabase
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', currentUser.id)
+    .single()
+    .then(({ data: profile }) => {
+      fetch(`${SERVER_URL}/api/livekit/egress/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          egressId: egressIdRef.current,
+          filename: egressFilenameRef.current,
+          userId: currentUser.id,
+          title,
+          thumbnailUrl: profile?.avatar_url || null,
+        }),
+      }).then(() => {
+        console.log('[EGRESS] Replay saved!');
+      }).catch(e => {
+        console.error('[EGRESS] Failed to save replay:', e);
+      });
     });
-    console.log('[EGRESS] Replay saved!');
-  } catch (e) {
-    console.error('[EGRESS] Failed to save replay:', e);
-  }
 }
+
+// Save stream ID before deleting
+    const streamIdSnapshot = currentStreamIdRef.current;
+
+    // Collect analytics BEFORE deleting stream
+    try {
+      const streamStart = new Date(Date.now() - streamDurationRef.current * 1000).toISOString();
+
+      const withTimeout = (promise, ms) => Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+      ]);
+
+      const [viewersRes, likesRes, donationsRes, followsRes] = await withTimeout(
+        Promise.all([
+          supabase.from('stream_viewers').select('*', { count: 'exact' }).eq('stream_id', streamIdSnapshot),
+          supabase.from('live_reactions').select('*', { count: 'exact' }).eq('stream_id', streamIdSnapshot),
+          supabase.from('donations').select('amount').eq('stream_id', streamIdSnapshot),
+          supabase.from('follows').select('*', { count: 'exact' }).eq('following_id', currentUser.id).gte('created_at', streamStart),
+        ]),
+        5000
+      );
+
+      console.log('[ANALYTICS] viewersRes:', viewersRes.count, viewersRes.error);
+      console.log('[ANALYTICS] likesRes:', likesRes.count, likesRes.error);
+      console.log('[ANALYTICS] streamIdSnapshot:', streamIdSnapshot);
+
+      const totalGifts = donationsRes.data?.reduce((sum, d) => sum + (d.amount || 0), 0) ?? 0;
+
+      setStreamAnalytics({
+        totalViewers: peakViewersRef.current,
+        peakViewers: peakViewersRef.current,
+        totalLikes: likesRes.count ?? 0,
+        totalGifts,
+        newFollowers: followsRes.count ?? 0,
+        duration: streamDurationRef.current,
+      });
+    } catch (e) {
+      console.error('[ANALYTICS] Error or timeout:', e);
+      setStreamAnalytics({
+        totalViewers: 0,
+        peakViewers: peakViewersRef.current,
+        totalLikes: 0,
+        totalGifts: 0,
+        newFollowers: 0,
+        duration: streamDurationRef.current,
+      });
+    }
 
 // Delete from live feed
 try {
-  if (currentStreamIdRef.current) {
+  if (streamIdSnapshot) {
     await supabase
       .from('live_streams')
       .delete()
-      .eq('id', currentStreamIdRef.current);
+      .eq('id', streamIdSnapshot);
     console.log('[END] Stream deleted from live feed');
   }
 } catch (e) {
@@ -505,13 +581,9 @@ try {
 
     await cleanup();
 
-    if (isMountedRef.current) {
-      setIsEnding(false);
-      setIsConnected(false);
-      setLocalVideoTrack(null);
-    }
-
-    navigation.goBack();
+    setIsEnding(false);
+    setIsConnected(false);
+    setLocalVideoTrack(null);
   }, [navigation]);
 
   // ─── LIVE FEED SUBSCRIPTION ──────────────────────────────────────────────────
@@ -550,6 +622,43 @@ try {
       });
   }
 
+  // ─── MODERATION ──────────────────────────────────────────────────────────────
+  const muteUser = (userId, username) => {
+    const updated = [...mutedUsersRef.current, userId];
+    mutedUsersRef.current = updated;
+    setMutedUsers(updated);
+    setMessages(prev => prev.filter(m => m.user_id !== userId));
+    setModerationMenu(null);
+    showLiveNotif(`🔇 @${username} muted`);
+  };
+
+  const blockUser = (userId, username) => {
+    const updated = [...blockedUsersRef.current, userId];
+    blockedUsersRef.current = updated;
+    setBlockedUsers(updated);
+    setMessages(prev => prev.filter(m => m.user_id !== userId));
+    setModerationMenu(null);
+    showLiveNotif(`🚫 @${username} blocked from chat`);
+  };
+
+  const pinMessage = async (message) => {
+    setPinnedMessage(message);
+    setModerationMenu(null);
+    showLiveNotif(`📌 Message pinned`);
+    await supabase
+      .from('live_streams')
+      .update({ pinned_message: message })
+      .eq('id', currentStreamIdRef.current);
+  };
+
+  const unpinMessage = async () => {
+    setPinnedMessage(null);
+    await supabase
+      .from('live_streams')
+      .update({ pinned_message: null })
+      .eq('id', currentStreamIdRef.current);
+  };
+
   // ─── SUPABASE CHAT SUBSCRIPTION ──────────────────────────────────────────────
   function subscribeToChat(sid) {
     chatChannelRef.current = supabase
@@ -568,6 +677,8 @@ try {
             return;
           }
 
+          if (mutedUsersRef.current.includes(payload.new.user_id)) return;
+          if (blockedUsersRef.current.includes(payload.new.user_id)) return;
           const displayMessage = { ...payload.new, message: moderationResult.filteredText };
           setMessages(prev => [...prev, displayMessage]);
           setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
@@ -695,6 +806,61 @@ try {
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.gold} />
         <Text style={styles.loadingText}>Ending stream...</Text>
+      </View>
+    );
+  }
+
+  if (streamAnalytics) {
+    const mins = Math.floor(streamAnalytics.duration / 60);
+    const secs = streamAnalytics.duration % 60;
+    return (
+      <View style={styles.loadingContainer}>
+        <SystemBars style="light" />
+        <Text style={{ fontSize: 48, marginBottom: 8 }}>🎙️</Text>
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 4 }}>Stream Ended</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, marginBottom: 32 }}>Here's how it went</Text>
+
+        <View style={styles.analyticsCard}>
+          <View style={styles.analyticsRow}>
+            <Text style={styles.analyticsEmoji}>👁️</Text>
+            <Text style={styles.analyticsLabel}>Total Viewers</Text>
+            <Text style={styles.analyticsValue}>{streamAnalytics.peakViewers}</Text>
+          </View>
+          <View style={styles.analyticsDivider} />
+          <View style={styles.analyticsRow}>
+            <Text style={styles.analyticsEmoji}>📈</Text>
+            <Text style={styles.analyticsLabel}>Peak Viewers</Text>
+            <Text style={styles.analyticsValue}>{streamAnalytics.peakViewers}</Text>
+          </View>
+          <View style={styles.analyticsDivider} />
+          <View style={styles.analyticsRow}>
+            <Text style={styles.analyticsEmoji}>❤️</Text>
+            <Text style={styles.analyticsLabel}>Total Likes</Text>
+            <Text style={styles.analyticsValue}>{streamAnalytics.totalLikes}</Text>
+          </View>
+          <View style={styles.analyticsDivider} />
+          <View style={styles.analyticsRow}>
+            <Text style={styles.analyticsEmoji}>🤲</Text>
+            <Text style={styles.analyticsLabel}>Gifts Earned</Text>
+            <Text style={styles.analyticsValue}>₱{streamAnalytics.totalGifts.toFixed(2)}</Text>
+          </View>
+          <View style={styles.analyticsDivider} />
+          <View style={styles.analyticsRow}>
+            <Text style={styles.analyticsEmoji}>➕</Text>
+            <Text style={styles.analyticsLabel}>New Followers</Text>
+            <Text style={styles.analyticsValue}>{streamAnalytics.newFollowers}</Text>
+          </View>
+          <View style={styles.analyticsDivider} />
+          <View style={styles.analyticsRow}>
+            <Text style={styles.analyticsEmoji}>⏱️</Text>
+            <Text style={styles.analyticsLabel}>Duration</Text>
+            <Text style={styles.analyticsValue}>{mins}m {secs}s</Text>
+          </View>
+        </View>
+
+        <AnimatedButton style={styles.actionButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.actionButtonText}>Done</Text>
+        </AnimatedButton>
       </View>
     );
   }
@@ -901,8 +1067,61 @@ try {
         </View>
       )}
 
+      {/* Pinned Message */}
+      {pinnedMessage && (
+        <View style={styles.pinnedMessage}>
+          <Text style={styles.pinnedLabel}>📌 Pinned</Text>
+          <Text style={styles.pinnedText}>@{pinnedMessage.username}: {pinnedMessage.message}</Text>
+          <AnimatedButton onPress={unpinMessage}>
+            <Text style={styles.pinnedClose}>✕</Text>
+          </AnimatedButton>
+        </View>
+      )}
+
+      {/* Moderation Menu */}
+      {moderationMenu && (
+        <View style={styles.moderationOverlay}>
+          <View style={styles.moderationSheet}>
+            <Text style={styles.moderationTitle}>@{moderationMenu.username}</Text>
+            <Text style={styles.moderationMessage} numberOfLines={2}>{moderationMenu.message}</Text>
+            <AnimatedButton style={styles.moderationBtn} onPress={() => pinMessage(moderationMenu)}>
+              <Text style={styles.moderationBtnText}>📌 Pin Message</Text>
+            </AnimatedButton>
+            <AnimatedButton style={styles.moderationBtn} onPress={() => muteUser(moderationMenu.user_id, moderationMenu.username)}>
+              <Text style={styles.moderationBtnText}>🔇 Mute User</Text>
+            </AnimatedButton>
+            <AnimatedButton style={[styles.moderationBtn, styles.moderationBtnDanger]} onPress={() => blockUser(moderationMenu.user_id, moderationMenu.username)}>
+              <Text style={styles.moderationBtnText}>🚫 Block User</Text>
+            </AnimatedButton>
+            <AnimatedButton style={styles.moderationCancelBtn} onPress={() => setModerationMenu(null)}>
+              <Text style={styles.moderationCancelText}>Cancel</Text>
+            </AnimatedButton>
+          </View>
+        </View>
+      )}
+
       {/* BOTTOM PANEL */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 8 }]}>
+        {activeTab === 'chat' && (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => String(item.id)}
+            style={styles.chatList}
+            renderItem={({ item }) => (
+              <AnimatedButton
+                style={styles.chatMessage}
+                onLongPress={() => setModerationMenu(item)}
+                delayLongPress={400}
+              >
+                <Text style={styles.chatUsername}>@{item.username} </Text>
+                <Text style={styles.chatText}>{item.message}</Text>
+              </AnimatedButton>
+            )}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+
         <View style={styles.tabs}>
           <AnimatedButton
             style={[styles.tab, activeTab === 'chat' && styles.tabActive]}
@@ -921,35 +1140,20 @@ try {
         </View>
 
         {activeTab === 'chat' && (
-          <>
-            <FlatList
-              ref={flatListRef}
-              data={messages}
-              keyExtractor={(item) => String(item.id)}
-              style={styles.chatList}
-              renderItem={({ item }) => (
-                <View style={styles.chatMessage}>
-                  <Text style={styles.chatUsername}>@{item.username} </Text>
-                  <Text style={styles.chatText}>{item.message}</Text>
-                </View>
-              )}
-              showsVerticalScrollIndicator={false}
+          <View style={[styles.chatInputRow, { marginBottom: Math.max(10, keyboardHeight - 45) }]}>
+            <TextInput
+              style={styles.chatInput}
+              value={chatInput}
+              onChangeText={setChatInput}
+              placeholder="Say something..."
+              placeholderTextColor="#64748b"
+              onSubmitEditing={sendMessage}
+              returnKeyType="send"
             />
-            <View style={[styles.chatInputRow, { marginBottom: Math.max(10, keyboardHeight - 45) }]}>
-              <TextInput
-                style={styles.chatInput}
-                value={chatInput}
-                onChangeText={setChatInput}
-                placeholder="Say something..."
-                placeholderTextColor="#64748b"
-                onSubmitEditing={sendMessage}
-                returnKeyType="send"
-              />
-              <AnimatedButton style={styles.sendBtn} onPress={sendMessage}>
-                <Text style={styles.sendBtnText}>Send</Text>
-              </AnimatedButton>
-            </View>
-          </>
+            <AnimatedButton style={styles.sendBtn} onPress={sendMessage}>
+              <Text style={styles.sendBtnText}>Send</Text>
+            </AnimatedButton>
+          </View>
         )}
 
         {activeTab === 'questions' && (
@@ -1039,7 +1243,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#000', 
     alignItems: 'center', 
     justifyContent: 'center', 
-    gap: 16 
+    gap: 16,
+    paddingHorizontal: 24,
   },
   loadingText: { 
     color: 'rgba(255,255,255,0.7)', 
@@ -1671,5 +1876,125 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '700',
+  },
+  analyticsCard: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  analyticsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  analyticsEmoji: {
+    fontSize: 22,
+    width: 32,
+  },
+  analyticsLabel: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  analyticsValue: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  analyticsDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  pinnedMessage: {
+    position: 'absolute',
+    top: 80,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 30,
+    borderWidth: 1,
+    borderColor: COLORS.gold,
+    gap: 8,
+  },
+  pinnedLabel: {
+    color: COLORS.gold,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  pinnedText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  pinnedClose: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  moderationOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+    zIndex: 999,
+  },
+  moderationSheet: {
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+    gap: 10,
+  },
+  moderationTitle: {
+    color: COLORS.gold,
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  moderationMessage: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  moderationBtn: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  moderationBtnDanger: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  moderationBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  moderationCancelBtn: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 14,
+    padding: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  moderationCancelText: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
