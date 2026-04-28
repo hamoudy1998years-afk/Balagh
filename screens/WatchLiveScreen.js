@@ -160,7 +160,20 @@ export default function WatchLiveScreen({ navigation, route }) {
       const { token, url } = await response.json();
 
       // Create LiveKit room
-      const room = new Room({ adaptiveStream: true, dynacast: true });
+      const room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        videoCaptureDefaults: {
+          resolution: { width: 640, height: 360, frameRate: 15 },
+        },
+        publishDefaults: {
+          videoEncoding: {
+            maxBitrate: 500_000,
+            maxFramerate: 15,
+          },
+          simulcast: false,
+        },
+      });
       roomRef.current = room;
 
       // Listen for host's video track
