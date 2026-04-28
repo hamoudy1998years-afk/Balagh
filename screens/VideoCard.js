@@ -152,8 +152,12 @@ function VideoCard({
     if (!isActive) {
       manualPauseRef.current = false;
       setPaused(true);
+      setCurrentTime(0);
+      setDuration(0);
+      durationRef.current = 0;
+      isVideoReadyRef.current = false;
+      progressAnim.setValue(0);
     } else {
-      // Scrolled back — restart from 0 and play like TikTok
       manualPauseRef.current = false;
       try {
         if (player?.current?.seek) {
@@ -293,8 +297,8 @@ function VideoCard({
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => Math.abs(gestureState.dx) > 1,
       onPanResponderTerminationRequest: () => false,
 
       onPanResponderGrant: (evt) => {
@@ -305,7 +309,7 @@ function VideoCard({
 
         // Record where finger started and where scrubber currently is
         dragStartPageX.current = evt.nativeEvent.pageX;
-        dragStartPct.current = progressAnim._value;
+        dragStartPct.current = progressAnim.__getValue();
       },
 
       onPanResponderMove: (evt) => {
@@ -559,21 +563,23 @@ function VideoCard({
             __DEV__ && console.log('Video error:', e);
           }}
           onLoad={(data) => {
-            if (data?.duration) {
+            if (data?.duration && data.duration > 0 && data.duration < 86400) {
               setDuration(data.duration);
-              durationRef.current = data.duration; // Set ref immediately, no useEffect lag
+              durationRef.current = data.duration;
+              isVideoReadyRef.current = true;
+            } else {
               isVideoReadyRef.current = true;
             }
           }}
           onProgress={(data) => {
-            if (isSeeking.current) return;  // Skip updates while user is seeking
-            if (data?.currentTime && data?.seekableDuration) {
+            if (isSeeking.current) return;
+            if (data?.currentTime != null && data?.seekableDuration > 0) {
               setCurrentTime(data.currentTime);
               const progress = data.currentTime / data.seekableDuration;
               progressAnim.setValue(progress);
             }
           }}
-          useTextureView={false}
+          useTextureView={true}
         />
       ) : (
         <View style={[styles.video, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }]}>
@@ -763,7 +769,7 @@ function VideoCard({
         style={[
           styles.progressContainer, 
           { 
-            bottom: safeBottom + s(58),  // ← changed from s(55)
+            bottom: Math.max(safeBottom, 16) + s(45),  // ← changed from s(55)
             zIndex: 10, 
             height: s(40),                   // ← changed from 40
             justifyContent: 'center',
@@ -771,6 +777,7 @@ function VideoCard({
           }
         ]}
         onLayout={onProgressBarLayout}
+        hitSlop={{ top: 20, bottom: 20, left: 0, right: 0 }}
         {...panResponder.panHandlers}
       >
         {/* ✅ NEW: TikTok-style current time / total duration */}
@@ -780,7 +787,7 @@ function VideoCard({
         </View>
 
         {/* Invisible hit slop area */}
-        <View style={{ paddingVertical: 2, width: '100%' }}>
+        <View style={{ paddingVertical: 4, width: '100%' }}>
           <View
             ref={progressBarRef}
             style={[
