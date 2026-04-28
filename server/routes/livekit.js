@@ -84,7 +84,15 @@ router.post('/egress/start', async (req, res) => {
           forcePathStyle: true,
         }
       }
-    }, { layout: 'speaker' });
+    }, {
+  layout: 'speaker',
+  encodingOptions: {
+    width: 720,
+    height: 1280,
+    framerate: 30,
+    videoBitrate: 1500,
+  }
+});
 
     console.log('[EGRESS] Recording started:', egress.egressId);
     res.json({ egressId: egress.egressId, filename });
