@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, Animated, Pressable, PanResponder, Image,
 } from 'react-native';
+import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useDownload } from '../context/DownloadContext';
 import { useUser } from '../context/UserContext';
@@ -223,7 +224,7 @@ export default function GlobalVideoOptionsSheet() {
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 0,
+      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 10,
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.dy > 0) translateY.setValue(gestureState.dy);
       },
@@ -332,11 +333,9 @@ export default function GlobalVideoOptionsSheet() {
           {/* Share removed - now on right side action bar */}
 
           {/* Download */}
-          <Pressable 
+          <TouchableOpacity 
             style={[styles.gridItem, hasDownloaded && styles.gridItemDisabled]} 
             onPress={handleDownload}
-            onPressIn={() => pressIn('download')}
-            onPressOut={() => pressOut('download')}
             disabled={hasDownloaded}
           >
             <Animated.View style={[
@@ -353,16 +352,11 @@ export default function GlobalVideoOptionsSheet() {
             <Text style={[styles.gridLabel, hasDownloaded && { color: '#22c55e' }]}>
               {hasDownloaded ? 'Saved' : 'Download'}
             </Text>
-          </Pressable>
+          </TouchableOpacity>
 
           {/* Pin - Owner only */}
           {isOwner && (
-            <Pressable 
-              style={styles.gridItem} 
-              onPress={handlePin}
-              onPressIn={() => pressIn('pin')}
-              onPressOut={() => pressOut('pin')}
-            >
+            <TouchableOpacity style={styles.gridItem} onPress={handlePin}>
               <Animated.View style={[
                 styles.gridIcon,
                 { transform: [{ scale: animatedScales.pin }] },
@@ -373,17 +367,12 @@ export default function GlobalVideoOptionsSheet() {
               <Text style={styles.gridLabel}>
                 {video?.is_pinned ? 'Unpin' : 'Pin'}
               </Text>
-            </Pressable>
+            </TouchableOpacity>
           )}
 
           {/* Block - Non-owner only */}
           {sheetState.onBlock && (
-            <Pressable 
-              style={styles.gridItem} 
-              onPress={handleBlock}
-              onPressIn={() => pressIn('block')}
-              onPressOut={() => pressOut('block')}
-            >
+            <TouchableOpacity style={styles.gridItem} onPress={handleBlock}>
               <Animated.View style={[
                 styles.gridIcon, 
                 { transform: [{ scale: animatedScales.block }] },
@@ -392,17 +381,12 @@ export default function GlobalVideoOptionsSheet() {
                 <Ionicons name="ban-outline" size={24} color="#ef4444" />
               </Animated.View>
               <Text style={[styles.gridLabel, { color: '#ef4444' }]}>Block</Text>
-            </Pressable>
+            </TouchableOpacity>
           )}
 
           {/* Delete - Owner only */}
           {isOwner && (
-            <Pressable 
-              style={styles.gridItem} 
-              onPress={handleDelete}
-              onPressIn={() => pressIn('delete')}
-              onPressOut={() => pressOut('delete')}
-            >
+            <TouchableOpacity style={styles.gridItem} onPress={handleDelete}>
               <Animated.View style={[
                 styles.gridIcon, 
                 { transform: [{ scale: animatedScales.delete }] },
@@ -411,14 +395,14 @@ export default function GlobalVideoOptionsSheet() {
                 <Ionicons name="trash-outline" size={24} color="#ef4444" />
               </Animated.View>
               <Text style={[styles.gridLabel, { color: '#ef4444' }]}>Delete</Text>
-            </Pressable>
+            </TouchableOpacity>
           )}
         </View>
         
         {/* Cancel Button */}
-        <Pressable style={styles.cancelButton} onPress={hideVideoOptionsSheet}>
+        <TouchableOpacity style={styles.cancelButton} onPress={hideVideoOptionsSheet}>
           <Text style={styles.cancelButtonText}>Cancel</Text>
-        </Pressable>
+        </TouchableOpacity>
         
         {/* Modern Login Required Dialog */}
         {loginDialogVisible && (
@@ -639,12 +623,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
-    gap: 16,
+    gap: 12,
     marginBottom: 24,
   },
   gridItem: {
     alignItems: 'center',
-    width: '22%',
+    width: 80,
     marginBottom: 8,
   },
   gridItemDisabled: {
