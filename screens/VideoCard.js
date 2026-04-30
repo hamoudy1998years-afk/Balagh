@@ -61,7 +61,11 @@ function VideoCard({
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
   const [isBlocked, setIsBlocked] = useState(false);
-  const [videoUri, setVideoUri] = useState(null);
+  const [videoUri, setVideoUri] = useState(() => {
+    if (item.video_url?.includes('?')) return item.video_url;
+    if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) return item.video_url;
+    return null;
+  });
   const [isLoadingSignedUrl, setIsLoadingSignedUrl] = useState(false);
 
     // Set video URI — signed URLs from parent take priority
@@ -153,10 +157,8 @@ function VideoCard({
       manualPauseRef.current = false;
       setPaused(true);
       setCurrentTime(0);
-      setDuration(0);
-      durationRef.current = 0;
-      isVideoReadyRef.current = false;
       progressAnim.setValue(0);
+      // DON'T reset duration or isVideoReadyRef here — keep them for when user scrolls back
     } else {
       manualPauseRef.current = false;
       try {
@@ -543,6 +545,7 @@ function VideoCard({
         <Video
           ref={player}
           source={{ uri: videoUri }}
+          onReadyForDisplay={() => {}}
           style={styles.video}
           resizeMode="contain"
           repeat={true}
@@ -582,9 +585,7 @@ function VideoCard({
           useTextureView={true}
         />
       ) : (
-        <View style={[styles.video, { backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }]}>
-          <ActivityIndicator color={COLORS.gold} size="large" />
-        </View>
+        <View style={[styles.video, { backgroundColor: '#000' }]} />
       )}
 
       {/* Full-screen tap area for pause/play (behind progress bar) */}
@@ -1004,7 +1005,8 @@ function areEqual(prevProps, nextProps) {
     prevProps.item.type === nextProps.item.type &&
     prevProps.isActive === nextProps.isActive &&
     prevProps.isVisible === nextProps.isVisible &&
-    prevProps.isTabActive === nextProps.isTabActive
+    prevProps.isTabActive === nextProps.isTabActive &&
+    prevProps.player === nextProps.player
   );
 }
 

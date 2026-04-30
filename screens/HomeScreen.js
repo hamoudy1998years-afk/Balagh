@@ -245,6 +245,8 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const playerPool = useVideoPlayerPool();
   const prevIndexRef = useRef(0);
   const isRefreshingRef = useRef(false);
+  const scrollDebounceRef = useRef(null);
+  const pendingDirectionRef = useRef(null);
 
   useImperativeHandle(ref, () => ({
     refresh: async () => {
@@ -259,48 +261,52 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     },
     setActive: (val) => {
       setIsTabActive(!!val);
+      if (val) {
+        setListHeight(null);
+      }
     },
   }));
 
   useEffect(() => {
     if (videos.length === 0) return;
-    if (isRefreshingRef.current) return;
-    if (prevIndexRef.current === -1) prevIndexRef.current = 0;
-    // Only reset to 0 on initial load, NOT when paginating or refreshing
-    if (videos.length <= 20 && offset <= 20) {
-      playerPool.loadVideo('current', videos[0].video_url);
-      setActiveIndex(0);
-    }
-  }, [videos, offset]);
-
-  useEffect(() => {
-    if (videos.length === 0) return;
 
     const direction = activeIndex > prevIndexRef.current ? 'next' : 'prev';
-    if (direction === 'next' && activeIndex > prevIndexRef.current) {
-      playerPool.scrollNext();
-    } else if (direction === 'prev' && activeIndex < prevIndexRef.current) {
-      playerPool.scrollPrev();
+    
+    // Debounce: only rotate slots after scroll settles (150ms)
+    if (scrollDebounceRef.current) {
+      clearTimeout(scrollDebounceRef.current);
     }
+    
+    pendingDirectionRef.current = { direction, activeIndex, prevIndex: prevIndexRef.current };
+    
+    scrollDebounceRef.current = setTimeout(() => {
+      const pending = pendingDirectionRef.current;
+      if (!pending) return;
+      
+      if (pending.direction === 'next' && pending.activeIndex > pending.prevIndex) {
+        playerPool.scrollNext();
+      } else if (pending.direction === 'prev' && pending.activeIndex < pending.prevIndex) {
+        playerPool.scrollPrev();
+      }
 
-    const currentVideo = videos[activeIndex];
-    if (currentVideo) {
-      playerPool.loadVideo('current', currentVideo.video_url);
-    }
+      // Load videos AFTER slot rotation
+      const currentVideo = videos[pending.activeIndex];
+      if (currentVideo) {
+        playerPool.loadVideo('current', currentVideo.video_url);
+      }
+      const nextVideo = videos[pending.activeIndex + 1];
+      if (nextVideo) playerPool.loadVideo('next', nextVideo.video_url);
+      const next2Video = videos[pending.activeIndex + 2];
+      if (next2Video) playerPool.loadVideo('next2', next2Video.video_url);
+      const prevVideo = videos[pending.activeIndex - 1];
+      if (prevVideo) playerPool.loadVideo('prev', prevVideo.video_url);
+      const prev2Video = videos[pending.activeIndex - 2];
+      if (prev2Video) playerPool.loadVideo('prev2', prev2Video.video_url);
 
-    const nextVideo = videos[activeIndex + 1];
-    if (nextVideo) playerPool.loadVideo('next', nextVideo.video_url);
+      prevIndexRef.current = pending.activeIndex;
+      pendingDirectionRef.current = null;
+    }, 150);
 
-    const next2Video = videos[activeIndex + 2];
-    if (next2Video) playerPool.loadVideo('next2', next2Video.video_url);
-
-    const prevVideo = videos[activeIndex - 1];
-    if (prevVideo) playerPool.loadVideo('prev', prevVideo.video_url);
-
-    const prev2Video = videos[activeIndex - 2];
-    if (prev2Video) playerPool.loadVideo('prev2', prev2Video.video_url);
-
-    prevIndexRef.current = activeIndex;
   }, [activeIndex, videos]);
 
   useEffect(() => {
@@ -508,6 +514,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
     return (
       <VideoCard
+        key={item.id}
         item={item}
         player={slot ? playerPool.getPlayerRef(slot) : null}
         isActive={index === activeIndex}
@@ -566,6 +573,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   return (
     // ── FIX: measure real height here, only render FlatList once we have it ──
     <View
+      key={`feed-${type}-${isTabActive ? 'active' : 'inactive'}`}
       style={{ flex: 1, backgroundColor: '#000' }}
       onLayout={(e) => {
         const measured = e.nativeEvent.layout.height;
@@ -591,7 +599,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
           initialNumToRender={1}
           onEndReached={onEndReached}
           onEndReachedThreshold={0.5}
-          removeClippedSubviews={true}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
