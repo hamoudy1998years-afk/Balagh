@@ -6,7 +6,12 @@ export const ROUTES = {
   LIVE_FEED: 'LiveFeed',
   UPLOAD: 'Upload',
   NOTIFICATIONS: 'Notifications',
-  PROFILE: 'Profile',
+    PROFILE: 'Profile',
+  
+  // Quran
+  QURAN: 'Quran',
+  QURAN_READER: 'QuranReader',
+  RECITATION_CHECKER: 'RecitationChecker',
   
   // Auth screens
   LOGIN: 'Login',
@@ -39,6 +44,7 @@ export const TAB_INDICES = {
   HOME: 0,
   LIVE: 1,
   UPLOAD: 2,
-  NOTIFICATIONS: 3,
-  PROFILE: 4,
+  QURAN: 3,
+  NOTIFICATIONS: 4,
+  PROFILE: 5,
 };

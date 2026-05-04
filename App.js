@@ -34,8 +34,9 @@ import { COLORS } from './constants/theme';
 import { ROUTES } from './constants/routes';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
-import ResetPasswordScreen from './screens/ResetPasswordScreen';
-import AdminScreen from './screens/AdminScreen';
+import QuranScreen from './screens/QuranScreen';
+import QuranReaderScreen from './screens/QuranReaderScreen';
+import RecitationCheckerScreen from './screens/RecitationCheckerScreen';
 import AgeGateScreen from './screens/AgeGateScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
 import MyUploadsScreen from './screens/MyUploadsScreen';
@@ -47,6 +48,8 @@ import { UserProvider } from './context/UserContext';
 import { DownloadProvider } from './context/DownloadContext';
 import GlobalVideoOptionsSheet from './components/GlobalVideoOptionsSheet';
 import * as SplashScreen from 'expo-splash-screen';
+import ResetPasswordScreen from './screens/ResetPasswordScreen';
+import AdminScreen from './screens/AdminScreen';
 
 // Prevent splash screen from hiding automatically
 SplashScreen.preventAutoHideAsync();
@@ -179,6 +182,17 @@ function MainTabs({ session }) {
                 }
               }}
             />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Quran"
+        component={QuranScreen}
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <View style={{ backgroundColor: focused ? '#c9a84c' : 'rgba(201,168,76,0.2)', borderRadius: 26, padding: 3 }}>
+              <Image source={require('./assets/quran.png')} style={{ width: 28, height: 28 }} />
+            </View>
           ),
         }}
       />
@@ -512,6 +526,9 @@ function App() {
                       <Stack.Screen name="Admin" component={AdminScreen} />
                       <Stack.Screen name="MyUploads" component={MyUploadsScreen} />
                       <Stack.Screen name="ContactAdmin" component={ContactAdminScreen} />
+                      <Stack.Screen name="Quran" component={QuranScreen} />
+                      <Stack.Screen name="QuranReader" component={QuranReaderScreen} />
+                      <Stack.Screen name="RecitationChecker" component={RecitationCheckerScreen} />
                     </Stack.Navigator>
                     <GlobalVideoOptionsSheet />
                   </NavigationContainer>
