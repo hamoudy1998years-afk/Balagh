@@ -31,6 +31,8 @@ import { ROUTES } from '../constants/routes';
 import { getCredentialKey } from '../constants/storage';
 import { s, ms } from '../utils/responsive';
 import ModernDialog from './ModernDialog';
+import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -70,6 +72,13 @@ export default function LoginScreen({ navigation }) {
   const { refreshUser, setUser } = useUser();
   const suppressDropdown = useRef(false);
   const silentReAuth = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      const entry = SystemBars.pushStackEntry({ style: 'light' });
+      return () => SystemBars.popStackEntry(entry);
+    }, [])
+  );
 
   const {
     isBiometricAvailable,

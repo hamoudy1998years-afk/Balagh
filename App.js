@@ -35,6 +35,7 @@ import { ROUTES } from './constants/routes';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import QuranScreen from './screens/QuranScreen';
+import PrayerScreen from './screens/PrayerScreen';
 import QuranReaderScreen from './screens/QuranReaderScreen';
 import RecitationCheckerScreen from './screens/RecitationCheckerScreen';
 import AgeGateScreen from './screens/AgeGateScreen';
@@ -194,6 +195,17 @@ function MainTabs({ session }) {
               <Image source={require('./assets/quran.png')} style={{ width: 28, height: 28 }} />
             </View>
           ),
+        }}
+      />
+      <Tab.Screen
+        name="Prayer"
+        component={PrayerScreen}
+        options={{
+          tabBarIcon: ({ color, size, focused }) => (
+            <Text style={{ fontSize: focused ? 26 : 22 }}>🕌</Text>
+          ),
+          lazy: true,
+          unmountOnBlur: true,
         }}
       />
       <Tab.Screen

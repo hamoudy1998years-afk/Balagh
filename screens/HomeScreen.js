@@ -755,12 +755,13 @@ export default function HomeScreen({ navigation }) {
 
   useFocusEffect(
     useCallback(() => {
+      followingRef.current?.setActive(isFocusedRef.current && index === 0);
+      foryouRef.current?.setActive(isFocusedRef.current && index === 1);
       return () => {
-        // Screen lost focus — force pause both feeds
         followingRef.current?.setActive(false);
         foryouRef.current?.setActive(false);
       };
-    }, [])
+    }, [index])
   );
 
   // Refresh feed when returning to home screen
