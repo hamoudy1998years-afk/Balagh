@@ -748,6 +748,13 @@ export default function HomeScreen({ navigation }) {
 
   useFocusEffect(
     useCallback(() => {
+      const entry = SystemBars.pushStackEntry({ style: index === 2 ? 'dark' : 'light' });
+      return () => SystemBars.popStackEntry(entry);
+    }, [index])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
       return () => {
         // Screen lost focus — force pause both feeds
         followingRef.current?.setActive(false);
@@ -897,7 +904,6 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000' }}>
-      <SystemBars style={index === 2 ? 'dark' : 'light'} />
       {showOffline && (
         <View style={{
           position: 'absolute',
