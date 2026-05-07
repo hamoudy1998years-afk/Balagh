@@ -39,6 +39,8 @@ export default function QuranReaderScreen({ navigation, route }) {
   const [memorizedKeys, setMemorizedKeys] = useState(new Set());
   const [revealedKeys, setRevealedKeys] = useState(new Set());
   const [playingKey, setPlayingKey] = useState(null);
+  const [isPlayingSurah, setIsPlayingSurah] = useState(false);
+  const surahPlayingRef = useRef(false);
   const soundRef = useRef(null);
 
   // Load verses + saved progress
@@ -98,6 +100,9 @@ export default function QuranReaderScreen({ navigation, route }) {
   }
 
   // In memorize mode: tap to reveal hidden verse
+  function hideVerse(verseKey) {
+    setRevealedKeys((prev) => { const next = new Set(prev); next.delete(verseKey); return next; });
+  }
   function revealVerse(verseKey) {
     setRevealedKeys((prev) => {
       const next = new Set(prev);
@@ -139,6 +144,56 @@ export default function QuranReaderScreen({ navigation, route }) {
       Alert.alert('Audio Error', 'Could not play audio for this verse.');
     }
   }
+
+  async function playSurah() {
+    if (isPlayingSurah) {
+        surahPlayingRef.current = false;
+        setIsPlayingSurah(false);
+        if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+        }
+        setPlayingKey(null);
+        return;
+    }
+    surahPlayingRef.current = true;
+    setIsPlayingSurah(true);
+
+    // Play Bismillah first (except Surah 1 and 9)
+    if (surah.id !== 1 && surah.id !== 9) {
+        const bismillahUrl = await fetchVerseAudioUrl('1:1');
+        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+        const { sound: bismillahSound } = await Audio.Sound.createAsync({ uri: bismillahUrl }, { shouldPlay: true });
+        soundRef.current = bismillahSound;
+        await new Promise((resolve) => {
+        bismillahSound.setOnPlaybackStatusUpdate((status) => {
+            if (status.didJustFinish) resolve();
+        });
+        });
+        await bismillahSound.unloadAsync();
+        soundRef.current = null;
+    }
+
+    for (let i = 0; i < verses.length; i++) {
+        if (!surahPlayingRef.current) break;
+        const verseKey = verses[i].verse_key;
+        setPlayingKey(verseKey);
+        const url = await fetchVerseAudioUrl(verseKey);
+        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+        soundRef.current = sound;
+        await new Promise((resolve) => {
+        sound.setOnPlaybackStatusUpdate((status) => {
+            if (status.didJustFinish) resolve();
+        });
+        });
+        await sound.unloadAsync();
+        soundRef.current = null;
+    }
+    setIsPlayingSurah(false);
+    setPlayingKey(null);
+    surahPlayingRef.current = false;
+    }
 
   const memorizedCount = memorizedKeys.size;
   const totalVerses = surah.verses_count;
@@ -211,7 +266,15 @@ export default function QuranReaderScreen({ navigation, route }) {
             <Text style={styles.hiddenText}>Tap to reveal</Text>
           </Pressable>
         ) : (
-          <Text style={styles.arabicText}>{item.text_uthmani}</Text>
+          <View>
+            <Text style={styles.arabicText}>{item.text_uthmani}</Text>
+            {isRevealed && (
+              <TouchableOpacity onPress={() => hideVerse(verseKey)} style={styles.hideBtn}>
+                <Ionicons name="eye-off-outline" size={14} color="#888" />
+                <Text style={styles.hideBtnText}>Hide again</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
 
         {/* Translation */}
@@ -281,6 +344,13 @@ export default function QuranReaderScreen({ navigation, route }) {
           />
           <Text style={[styles.modeBtnText, memorizeMode && { color: '#000' }]}>
             {memorizeMode ? 'Memorize' : 'Read'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={playSurah} style={[styles.modeBtn, isPlayingSurah && styles.modeBtnActive]}>
+          <Ionicons name={isPlayingSurah ? 'stop' : 'play'} size={18} color={'#000'} />
+          <Text style={[styles.modeBtnText, isPlayingSurah && { color: '#000' }]}>
+            {isPlayingSurah ? 'Stop' : 'Play All'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -503,6 +573,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 8, // ADDED — replaces gap
   },
+  hideBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
+  hideBtnText: { color: '#888', fontSize: 12, marginLeft: 4 },
   translationText: {
     color: '#444',
     fontSize: 14,
