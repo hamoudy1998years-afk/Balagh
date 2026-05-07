@@ -13,7 +13,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
 import {
   getCoordinates, getPrayerTimes, getMonthlyTimetable,
-  getNextPrayer, formatTime, getPrayerEmoji
+  getNextPrayer, formatTime, getPrayerEmoji,
+  savePrayerCache, loadPrayerCache,
 } from '../services/prayerApi';
 
 const PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
@@ -114,8 +115,21 @@ export default function PrayerScreen() {
 
   async function loadPrayerData() {
     try {
-      setLoading(true);
       setError(null);
+
+      // Load from cache instantly first
+      const cached = await loadPrayerCache();
+      if (cached) {
+        setPrayerData(cached.data);
+        setNextPrayer(getNextPrayer(cached.data.timings));
+        setCoords(cached.coords);
+        setQiblaAngle(calculateQibla(cached.coords.latitude, cached.coords.longitude));
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
+      // Fetch fresh data in background
       const location = await getCoordinates();
       setCoords(location);
       const qibla = calculateQibla(location.latitude, location.longitude);
@@ -123,8 +137,11 @@ export default function PrayerScreen() {
       const data = await getPrayerTimes(location.latitude, location.longitude);
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
+
+      // Save fresh data to cache
+      await savePrayerCache(data, location);
     } catch (e) {
-      setError(e.message);
+      if (!prayerData) setError(e.message);
     } finally {
       setLoading(false);
     }

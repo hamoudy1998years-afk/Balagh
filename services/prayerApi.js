@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BASE_URL = 'https://api.aladhan.com/v1';
 
@@ -85,4 +86,30 @@ export function getPrayerEmoji(prayer) {
     Isha: '🌙',
   };
   return emojis[prayer] || '🕌';
+}
+
+const CACHE_KEY = 'prayerTimesCache';
+const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+export async function savePrayerCache(data, coords) {
+  try {
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({
+      data,
+      coords,
+      timestamp: Date.now(),
+    }));
+  } catch (e) {}
+}
+
+export async function loadPrayerCache() {
+  try {
+    const raw = await AsyncStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const isExpired = Date.now() - parsed.timestamp > CACHE_TTL;
+    if (isExpired) return null;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
 }
