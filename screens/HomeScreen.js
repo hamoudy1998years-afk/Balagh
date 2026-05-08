@@ -623,10 +623,12 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
               }
             }
 
-            flatListRef.current?.scrollToOffset({
-              offset: targetIndex * listHeight,
-              animated: false,
-            });
+            setTimeout(() => {
+              flatListRef.current?.scrollToOffset({
+                offset: targetIndex * listHeight,
+                animated: false,
+              });
+            }, 50);
           }}
           refreshControl={
               <RefreshControl
