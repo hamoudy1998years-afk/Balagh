@@ -300,7 +300,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
       prevIndexRef.current = pending.activeIndex;
       pendingDirectionRef.current = null;
-    }, 150);
+    }, 50);
 
   }, [activeIndex, videos]);
 
@@ -582,6 +582,10 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
           overScrollMode="never"
           renderItem={renderItem}
           pagingEnabled={false}
+          decelerationRate="fast"
+          snapToInterval={listHeight}
+          snapToAlignment="start"
+          disableIntervalMomentum={true}
           showsVerticalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}

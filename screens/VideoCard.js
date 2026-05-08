@@ -83,6 +83,7 @@ function VideoCard({
           return;
         }
         await videoCache.removeCachedVideo(item.video_url);
+        setVideoUri(item.video_url);
       }
       videoCache.cacheVideo(item.video_url);
     };
