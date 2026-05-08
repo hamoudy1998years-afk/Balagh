@@ -48,7 +48,8 @@ function VideoCard({
   isScholar: isScholarProp,
   isTrusted: isTrustedProp,
   onBlocked,
-}) {
+    scrollOpacity,
+  }) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const safeBottom = insets?.bottom ?? 0;
@@ -562,7 +563,7 @@ function VideoCard({
         </View>
       )}
 
-      <Animated.View style={[styles.overlay, { bottom: safeBottom + s(95) }]}>
+      <Animated.View style={[styles.overlay, { bottom: safeBottom + s(95), opacity: scrollOpacity ?? 1 }]}>
         <AnimatedButton onPress={handleNavigateUserProfile}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={styles.username}>{username}</Text>
@@ -602,7 +603,7 @@ function VideoCard({
         )}
       </Animated.View>
 
-      <View style={[styles.actions, { bottom: safeBottom + s(100) }]}>
+      <Animated.View style={[styles.actions, { bottom: safeBottom + s(100), opacity: scrollOpacity ?? 1 }]}>
         <View style={styles.creatorContainer}>
           <AnimatedButton onPress={handleNavigateUserProfile}>
             <View style={[styles.creatorAvatar, followed && styles.creatorAvatarFollowed]}>
@@ -668,7 +669,7 @@ function VideoCard({
           </View>
           <Text style={styles.actionCount}>Report</Text>
         </AnimatedButton>
-      </View>
+      </Animated.View>
 
       <ModernDialog
         visible={showReportSheet}

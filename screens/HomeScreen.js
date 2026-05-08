@@ -247,6 +247,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const scrollDebounceRef = useRef(null);
   const pendingDirectionRef = useRef(null);
   const scrollStartYRef = useRef(0);
+  const scrollOpacityAnim = useRef(new Animated.Value(1)).current;
 
   useImperativeHandle(ref, () => ({
     refresh: async () => {
@@ -522,6 +523,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         cardHeight={listHeight}
         username={item.profiles?.username ?? 'user'}
         avatarUrl={item.profiles?.avatar_url ?? null}
+        scrollOpacity={scrollOpacityAnim}
         onBlocked={(blockedIndex) => {
           const nextIndex = blockedIndex + 1;
           if (nextIndex < videos.length) {
@@ -597,7 +599,12 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           getItemLayout={(data, index) => ({ length: listHeight, offset: listHeight * index, index })}
           onScrollBeginDrag={() => {
-          scrollStartYRef.current = activeIndex * listHeight;
+            scrollStartYRef.current = activeIndex * listHeight;
+            Animated.timing(scrollOpacityAnim, {
+              toValue: 0.3,
+              duration: 150,
+              useNativeDriver: true,
+            }).start();
           }}
           onScrollEndDrag={(e) => {
             const currentOffset = e.nativeEvent.contentOffset.y;
@@ -633,6 +640,12 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
                 animated: false,
               });
             }, 50);
+
+            Animated.timing(scrollOpacityAnim, {
+              toValue: 1,
+              duration: 200,
+              useNativeDriver: true,
+            }).start();
           }}
           refreshControl={
               <RefreshControl
