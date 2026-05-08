@@ -109,7 +109,7 @@ export function useVideoPlayerPool() {
         try {
           if (ref?.current) ref.current.seek(0);
         } catch (e) {}
-      }, 100);
+      }, 0);
     }
   }, [getPlayerRef, videoMap]);
 
