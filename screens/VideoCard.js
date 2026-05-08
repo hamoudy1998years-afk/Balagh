@@ -61,47 +61,36 @@ function VideoCard({
   const [showComments, setShowComments] = useState(false);
   const [followed, setFollowed] = useState(initialFollowed);
   const [isBlocked, setIsBlocked] = useState(false);
-  const [videoUri, setVideoUri] = useState(() => {
-    if (item.video_url?.includes('?')) return item.video_url;
-    if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) return item.video_url;
-    return null;
-  });
+
+  // Always start with the video URL immediately — no null, no black frame
+  const [videoUri, setVideoUri] = useState(() => item.video_url ?? null);
+
+  // isReady: false = show thumbnail overlay, true = show video
+  const [isReady, setIsReady] = useState(false);
   const [isLoadingSignedUrl, setIsLoadingSignedUrl] = useState(false);
 
-    // Set video URI — signed URLs from parent take priority
-    useEffect(() => {
-      const loadVideoUri = async () => {
-        // If parent already provided a signed URL (has query params), use it directly
-        if (item.video_url?.includes('?')) {
-          console.log('[VIDEOCARD] Using signed URL from parent:', item.video_url.substring(0, 80) + '...');
-          setVideoUri(item.video_url);
+  // Upgrade to cached local file silently — never set to null
+  useEffect(() => {
+    const loadVideoUri = async () => {
+      if (item.video_url?.includes('?')) return;
+      if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) return;
+
+      const cachedUri = await videoCache.getCachedVideo(item.video_url);
+      if (cachedUri) {
+        const fileInfo = await FileSystem.getInfoAsync(cachedUri);
+        if (fileInfo.exists) {
+          setVideoUri(cachedUri);
           return;
         }
-
-        // Livestream — use direct Supabase URL
-        if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) {
-          setVideoUri(item.video_url);
-          return;
-        }
-
-        // Regular video — check cache
-        const cachedUri = await videoCache.getCachedVideo(item.video_url);
-        if (cachedUri) {
-          const fileInfo = await FileSystem.getInfoAsync(cachedUri);
-          if (fileInfo.exists) {
-            setVideoUri(cachedUri);
-            return;
-          }
-          await videoCache.removeCachedVideo(item.video_url);
-        }
-        setVideoUri(item.video_url);
-        videoCache.cacheVideo(item.video_url);
-      };
-
-      if (item.id && item.video_url) {
-        loadVideoUri();
+        await videoCache.removeCachedVideo(item.video_url);
       }
-    }, [item.id, item.video_url, item.type]);
+      videoCache.cacheVideo(item.video_url);
+    };
+
+    if (item.id && item.video_url) {
+      loadVideoUri();
+    }
+  }, [item.id]);
 
   useEffect(() => {
     async function checkBlocked() {
@@ -117,7 +106,6 @@ function VideoCard({
     checkBlocked();
   }, [currentUserId, item.user_id]);
 
-
   const { user: authUser, loading: authLoading } = useUser();
   const currentUserId = authUser?.id ?? null;
   const [paused, setPaused] = useState(false);
@@ -128,13 +116,12 @@ function VideoCard({
   const [showProgress, setShowProgress] = useState(true);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [isDownloading, setIsDownloading] = useState(false);
-  // Refs to fix stale closure in PanResponder - always hold latest values
   const durationRef = useRef(0);
   const playerRef = useRef(null);
   const isVideoReadyRef = useRef(false);
   const isSeeking = useRef(false);
-  const progressBarRef = useRef(null);  // Ref for measure()
-  const lastSeekTime = useRef(0);  // Throttle video seek during drag
+  const progressBarRef = useRef(null);
+  const lastSeekTime = useRef(0);
   const dragStartPageX = useRef(0);
   const dragStartPct = useRef(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -143,22 +130,18 @@ function VideoCard({
   const [showFullCaption, setShowFullCaption] = useState(false);
   const manualPauseRef = useRef(false);
 
-  // Check if video owner is blocked (from context)
   const isUserBlocked = blockedUsers?.has(item.user_id);
-  
-  // Fade animation for blocked content
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   // ── PLAY/PAUSE LOGIC ──────────────────────────────────────────────────────
 
-  // When user scrolls away — reset manual pause so it auto-plays on return
   useEffect(() => {
     if (!isActive) {
       manualPauseRef.current = false;
       setPaused(true);
       setCurrentTime(0);
       progressAnim.setValue(0);
-      // DON'T reset duration or isVideoReadyRef here — keep them for when user scrolls back
+      // DO NOT reset isReady — prevents flicker when scrolling back
     } else {
       manualPauseRef.current = false;
       try {
@@ -170,15 +153,14 @@ function VideoCard({
     }
   }, [isActive]);
 
-  // When tab switches — pause/resume and restart from beginning
   useEffect(() => {
     if (isTabActive) {
       if (isActive) {
         manualPauseRef.current = false;
         setPaused(false);
-        try { 
+        try {
           if (player?.current?.seek) {
-            player.current.seek(0); 
+            player.current.seek(0);
           }
         } catch (e) {}
       } else {
@@ -188,20 +170,18 @@ function VideoCard({
     } else {
       setPaused(true);
       if (isActive) {
-        try { 
+        try {
           if (player?.current?.seek) {
-            player.current.seek(0); 
+            player.current.seek(0);
           }
         } catch (e) {}
       }
     }
   }, [isTabActive]);
 
-  // FIX: Pause video when navigating away to profile/search/other screens
   useFocusEffect(
     useCallback(() => {
       return () => {
-        // Screen lost focus — pause video to stop audio leak
         setPaused(true);
         manualPauseRef.current = false;
       };
@@ -213,7 +193,6 @@ function VideoCard({
   const [dialog, setDialog] = useState({
     visible: false, title: '', message: '', type: 'info', buttons: []
   });
-  // TikTok-style progress bar visibility
   const [isDragging, setIsDragging] = useState(false);
   const barOpacity = useRef(new Animated.Value(0)).current;
 
@@ -224,28 +203,21 @@ function VideoCard({
 
   useEffect(() => { setLiked(initialLiked); }, [initialLiked]);
   useEffect(() => { setFollowed(initialFollowed); }, [item.user_id]);
-  // Sync state to refs so PanResponder always reads latest values
   useEffect(() => { durationRef.current = duration; }, [duration]);
-  useEffect(() => { 
+  useEffect(() => {
     if (player?.current) {
-      playerRef.current = player.current; 
+      playerRef.current = player.current;
     }
   }, [player?.current]);
-  // TikTok-style: fade in/out progress bar based on paused or dragging
+
   useEffect(() => {
     if (paused || isDragging) {
-      // Show instantly (100ms fade in)
       Animated.timing(barOpacity, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
+        toValue: 1, duration: 100, useNativeDriver: true,
       }).start();
     } else {
-      // Smooth fade out (250ms)
       Animated.timing(barOpacity, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
+        toValue: 0, duration: 250, useNativeDriver: true,
       }).start();
     }
   }, [paused, isDragging]);
@@ -282,20 +254,15 @@ function VideoCard({
   const lastTap = useRef(null);
   const tapTimer = useRef(null);
 
-  // Progress bar dragging
   const progressBarWidth = useRef(0);
-  // Helper for instant UI updates during drag
   const updateProgressBarUI = (pct) => {
     const safePct = Math.max(0, Math.min(1, pct));
     progressAnim.setValue(safePct);
   };
-  // Capture both width AND absolute screen position on layout
   const onProgressBarLayout = (e) => {
     const { width } = e.nativeEvent.layout;
     progressBarWidth.current = width;
   };
-
-  // Convert any touch's pageX into 0-1 percentage along the bar
 
   const panResponder = useRef(
     PanResponder.create({
@@ -308,18 +275,14 @@ function VideoCard({
         isSeeking.current = true;
         manualPauseRef.current = true;
         setPaused(true);
-
-        // Record where finger started and where scrubber currently is
         dragStartPageX.current = evt.nativeEvent.pageX;
         dragStartPct.current = progressAnim.__getValue();
       },
 
       onPanResponderMove: (evt) => {
-        // Calculate delta from start position, apply 50% speed ratio
         const delta = (evt.nativeEvent.pageX - dragStartPageX.current) / progressBarWidth.current;
         const newPct = Math.max(0, Math.min(1, dragStartPct.current + delta * 1.0));
         updateProgressBarUI(newPct);
-
         const now = Date.now();
         if (now - lastSeekTime.current > 100) {
           seekToPosition(newPct);
@@ -332,7 +295,6 @@ function VideoCard({
         const newPct = Math.max(0, Math.min(1, dragStartPct.current + delta * 1.0));
         updateProgressBarUI(newPct);
         seekToPosition(newPct);
-
         isSeeking.current = false;
         manualPauseRef.current = false;
         setPaused(false);
@@ -350,11 +312,9 @@ function VideoCard({
   const seekToPosition = (percentage) => {
     const dur = durationRef.current;
     if (dur === 0) return;
-
     const newTime = percentage * dur;
     progressAnim.setValue(percentage);
     setCurrentTime(newTime);
-
     if (playerRef.current && isVideoReadyRef.current) {
       playerRef.current.seek(newTime);
     }
@@ -367,7 +327,6 @@ function VideoCard({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (tapTimer.current) clearTimeout(tapTimer.current);
@@ -418,7 +377,6 @@ function VideoCard({
   const handleTap = useCallback(() => {
     const now = Date.now();
     if (lastTap.current && now - lastTap.current < 300) {
-      // Double tap - like the video
       clearTimeout(tapTimer.current);
       lastTap.current = null;
       handleLike();
@@ -426,23 +384,15 @@ function VideoCard({
       setShowPauseIcon(false);
       setTimeout(() => setShowHeart(false), 800);
     } else {
-      // Single tap - toggle pause/play
       lastTap.current = now;
       tapTimer.current = setTimeout(() => {
         setPaused(prev => {
           const newPaused = !prev;
           manualPauseRef.current = newPaused;
-          
-          // Show icon when state changes, but don't auto-hide when pausing
           setShowPauseIcon(true);
-          
-          // Only auto-hide when resuming (unpausing), not when pausing
           if (!newPaused) {
-            // Resuming - hide icon after delay
             setTimeout(() => setShowPauseIcon(false), 800);
           }
-          // When pausing (newPaused = true), icon stays visible
-          
           return newPaused;
         });
         lastTap.current = null;
@@ -465,19 +415,14 @@ function VideoCard({
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        setDialog({ 
-          visible: true, 
-          title: 'Permission Required', 
-          message: 'Please allow access to your media library to download videos.', 
-          type: 'warning', 
+        setDialog({
+          visible: true, title: 'Permission Required',
+          message: 'Please allow access to your media library to download videos.',
+          type: 'warning',
           buttons: [
             { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Open Settings', 
-              onPress: () => Linking.openSettings(),
-              style: 'destructive'
-            },
-          ] 
+            { text: 'Open Settings', onPress: () => Linking.openSettings(), style: 'destructive' },
+          ]
         });
         return;
       }
@@ -523,8 +468,6 @@ function VideoCard({
     }
   }, [currentUserId, item.user_id]);
 
-
-
   const handleNavigateUserProfile = useCallback(() => {
     navigation.navigate(ROUTES.USER_PROFILE, { profileUserId: item.user_id });
   }, [navigation, item.user_id]);
@@ -541,12 +484,24 @@ function VideoCard({
 
   return (
     <Animated.View style={[styles.card, { height: cardHeight, opacity: isUserBlocked ? 0 : 1 }]}>
+
+      {/* Thumbnail — always rendered, hides once video is ready */}
+      <Image
+        source={{ uri: item.thumbnail_url ?? '' }}
+        style={[styles.video, { zIndex: 1, opacity: isReady ? 0 : 1, backgroundColor: '#000' }]}
+        resizeMode="contain"
+      />
+
+      {/* Video — invisible until onReadyForDisplay fires */}
       {videoUri ? (
         <Video
           ref={player}
           source={{ uri: videoUri }}
-          onReadyForDisplay={() => {}}
-          style={styles.video}
+          onReadyForDisplay={() => {
+            isVideoReadyRef.current = true;
+            setIsReady(true);
+          }}
+          style={[styles.video, { zIndex: 2, opacity: isReady ? 1 : 0 }]}
           resizeMode="contain"
           repeat={true}
           paused={!isActive || !isTabActive || paused}
@@ -562,8 +517,8 @@ function VideoCard({
             bufferForPlaybackAfterRebufferMs: 5000,
           }}
           onError={(e) => {
-
             __DEV__ && console.log('Video error:', e);
+            setIsReady(true);
           }}
           onLoad={(data) => {
             if (data?.duration && data.duration > 0 && data.duration < 86400) {
@@ -585,12 +540,12 @@ function VideoCard({
           useTextureView={true}
         />
       ) : (
-        <View style={[styles.video, { backgroundColor: '#000' }]} />
+        <View style={[styles.video, { zIndex: 2, backgroundColor: '#000' }]} />
       )}
 
-      {/* Full-screen tap area for pause/play (behind progress bar) */}
+      {/* Full-screen tap area */}
       <Pressable
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { zIndex: 3 }]}
         onPress={handleTap}
         onLongPress={handleLongPress}
         delayLongPress={400}
@@ -602,21 +557,11 @@ function VideoCard({
       )}
       {showPauseIcon && paused && (
         <View style={styles.pauseOverlay}>
-          <Ionicons 
-            name="play" 
-            size={60} 
-            color="#ffffff" 
-            style={{ opacity: 0.9 }}
-          />
+          <Ionicons name="play" size={60} color="#ffffff" style={{ opacity: 0.9 }} />
         </View>
       )}
 
-      {/* Bottom UI - fades out when dragging (TikTok style) */}
-      <Animated.View style={[styles.overlay, { 
-        bottom: safeBottom + s(95),
-      }]}>
-
-        {/* Username row — always on top */}
+      <Animated.View style={[styles.overlay, { bottom: safeBottom + s(95) }]}>
         <AnimatedButton onPress={handleNavigateUserProfile}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={styles.username}>{username}</Text>
@@ -638,7 +583,6 @@ function VideoCard({
           </View>
         </AnimatedButton>
 
-        {/* Caption — 2 lines max with more/less toggle */}
         {captionText ? (
           <Pressable onPress={() => setShowFullCaption(prev => !prev)} style={{ marginBottom: 4 }}>
             <Text style={styles.caption} numberOfLines={showFullCaption ? undefined : 2} ellipsizeMode="tail">
@@ -650,7 +594,6 @@ function VideoCard({
           </Pressable>
         ) : null}
 
-        {/* Hashtags — always at the bottom */}
         {hashtags.length > 0 && (
           <View style={styles.hashtagsRow}>
             {hashtags.map((tag, i) => <Text key={i} style={styles.hashtag}>{tag}</Text>)}
@@ -677,8 +620,8 @@ function VideoCard({
             </AnimatedButton>
           )}
         </View>
-        <AnimatedButton 
-          onPress={handleLike} 
+        <AnimatedButton
+          onPress={handleLike}
           style={styles.actionBtn}
           accessibilityLabel={liked ? "Unlike video" : "Like video"}
           accessibilityRole="button"
@@ -689,8 +632,8 @@ function VideoCard({
           </View>
           <Text style={styles.actionCount}>{likeCount}</Text>
         </AnimatedButton>
-        <AnimatedButton 
-          onPress={handleOpenComments} 
+        <AnimatedButton
+          onPress={handleOpenComments}
           style={styles.actionBtn}
           accessibilityLabel="View comments"
           accessibilityRole="button"
@@ -701,11 +644,8 @@ function VideoCard({
           </View>
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>
-        <AnimatedButton 
-          onPress={() => {
-            console.log('📤 SHARE BUTTON TAPPED - calling showTikTokShare with:', item?.id, currentUserId);
-            showTikTokShare(item, currentUserId);
-          }} 
+        <AnimatedButton
+          onPress={() => { showTikTokShare(item, currentUserId); }}
           style={styles.actionBtn}
           accessibilityLabel="Share video"
           accessibilityRole="button"
@@ -715,8 +655,8 @@ function VideoCard({
           </View>
           <Text style={styles.actionCount}>Share</Text>
         </AnimatedButton>
-        <AnimatedButton 
-          onPress={handleOpenReportSheet} 
+        <AnimatedButton
+          onPress={handleOpenReportSheet}
           style={[styles.actionBtn, { opacity: currentUserId && currentUserId !== item.user_id ? 1 : 0 }]}
           disabled={!currentUserId || currentUserId === item.user_id}
           accessibilityLabel="Report video"
@@ -763,61 +703,40 @@ function VideoCard({
         onDismiss={() => setDialog({ ...dialog, visible: false })}
       />
 
-      {/* =====================================================
-          TikTok-style Progress Bar — UPDATED with duration
-          ===================================================== */}
-      <Animated.View 
+      <Animated.View
         style={[
-          styles.progressContainer, 
-          { 
-            bottom: Math.max(safeBottom, 16) + s(45),  // ← changed from s(55)
-            zIndex: 10, 
-            height: s(40),                   // ← changed from 40
+          styles.progressContainer,
+          {
+            bottom: Math.max(safeBottom, 16) + s(45),
+            zIndex: 10,
+            height: s(40),
             justifyContent: 'center',
-            opacity: barOpacity
+            opacity: barOpacity,
           }
         ]}
         onLayout={onProgressBarLayout}
         hitSlop={{ top: 20, bottom: 20, left: 0, right: 0 }}
         {...panResponder.panHandlers}
       >
-        {/* ✅ NEW: TikTok-style current time / total duration */}
         <View style={styles.timeRow}>
           <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
           <Text style={styles.timeText}>{formatTime(duration)}</Text>
         </View>
 
-        {/* Invisible hit slop area */}
         <View style={{ paddingVertical: 4, width: '100%' }}>
-          <View
-            ref={progressBarRef}
-            style={[
-              styles.progressBarBg, 
-              { height: isDragging ? 6 : 4 }
-            ]}
-          >
-            <Animated.View 
+          <View ref={progressBarRef} style={[styles.progressBarBg, { height: isDragging ? 6 : 4 }]}>
+            <Animated.View
               pointerEvents="none"
-              style={[
-                styles.progressBarFill,
-                { width: progressAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0%', '100%']
-                })}
-              ]} 
+              style={[styles.progressBarFill, {
+                width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] })
+              }]}
             />
-            <Animated.View 
+            <Animated.View
               pointerEvents="none"
-              style={[
-                styles.progressThumb,
-                { 
-                  left: progressAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0%', '100%']
-                  }),
-                  marginLeft: -6,
-                }
-              ]}
+              style={[styles.progressThumb, {
+                left: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                marginLeft: -6,
+              }]}
             />
           </View>
         </View>
@@ -830,118 +749,50 @@ const styles = StyleSheet.create({
   card: { width: '100%', backgroundColor: '#000' },
   video: { width: '100%', height: '100%', position: 'absolute' },
   tapAreaFull: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 },
-  heartOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 2, pointerEvents: 'none' },
+  heartOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 5, pointerEvents: 'none' },
   heartIcon: { fontSize: ms(80), opacity: 0.9 },
-  pauseOverlay: { 
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    bottom: 0, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    zIndex: 2, 
-    pointerEvents: 'none',
+  pauseOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center', justifyContent: 'center', zIndex: 5, pointerEvents: 'none',
   },
-
-  overlay: { position: 'absolute', left: s(16), right: s(80), zIndex: 3 },
+  overlay: { position: 'absolute', left: s(16), right: s(80), zIndex: 4 },
   username: {
-    color: '#ffffff',
-    fontWeight: '900',
-    fontSize: ms(16),
-    marginBottom: 10,
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    color: '#ffffff', fontWeight: '900', fontSize: ms(16), marginBottom: 10,
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
   caption: {
-    color: '#ffffff',
-    fontSize: ms(14),
-    fontWeight: '400',
-    lineHeight: ms(18),
-    marginBottom: 4,
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    color: '#ffffff', fontSize: ms(14), fontWeight: '400', lineHeight: ms(18), marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
   hashtagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 },
   hashtag: {
-    color: COLORS.gold,
-    fontSize: ms(13),
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    color: COLORS.gold, fontSize: ms(13), fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
-  captionMore: {
-    color: COLORS.gold,
-    fontSize: ms(12),
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  actions: { position: 'absolute', right: s(12), alignItems: 'center', width: s(56), zIndex: 10 },
+  captionMore: { color: COLORS.gold, fontSize: ms(12), fontWeight: '700', marginTop: 2 },
+  actions: { position: 'absolute', right: s(12), alignItems: 'center', width: s(56), zIndex: 4 },
   actionBtn: { alignItems: 'center', marginBottom: 20 },
   actionIcon: { fontSize: ms(32) },
   actionCount: {
-    color: '#ffffff',
-    fontSize: ms(11),
-    textAlign: 'center',
-    marginTop: 4,
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    color: '#ffffff', fontSize: ms(11), textAlign: 'center', marginTop: 4, fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
   },
-  goldBadge: {
-    backgroundColor: '#B76E79',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  goldBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  blueBadge: {
-    backgroundColor: '#3b82f6',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  blueBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
-  },
+  goldBadge: { backgroundColor: '#B76E79', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  goldBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  blueBadge: { backgroundColor: '#3b82f6', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  blueBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   creatorContainer: { alignItems: 'center', marginBottom: 16 },
   creatorAvatar: {
-    width: s(52),
-    height: s(52),
-    borderRadius: s(26),
-    backgroundColor: COLORS.gold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#ffffff',
+    width: s(52), height: s(52), borderRadius: s(26), backgroundColor: COLORS.gold,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#ffffff',
   },
   creatorAvatarFollowed: { borderColor: COLORS.gold, borderWidth: 2 },
   creatorAvatarText: { color: '#fff', fontWeight: '700', fontSize: ms(20) },
   followBadge: {
-    width: 27,
-    height: 27,
-    borderRadius: 13.5,
-    backgroundColor: COLORS.gold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: -13.5,
-    borderWidth: 2,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    width: 27, height: 27, borderRadius: 13.5, backgroundColor: COLORS.gold,
+    alignItems: 'center', justifyContent: 'center', marginTop: -13.5,
+    borderWidth: 2, borderColor: '#fff',
+    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4,
   },
   followedBadge: { backgroundColor: '#10b981' },
   followBadgeText: { color: '#fff', fontSize: 16, fontWeight: '800' },
@@ -951,50 +802,21 @@ const styles = StyleSheet.create({
   dlBarBg: { width: '100%', height: 8, backgroundColor: '#2a3a5c', borderRadius: 4, overflow: 'hidden' },
   dlBarFill: { height: '100%', backgroundColor: COLORS.gold, borderRadius: 4 },
   dlPercent: { color: COLORS.gold, fontSize: 22, fontWeight: '800' },
-  progressContainer: {
-    position: 'absolute',
-    left: s(16),
-    right: s(16),
-    zIndex: 5,
-  },
-  timeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  timeText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: ms(11),
-    fontWeight: '600',
-  },
+  progressContainer: { position: 'absolute', left: s(16), right: s(16), zIndex: 5 },
+  timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  timeText: { color: 'rgba(255,255,255,0.8)', fontSize: ms(11), fontWeight: '600' },
   progressBarBg: {
-    height: 3,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 2,
-    overflow: 'visible',
-    position: 'relative',
+    height: 3, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2,
+    overflow: 'visible', position: 'relative',
   },
   progressBarFill: {
-    height: '100%',
-    backgroundColor: COLORS.gold,
-    borderRadius: 2,
-    position: 'absolute',
-    left: 0,
-    top: 0,
+    height: '100%', backgroundColor: COLORS.gold, borderRadius: 2,
+    position: 'absolute', left: 0, top: 0,
   },
   progressThumb: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#ffffff',
-    position: 'absolute',
-    top: -4,
-    marginLeft: -6,
-    shadowColor: '#000',
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
+    width: 12, height: 12, borderRadius: 6, backgroundColor: '#ffffff',
+    position: 'absolute', top: -4, marginLeft: -6,
+    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 5,
   },
 });
 

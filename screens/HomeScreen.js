@@ -178,7 +178,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const [activeIndex, setActiveIndex] = useState(0);
   const { width, height } = useWindowDimensions();
 
-  // ── FIX: initialize to null so we wait for real measured height ──
   const [listHeight, setListHeight] = useState(null);
 
   const [myLikes, setMyLikes] = useState(() => feedCache.likes ?? []);
@@ -247,6 +246,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   const isRefreshingRef = useRef(false);
   const scrollDebounceRef = useRef(null);
   const pendingDirectionRef = useRef(null);
+  const scrollStartYRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     refresh: async () => {
@@ -261,9 +261,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
     },
     setActive: (val) => {
       setIsTabActive(!!val);
-      if (val) {
-        setListHeight(null);
-      }
     },
   }));
 
@@ -272,7 +269,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
 
     const direction = activeIndex > prevIndexRef.current ? 'next' : 'prev';
     
-    // Debounce: only rotate slots after scroll settles (150ms)
     if (scrollDebounceRef.current) {
       clearTimeout(scrollDebounceRef.current);
     }
@@ -289,7 +285,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         playerPool.scrollPrev();
       }
 
-      // Load videos AFTER slot rotation
       const currentVideo = videos[pending.activeIndex];
       if (currentVideo) {
         playerPool.loadVideo('current', currentVideo.video_url);
@@ -321,7 +316,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       setMyLikes(feedCache.likes ?? []);
       setMyFollows(feedCache.follows ?? []);
       setLoading(false);
-      // Only update interactions in background, don't reshuffle videos
       loadMyInteractions(true);
     } else {
       loadVideos();
@@ -426,7 +420,6 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       setHasMore(newVideos.length === 20);
       
             if (loadMore) {
-        // Only shuffle the NEW batch, then append to existing order
         const newArr = [...newVideos];
         for (let i = newArr.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -532,7 +525,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
         onBlocked={(blockedIndex) => {
           const nextIndex = blockedIndex + 1;
           if (nextIndex < videos.length) {
-            flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+            flatListRef.current?.scrollToIndex({ index: nextIndex, animated: false });
           }
         }}
       />
@@ -571,9 +564,7 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
   }
 
   return (
-    // ── FIX: measure real height here, only render FlatList once we have it ──
     <View
-      key={`feed-${type}-${isTabActive ? 'active' : 'inactive'}`}
       style={{ flex: 1, backgroundColor: '#000' }}
       onLayout={(e) => {
         const measured = e.nativeEvent.layout.height;
@@ -583,14 +574,14 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
       }}
     >
       {listHeight ? (
-        <FlatList
+                <FlatList
           ref={flatListRef}
           data={visibleVideos}
           keyExtractor={(item) => item.id}
           style={{ backgroundColor: '#000' }}
           overScrollMode="never"
           renderItem={renderItem}
-          pagingEnabled
+          pagingEnabled={false}
           showsVerticalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}
@@ -600,8 +591,45 @@ const VideoFeed = forwardRef(({ type, navigation, tabIndex, activeIndexRef, isFo
           onEndReached={onEndReached}
           onEndReachedThreshold={0.5}
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          getItemLayout={(data, index) => ({ length: listHeight, offset: listHeight * index, index })}
+          onScrollBeginDrag={() => {
+          scrollStartYRef.current = activeIndex * listHeight;
+          }}
+          onScrollEndDrag={(e) => {
+            const currentOffset = e.nativeEvent.contentOffset.y;
+            const currentIndexOffset = activeIndex * listHeight;
+            const dragDistance = currentOffset - currentIndexOffset;
+            const dragPercent = Math.abs(dragDistance) / listHeight;
+            const velocity = e.nativeEvent.velocity?.y ?? 0;
+            const isFastScroll = Math.abs(velocity) > 0.3;
+
+            let targetIndex = activeIndex;
+
+            if (isFastScroll) {
+              // Fast scroll/flick — change video easily
+              if (dragDistance > 0) {
+                targetIndex = Math.min(activeIndex + 1, visibleVideos.length - 1);
+              } else if (dragDistance < 0) {
+                targetIndex = Math.max(activeIndex - 1, 0);
+              }
+            } else {
+              // Slow drag — need 45% to change video
+              if (dragPercent >= 0.45) {
+                if (dragDistance > 0) {
+                  targetIndex = Math.min(activeIndex + 1, visibleVideos.length - 1);
+                } else {
+                  targetIndex = Math.max(activeIndex - 1, 0);
+                }
+              }
+            }
+
+            flatListRef.current?.scrollToOffset({
+              offset: targetIndex * listHeight,
+              animated: false,
+            });
+          }}
           refreshControl={
-            <RefreshControl
+              <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
               tintColor="#ffffff"
@@ -764,14 +792,12 @@ export default function HomeScreen({ navigation }) {
     }, [index])
   );
 
-  // Refresh feed when returning to home screen
   useEffect(() => {
     if (!hasMountedRef.current) {
       hasMountedRef.current = true;
       return;
     }
     if (isFocused) {
-      // Only refresh if cache is empty — don't reshuffle if videos already loaded
       if (index === 0 && !isCacheValid('following')) followingRef.current?.refresh?.();
       else if (index === 1 && !isCacheValid('foryou')) foryouRef.current?.refresh?.();
     }
@@ -949,7 +975,7 @@ export default function HomeScreen({ navigation }) {
         initialLayout={{ width: screenWidth }}
         lazy={true}
         swipeEnabled={true}
-        animationEnabled={true}
+        animationEnabled={false}
         tabBarPosition="top"
       />
     </GestureHandlerRootView>
