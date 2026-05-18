@@ -190,6 +190,15 @@ function VideoCard({
     }, [])
   );
 
+  useEffect(() => {
+    const { DeviceEventEmitter } = require('react-native');
+    const sub = DeviceEventEmitter.addListener('pauseAllVideos', () => {
+      setPaused(true);
+      manualPauseRef.current = false;
+    });
+    return () => sub.remove();
+  }, []);
+
   // ─────────────────────────────────────────────────────────────────────────
 
   const [dialog, setDialog] = useState({

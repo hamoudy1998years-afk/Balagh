@@ -6,21 +6,48 @@ const BASE_URL = 'https://api.aladhan.com/v1';
 export async function getCoordinates() {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') throw new Error('Location permission denied');
-  const location = await Location.getCurrentPositionAsync({});
-  return {
-    latitude: location.coords.latitude,
-    longitude: location.coords.longitude,
-  };
+
+  const enabled = await Location.hasServicesEnabledAsync();
+  if (!enabled) throw new Error('Please enable location services');
+
+  const location = await Location.getCurrentPositionAsync({
+    accuracy: Location.Accuracy.BestForNavigation,
+    mayShowUserSettingsDialog: true,
+  });
+
+  const { latitude, longitude } = location.coords;
+  
+  // Warn if coords look wrong (Manila is ~14.5, 121.0; Zamboanga is ~6.9, 122.0)
+  if (latitude > 10) {
+    console.warn('[PrayerApi] WARNING: Got coords north of 10°N. If you are in Zamboanga/Mindanao, this is WRONG. Emulator may be set to Manila.');
+    console.warn('[PrayerApi] Coords:', latitude, longitude);
+  }
+  
+  console.log('[PrayerApi] GPS coords:', latitude, longitude);
+  return { latitude, longitude };
 }
 
 export async function getPrayerTimes(latitude, longitude) {
   const date = new Date();
   const timestamp = Math.floor(date.getTime() / 1000);
-  const response = await fetch(
-    `${BASE_URL}/timings/${timestamp}?latitude=${latitude}&longitude=${longitude}&method=16&school=1`
-  );
+  
+  const params = new URLSearchParams({
+    latitude: latitude.toString(),
+    longitude: longitude.toString(),
+    method: '3',
+    school: '0',
+    timezonestring: 'Asia/Manila',
+    tune: '0,0,0,0,-1,0,0,0,0',  // -1 min Asr (format: Imsak,Fajr,Sunrise,Dhuhr,Asr,Maghrib,Sunset,Isha,Midnight)
+  });
+  
+  const url = `${BASE_URL}/timings/${timestamp}?${params.toString()}`;
+  console.log('[PrayerApi] Full URL:', url);
+  
+  const response = await fetch(url);
   const data = await response.json();
   if (data.code !== 200) throw new Error('Failed to fetch prayer times');
+  
+  console.log('[PrayerApi] Times:', data.data.timings);
   return data.data;
 }
 
@@ -28,8 +55,18 @@ export async function getMonthlyTimetable(latitude, longitude) {
   const date = new Date();
   const month = date.getMonth() + 1;
   const year = date.getFullYear();
+  
+  const params = new URLSearchParams({
+    latitude: latitude.toString(),
+    longitude: longitude.toString(),
+    method: '3',
+    school: '0',
+    timezonestring: 'Asia/Manila',
+    tune: '0,0,0,0,-1,0,0,0,0',  // ← ADD THIS
+  });
+  
   const response = await fetch(
-    `${BASE_URL}/calendar/${year}/${month}?latitude=${latitude}&longitude=${longitude}&method=16&school=1`
+    `${BASE_URL}/calendar/${year}/${month}?${params.toString()}`
   );
   const data = await response.json();
   if (data.code !== 200) throw new Error('Failed to fetch timetable');
@@ -80,6 +117,7 @@ export function formatTime(time24) {
 export function getPrayerEmoji(prayer) {
   const emojis = {
     Fajr: '🌅',
+    Sunrise: '🌄',
     Dhuhr: '☀️',
     Asr: '🌤',
     Maghrib: '🌇',
@@ -89,7 +127,7 @@ export function getPrayerEmoji(prayer) {
 }
 
 const CACHE_KEY = 'prayerTimesCache';
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 export async function savePrayerCache(data, coords) {
   try {

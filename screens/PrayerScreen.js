@@ -1,8 +1,11 @@
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, ActivityIndicator, Animated, Platform, Dimensions
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  Switch, ActivityIndicator
 } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
@@ -16,13 +19,14 @@ import {
   getNextPrayer, formatTime, getPrayerEmoji,
   savePrayerCache, loadPrayerCache,
 } from '../services/prayerApi';
+import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications } from '../services/prayerNotificationService';
 
-const PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
-const MECCA = { lat: 21.3891, lng: 39.8579 };
+const PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+const MECCA = { lat: 21.4225, lng: 39.8262 };
 const ADHAN_STYLES = [
-  { label: 'Makkah', url: 'https://www.islamicfinder.org/prayer-times/adhan/makkah.mp3' },
-  { label: 'Madinah', url: 'https://www.islamicfinder.org/prayer-times/adhan/madinah.mp3' },
-  { label: 'Al-Aqsa', url: 'https://www.islamicfinder.org/prayer-times/adhan/aqsa.mp3' },
+  { label: 'Makkah', url: require('../assets/audio/adhan_makkah.mp3') },
+  { label: 'Madinah', url: require('../assets/audio/adhan_madinah.mp3') },
+  { label: 'Al-Aqsa', url: require('../assets/audio/adhan_aqsa.mp3') },
 ];
 
 function calculateQibla(lat, lng) {
@@ -53,24 +57,36 @@ export default function PrayerScreen() {
   const [notifications, setNotifications] = useState({});
   const [adhanStyle, setAdhanStyle] = useState(0);
   const [adhanEnabled, setAdhanEnabled] = useState(true);
-  const [compassHeading, setCompassHeading] = useState(0);
   const [qiblaAngle, setQiblaAngle] = useState(null);
+  const [compassHeading, setCompassHeading] = useState(0);
   const [sound, setSound] = useState(null);
   const [playingAdhan, setPlayingAdhan] = useState(false);
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const [notifsEnabled, setNotifsEnabled] = useState(true);
+  const [compassExpanded, setCompassExpanded] = useState(false);
+
   const countdownRef = useRef(null);
-  const needleAnim = useRef(new Animated.Value(0)).current;
   const magnetometerSub = useRef(null);
+  const rafRef = useRef(null);
+
+  const rotation = useSharedValue(0);
+
+  const animatedCompassStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
 
   useFocusEffect(
     useCallback(() => {
-        const entry = SystemBars.pushStackEntry({ style: 'light' });
-        startMagnetometer();
-        return () => {
+      const entry = SystemBars.pushStackEntry({ style: 'light' });
+      startMagnetometer();
+      const { DeviceEventEmitter } = require('react-native');
+      DeviceEventEmitter.emit('pauseAllVideos');
+      return () => {
         SystemBars.popStackEntry(entry);
         stopMagnetometer();
-        };
+      };
     }, [])
-    );
+  );
 
   useEffect(() => {
     loadSavedSettings();
@@ -83,6 +99,18 @@ export default function PrayerScreen() {
   }, []);
 
   useEffect(() => {
+    async function checkNotifChoice() {
+      const choice = await getPrayerNotifChoice();
+      if (!choice) {
+        setTimeout(() => setShowNotifPrompt(true), 1000);
+      } else if (choice === 'enabled' || choice === 'silent') {
+        initPrayerNotifications(choice === 'enabled');
+      }
+    }
+    checkNotifChoice();
+  }, []);
+
+  useEffect(() => {
     if (prayerData) {
       countdownRef.current = setInterval(() => {
         setNextPrayer(getNextPrayer(prayerData.timings));
@@ -90,17 +118,6 @@ export default function PrayerScreen() {
     }
     return () => clearInterval(countdownRef.current);
   }, [prayerData]);
-
-  useEffect(() => {
-    if (qiblaAngle !== null) {
-      const needleRotation = qiblaAngle - compassHeading;
-      Animated.spring(needleAnim, {
-        toValue: needleRotation,
-        useNativeDriver: true,
-        friction: 6,
-      }).start();
-    }
-  }, [compassHeading, qiblaAngle]);
 
   async function loadSavedSettings() {
     try {
@@ -110,26 +127,25 @@ export default function PrayerScreen() {
       if (savedAdhan !== null) setAdhanStyle(parseInt(savedAdhan));
       const savedAdhanEnabled = await AsyncStorage.getItem('adhanEnabled');
       if (savedAdhanEnabled !== null) setAdhanEnabled(savedAdhanEnabled === 'true');
+      const savedNotifsEnabled = await AsyncStorage.getItem('notifsEnabled');
+      if (savedNotifsEnabled !== null) setNotifsEnabled(savedNotifsEnabled === 'true');
     } catch (e) {}
   }
 
   async function loadPrayerData() {
     try {
       setError(null);
-
-      // Load from cache instantly first
       const cached = await loadPrayerCache();
       if (cached) {
         setPrayerData(cached.data);
         setNextPrayer(getNextPrayer(cached.data.timings));
         setCoords(cached.coords);
-        setQiblaAngle(calculateQibla(cached.coords.latitude, cached.coords.longitude));
+        const qibla = calculateQibla(cached.coords.latitude, cached.coords.longitude);
+        setQiblaAngle(qibla);
         setLoading(false);
       } else {
         setLoading(true);
       }
-
-      // Fetch fresh data in background
       const location = await getCoordinates();
       setCoords(location);
       const qibla = calculateQibla(location.latitude, location.longitude);
@@ -137,8 +153,6 @@ export default function PrayerScreen() {
       const data = await getPrayerTimes(location.latitude, location.longitude);
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
-
-      // Save fresh data to cache
       await savePrayerCache(data, location);
     } catch (e) {
       if (!prayerData) setError(e.message);
@@ -157,18 +171,80 @@ export default function PrayerScreen() {
   }
 
   function startMagnetometer() {
-    Magnetometer.setUpdateInterval(300);
+    Magnetometer.setUpdateInterval(16);
+    let targetAngle = 0;
+    let visualAngle = rotation.value;
+    let initialized = false;
+    let lastTarget = -1;
+    let lastVisual = 0;
+    let rejectCount = 0;
+    
     magnetometerSub.current = Magnetometer.addListener(({ x, y }) => {
-      let angle = Math.atan2(y, x) * (180 / Math.PI);
-      angle = (angle + 360) % 360;
-      setCompassHeading(angle);
+      let rawAngle = Math.atan2(y, x) * (180 / Math.PI) - 90;
+      rawAngle = (rawAngle + 360) % 360;
+      setCompassHeading(rawAngle);
+      
+      if (lastTarget === -1) { lastTarget = rawAngle; targetAngle = rawAngle; initialized = true; return; }
+      const sensorDelta = rawAngle - lastTarget;
+      const sensorShortest = sensorDelta > 180 ? sensorDelta - 360 : sensorDelta < -180 ? sensorDelta + 360 : sensorDelta;
+      
+      if (Math.abs(sensorShortest) > 90) {
+        rejectCount++;
+        if (rejectCount > 5) {
+          lastTarget = rawAngle;
+          targetAngle = rawAngle;
+          initialized = true;
+          rejectCount = 0;
+        } else {
+        }
+        return;
+      }
+      rejectCount = 0;
+      
+      if (Math.abs(sensorShortest) > 45) {
+      }
+      
+      lastTarget = rawAngle;
+      targetAngle = rawAngle;
+      initialized = true;
     });
+    
+    function smoothLoop() {
+      if (!initialized) {
+        rafRef.current = requestAnimationFrame(smoothLoop);
+        return;
+      }
+      
+      let delta = targetAngle - visualAngle;
+      
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      
+      const alpha = 0.08;
+      visualAngle += delta * alpha;
+      visualAngle = ((visualAngle % 360) + 360) % 360;
+      
+      const visualDelta = visualAngle - lastVisual;
+      const visualShortest = visualDelta > 180 ? visualDelta - 360 : visualDelta < -180 ? visualDelta + 360 : visualDelta;
+      if (Math.abs(visualShortest) > 5) {
+      }
+      
+      lastVisual = visualAngle;
+      rotation.value = -visualAngle;
+      
+      rafRef.current = requestAnimationFrame(smoothLoop);
+    }
+    rafRef.current = requestAnimationFrame(smoothLoop);
   }
 
   function stopMagnetometer() {
     if (magnetometerSub.current) {
       magnetometerSub.current.remove();
       magnetometerSub.current = null;
+    }
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
   }
 
@@ -191,8 +267,10 @@ export default function PrayerScreen() {
         title: `🕌 ${prayer} Prayer Time`,
         body: `It's time for ${prayer} prayer. Allahu Akbar!`,
         sound: true,
+        channelId: 'prayer-times',
+        data: { type: 'prayer', prayer },
       },
-      trigger: { hour: hours, minute: minutes, repeats: true },
+      trigger: { type: 'daily', hour: hours, minute: minutes },
     });
   }
 
@@ -206,7 +284,7 @@ export default function PrayerScreen() {
       if (sound) await sound.unloadAsync();
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
       const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: ADHAN_STYLES[adhanStyle].url },
+        ADHAN_STYLES[adhanStyle].url,
         { shouldPlay: true }
       );
       setSound(newSound);
@@ -229,10 +307,9 @@ export default function PrayerScreen() {
     await AsyncStorage.setItem('adhanEnabled', String(val));
   }
 
-  const needleRotation = needleAnim.interpolate({
-    inputRange: [-360, 360],
-    outputRange: ['-360deg', '360deg'],
-  });
+  const diff = qiblaAngle !== null ? ((qiblaAngle - compassHeading) % 360 + 360) % 360 : 0;
+  const shortestDiff = diff > 180 ? 360 - diff : diff;
+  const facingMakkah = qiblaAngle !== null && shortestDiff < 15;
 
   if (loading) {
     return (
@@ -260,12 +337,62 @@ export default function PrayerScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
+      {showNotifPrompt && (
+        <View style={{
+          position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999,
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <View style={{
+            backgroundColor: '#1a2e44', borderRadius: 24, padding: 28,
+            width: '85%', alignItems: 'center',
+            borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)',
+          }}>
+            <Text style={{ fontSize: 40, marginBottom: 12 }}>🕌</Text>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 8, textAlign: 'center' }}>
+              Prayer Time Reminders
+            </Text>
+            <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 22, marginBottom: 24 }}>
+              Would you like to receive daily prayer time notifications with Adhan sound?
+            </Text>
+            <TouchableOpacity
+              style={{ backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, width: '100%', alignItems: 'center', marginBottom: 10 }}
+              onPress={async () => {
+                setShowNotifPrompt(false);
+                await setPrayerNotifChoice('enabled');
+                await initPrayerNotifications(true);
+              }}
+            >
+              <Text style={{ color: '#1a2e44', fontWeight: '700', fontSize: 15 }}>🔔 Enable with Adhan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, width: '100%', alignItems: 'center', marginBottom: 10 }}
+              onPress={async () => {
+                setShowNotifPrompt(false);
+                await setPrayerNotifChoice('silent');
+                await initPrayerNotifications(false);
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>🔕 Silent Notifications</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, width: '100%', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' }}
+              onPress={async () => {
+                setShowNotifPrompt(false);
+                await setPrayerNotifChoice('skipped');
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 15 }}>Not Now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <Text style={styles.headerSub}>BISMILLAH</Text>
           <Text style={styles.screenTitle}>Prayer Times</Text>
@@ -281,7 +408,6 @@ export default function PrayerScreen() {
           </View>
         </View>
 
-        {/* Next Prayer Hero */}
         {nextPrayer && (
           <View style={styles.heroCard}>
             <Text style={styles.heroLabel}>NEXT PRAYER</Text>
@@ -300,7 +426,31 @@ export default function PrayerScreen() {
           </View>
         )}
 
-        {/* Prayer Times List */}
+        <View style={styles.card}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#1a2e44' }}>🔔 Prayer Notifications</Text>
+              <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{notifsEnabled ? 'Enabled' : 'Disabled'}</Text>
+            </View>
+            <Switch
+              value={notifsEnabled}
+              onValueChange={async (val) => {
+                setNotifsEnabled(val);
+                await AsyncStorage.setItem('notifsEnabled', String(val));
+                if (val) {
+                  await initPrayerNotifications(adhanEnabled);
+                } else {
+                  await cancelPrayerNotifications();
+                  await Notifications.cancelScheduledNotificationAsync('prayer-daily-summary');
+                  await Notifications.dismissNotificationAsync('prayer-persistent');
+                }
+              }}
+              trackColor={{ false: 'rgba(0,0,0,0.1)', true: COLORS.gold + '80' }}
+              thumbColor={notifsEnabled ? COLORS.gold : 'rgba(0,0,0,0.3)'}
+            />
+          </View>
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>TODAY'S PRAYERS</Text>
           {PRAYERS.map((prayer) => {
@@ -339,10 +489,12 @@ export default function PrayerScreen() {
           })}
         </View>
 
-        {/* Qibla + Adhan */}
-        <View style={styles.twoCol}>
-          {/* Qibla */}
-          <View style={[styles.card, styles.halfCard]}>
+        {compassExpanded && (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => setCompassExpanded(false)}
+            style={[styles.card, { alignItems: 'center' }]}
+          >
             <View style={styles.iconRing}>
               <Text style={{ fontSize: 22 }}>🧭</Text>
             </View>
@@ -353,65 +505,119 @@ export default function PrayerScreen() {
             <Text style={styles.cardSub}>
               {qiblaAngle !== null ? `${getCardinalDirection(qiblaAngle)} toward Mecca` : ''}
             </Text>
-            <View style={styles.compassRing}>
+
+            <Animated.View style={[
+              {
+                width: 220, height: 220, borderRadius: 110, borderWidth: 2,
+                borderColor: 'rgba(201,168,76,0.3)', backgroundColor: '#f8f8f8',
+                alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 8
+              },
+              animatedCompassStyle
+            ]}>
               {['N', 'E', 'S', 'W'].map((dir, i) => (
-                <Text
-                  key={dir}
-                  style={[styles.compassDir, {
+                <Text key={dir} style={[styles.compassDir, {
+                  position: 'absolute',
+                  top: i === 0 ? 4 : i === 2 ? null : '40%',
+                  bottom: i === 2 ? 4 : null,
+                  left: i === 3 ? 4 : i === 1 ? null : '44%',
+                  right: i === 1 ? 4 : null,
+                  color: i === 0 ? '#e74c3c' : '#1a2e44',
+                }]}>{dir}</Text>
+              ))}
+              <View style={{ width: 4, height: 180, alignItems: 'center', position: 'absolute', transform: [{ rotate: `${qiblaAngle}deg` }] }}>
+                <View style={{ width: 4, height: 90, backgroundColor: COLORS.gold, borderRadius: 2 }} />
+                <View style={{ width: 4, height: 90, backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 2 }} />
+              </View>
+              <View style={styles.compassCenter} />
+              <Text style={{ position: 'absolute', top: 8, fontSize: 28 }}>🕋</Text>
+            </Animated.View>
+
+            <Text style={[{ fontSize: 13, fontWeight: '700', marginTop: 8, textAlign: 'center' }, { color: facingMakkah ? '#22c55e' : COLORS.gold }]}>
+              {facingMakkah ? '🕋 Facing Makkah!' : '🕋 Heading to Makkah'}
+            </Text>
+
+            <Text style={{ fontSize: 10, color: '#aaa', marginTop: 4 }}>Tap to collapse</Text>
+          </TouchableOpacity>
+        )}
+
+        {!compassExpanded && (
+          <View style={styles.twoCol}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => setCompassExpanded(true)}
+              style={[styles.card, styles.halfCard]}
+            >
+              <View style={styles.iconRing}>
+                <Text style={{ fontSize: 22 }}>🧭</Text>
+              </View>
+              <Text style={styles.cardTitle}>Qibla</Text>
+              <Text style={styles.cardValue}>
+                {qiblaAngle !== null ? `${Math.round(qiblaAngle)}°` : '--'}
+              </Text>
+              <Text style={styles.cardSub}>
+                {qiblaAngle !== null ? `${getCardinalDirection(qiblaAngle)} toward Mecca` : ''}
+              </Text>
+
+              <Animated.View style={[styles.compassRing, animatedCompassStyle]}>
+                {['N', 'E', 'S', 'W'].map((dir, i) => (
+                  <Text key={dir} style={[styles.compassDir, {
                     position: 'absolute',
                     top: i === 0 ? 4 : i === 2 ? null : '40%',
                     bottom: i === 2 ? 4 : null,
                     left: i === 3 ? 4 : i === 1 ? null : '44%',
                     right: i === 1 ? 4 : null,
                     color: i === 0 ? '#e74c3c' : '#1a2e44',
-                  }]}
-                >
-                  {dir}
-                </Text>
-              ))}
-              <Animated.View style={[styles.needle, { transform: [{ rotate: needleRotation }] }]}>
-                <View style={styles.needleTip} />
-                <View style={styles.needleBase} />
+                  }]}>{dir}</Text>
+                ))}
+                <View style={[styles.needle, { transform: [{ rotate: `${qiblaAngle}deg` }] }]}>
+                  <View style={styles.needleTip} />
+                  <View style={styles.needleBase} />
+                </View>
+                <View style={styles.compassCenter} />
+                <Text style={{ position: 'absolute', top: 4, fontSize: 18 }}>🕋</Text>
               </Animated.View>
-              <View style={styles.compassCenter} />
-            </View>
-          </View>
 
-          {/* Adhan */}
-          <View style={[styles.card, styles.halfCard]}>
-            <View style={styles.iconRing}>
-              <Text style={{ fontSize: 22 }}>🔊</Text>
-            </View>
-            <Text style={styles.cardTitle}>Adhan</Text>
-            <Switch
-              value={adhanEnabled}
-              onValueChange={toggleAdhan}
-              trackColor={{ false: 'rgba(0,0,0,0.1)', true: COLORS.gold + '80' }}
-              thumbColor={adhanEnabled ? COLORS.gold : 'rgba(0,0,0,0.3)'}
-              style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
-            />
-            <View style={styles.adhanStyles}>
-              {ADHAN_STYLES.map((s, i) => (
-                <TouchableOpacity
-                  key={s.label}
-                  style={[styles.adhanChip, adhanStyle === i && styles.adhanChipActive]}
-                  onPress={() => selectAdhan(i)}
-                >
-                  <Text style={[styles.adhanChipText, adhanStyle === i && styles.adhanChipTextActive]}>
-                    {s.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity style={styles.playBtn} onPress={playAdhan}>
-              <Text style={styles.playBtnText}>
-                {playingAdhan ? '⏹ Stop' : '▶️ Preview'}
+              <Text style={[{ fontSize: 13, fontWeight: '700', marginTop: 8, textAlign: 'center' }, { color: facingMakkah ? '#22c55e' : COLORS.gold }]}>
+                {facingMakkah ? '🕋 Facing Makkah!' : '🕋 Heading to Makkah'}
               </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
 
-        {/* Monthly Timetable */}
+              <Text style={{ fontSize: 10, color: '#aaa', marginTop: 4 }}>Tap to expand</Text>
+            </TouchableOpacity>
+
+            <View style={[styles.card, styles.halfCard]}>
+              <View style={styles.iconRing}>
+                <Text style={{ fontSize: 22 }}>🔊</Text>
+              </View>
+              <Text style={styles.cardTitle}>Adhan</Text>
+              <Switch
+                value={adhanEnabled}
+                onValueChange={toggleAdhan}
+                trackColor={{ false: 'rgba(0,0,0,0.1)', true: COLORS.gold + '80' }}
+                thumbColor={adhanEnabled ? COLORS.gold : 'rgba(0,0,0,0.3)'}
+                style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+              />
+              <View style={styles.adhanStyles}>
+                {ADHAN_STYLES.map((s, i) => (
+                  <TouchableOpacity
+                    key={s.label}
+                    style={[styles.adhanChip, adhanStyle === i && styles.adhanChipActive]}
+                    onPress={() => selectAdhan(i)}
+                  >
+                    <Text style={[styles.adhanChipText, adhanStyle === i && styles.adhanChipTextActive]}>
+                      {s.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity style={styles.playBtn} onPress={playAdhan}>
+                <Text style={styles.playBtnText}>
+                  {playingAdhan ? '⏹ Stop' : '▶️ Preview'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <View style={styles.card}>
           <TouchableOpacity
             style={styles.monthlyBtn}
@@ -464,7 +670,6 @@ const styles = StyleSheet.create({
   errorText: { color: '#dc2626', fontSize: 14, textAlign: 'center', paddingHorizontal: 40 },
   retryBtn: { backgroundColor: COLORS.gold, borderRadius: 12, paddingHorizontal: 24, paddingVertical: 10, marginTop: 12 },
   retryText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-
   header: { backgroundColor: '#1a2e44', borderBottomLeftRadius: 24, borderBottomRightRadius: 24, padding: 16, paddingBottom: 16, marginBottom: 12 },
   headerSub: { fontSize: 11, color: 'rgba(255,255,255,0.6)', letterSpacing: 1.5, marginBottom: 4 },
   screenTitle: { fontSize: 24, fontWeight: '700', color: '#ffffff', marginBottom: 12 },
@@ -472,7 +677,6 @@ const styles = StyleSheet.create({
   hijriPill: { backgroundColor: 'rgba(201,168,76,0.25)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
   hijriText: { color: '#f0c96a', fontSize: 11, fontWeight: '700' },
   locationText: { color: 'rgba(255,255,255,0.6)', fontSize: 11 },
-
   heroCard: { backgroundColor: '#1a2e44', borderRadius: 16, padding: 18, marginHorizontal: 12, marginBottom: 10 },
   heroLabel: { color: '#f0c96a', fontSize: 9, letterSpacing: 2, fontWeight: '700', marginBottom: 10 },
   heroRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -481,12 +685,10 @@ const styles = StyleSheet.create({
   countdownBadge: { backgroundColor: 'rgba(201,168,76,0.2)', borderRadius: 14, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(201,168,76,0.4)' },
   countdownLabel: { color: '#f0c96a', fontSize: 10, fontWeight: '700' },
   countdownValue: { color: '#f0c96a', fontSize: 20, fontWeight: '700' },
-
   card: { backgroundColor: '#ffffff', borderRadius: 16, padding: 14, marginHorizontal: 12, marginBottom: 10, borderWidth: 0.5, borderColor: 'rgba(0,0,0,0.08)' },
   twoCol: { flexDirection: 'row', gap: 10, marginHorizontal: 12, marginBottom: 10 },
   halfCard: { flex: 1, marginHorizontal: 0, alignItems: 'center' },
   sectionTitle: { fontSize: 11, fontWeight: '700', color: '#888', letterSpacing: 0.8, marginBottom: 10 },
-
   prayerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10, marginBottom: 2 },
   prayerRowActive: { backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.25)' },
   prayerRowPast: { opacity: 0.45 },
@@ -495,19 +697,16 @@ const styles = StyleSheet.create({
   prayerNameActive: { color: '#b8860b' },
   prayerTime: { color: '#555', fontSize: 14, fontWeight: '500', marginRight: 8 },
   prayerTimeActive: { color: '#b8860b', fontWeight: '700' },
-
   iconRing: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: 'rgba(201,168,76,0.4)', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   cardTitle: { fontSize: 14, fontWeight: '700', color: '#1a2e44', marginBottom: 4 },
   cardValue: { fontSize: 22, fontWeight: '700', color: '#b8860b' },
   cardSub: { fontSize: 11, color: '#666', textAlign: 'center', marginBottom: 8 },
-
   compassRing: { width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: 'rgba(201,168,76,0.3)', backgroundColor: '#f8f8f8', alignItems: 'center', justifyContent: 'center', position: 'relative', marginTop: 8 },
   compassDir: { fontSize: 11, fontWeight: '700' },
   needle: { width: 4, height: 90, alignItems: 'center', position: 'absolute' },
   needleTip: { width: 4, height: 45, backgroundColor: COLORS.gold, borderRadius: 2 },
   needleBase: { width: 4, height: 45, backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 2 },
   compassCenter: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.gold, position: 'absolute' },
-
   adhanStyles: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'center', marginVertical: 8 },
   adhanChip: { borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
   adhanChipActive: { backgroundColor: 'rgba(201,168,76,0.15)', borderColor: COLORS.gold },
@@ -515,13 +714,11 @@ const styles = StyleSheet.create({
   adhanChipTextActive: { color: '#b8860b', fontWeight: '700' },
   playBtn: { backgroundColor: 'rgba(201,168,76,0.1)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 16, marginTop: 4 },
   playBtnText: { color: '#b8860b', fontSize: 13, fontWeight: '700' },
-
   monthlyBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   monthlyTitle: { fontSize: 15, fontWeight: '700', color: '#1a2e44' },
   monthlySub: { fontSize: 12, color: '#666', fontWeight: '500', marginTop: 2 },
   viewBadge: { backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 6 },
   viewBadgeText: { color: '#b8860b', fontSize: 12, fontWeight: '700' },
-
   timetable: { marginTop: 14 },
   timetableHeader: { flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.08)' },
   timetableRow: { flexDirection: 'row', paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.04)' },

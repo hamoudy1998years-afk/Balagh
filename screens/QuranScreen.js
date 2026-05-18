@@ -16,6 +16,7 @@ import {
   AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { fetchSurahs, fetchVerses, fetchVerseAudioUrl } from '../services/quranApi';
@@ -44,10 +45,14 @@ export default function QuranScreen({ navigation }) {
   const soundRef = useRef(null);
   const surahsRef = useRef([]);
 
-  React.useEffect(() => {
-    const entry = SystemBars.pushStackEntry({ style: 'dark' });
-    return () => SystemBars.popStackEntry(entry);
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      const { DeviceEventEmitter } = require('react-native');
+      DeviceEventEmitter.emit('pauseAllVideos');
+      return () => SystemBars.popStackEntry(entry);
+    }, [])
+  );
 
   useEffect(() => {
     async function loadResumePosition() {
