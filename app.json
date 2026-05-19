@@ -22,7 +22,8 @@
         "NSPhotoLibraryAddUsageDescription": "Allow Bushrann to save videos to your photo library.",
         "NSCameraUsageDescription": "Allow Bushrann to access your camera to take a profile photo and record videos.",
         "NSMicrophoneUsageDescription": "Allow Bushrann to access your microphone for live streaming and video recording.",
-        "NSFaceIDUsageDescription": "Allow Bushrann to use Face ID for secure and quick sign in."
+        "NSFaceIDUsageDescription": "Allow Bushrann to use Face ID for secure and quick sign in.",
+        "NSLocationWhenInUseUsageDescription": "Bushrann uses your precise location to calculate accurate prayer times, Qibla direction, and Adhan notifications."
       }
     },
     "android": {
@@ -49,7 +50,9 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.VIBRATE",
-        "android.permission.ACCESS_NETWORK_STATE"
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -108,6 +111,12 @@
         }
       ],
       "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Bushrann uses your precise location to calculate accurate prayer times, Qibla direction, and Adhan notifications."
+        }
+      ],
       "react-native-video",
       "expo-asset"
     ],

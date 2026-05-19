@@ -11,8 +11,7 @@ export async function getCoordinates() {
   if (!enabled) throw new Error('Please enable location services');
 
   const location = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.BestForNavigation,
-    mayShowUserSettingsDialog: true,
+    accuracy: Location.Accuracy.High,
   });
 
   const { latitude, longitude } = location.coords;
@@ -36,7 +35,7 @@ export async function getPrayerTimes(latitude, longitude) {
     longitude: longitude.toString(),
     method: '3',
     school: '0',
-    timezonestring: 'Asia/Manila',
+    timezonestring: Intl.DateTimeFormat().resolvedOptions().timeZone,
     tune: '0,0,0,0,-1,0,0,0,0',  // -1 min Asr (format: Imsak,Fajr,Sunrise,Dhuhr,Asr,Maghrib,Sunset,Isha,Midnight)
   });
   
@@ -61,7 +60,7 @@ export async function getMonthlyTimetable(latitude, longitude) {
     longitude: longitude.toString(),
     method: '3',
     school: '0',
-    timezonestring: 'Asia/Manila',
+    timezonestring: Intl.DateTimeFormat().resolvedOptions().timeZone,
     tune: '0,0,0,0,-1,0,0,0,0',  // ← ADD THIS
   });
   
