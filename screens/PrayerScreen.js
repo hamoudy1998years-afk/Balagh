@@ -320,11 +320,6 @@ export default function PrayerScreen() {
       let rawAngle = (Math.atan2(filteredY, filteredX) * (180 / Math.PI) - 90 + 360) % 360;
       setCompassHeading(rawAngle);
 
-      const now = Date.now();
-      let jitter = Math.abs(rawAngle - lastRawAngle);
-      if (jitter > 180) jitter = 360 - jitter;
-      let lag = Math.abs(rawAngle - (-rotation.value));
-      if (lag > 180) lag = 360 - lag;
       lastRawAngle = rawAngle;
 
       if (lastTarget === -1) { lastTarget = rawAngle; targetAngle = rawAngle; initialized = true; return; }
@@ -439,50 +434,16 @@ export default function PrayerScreen() {
   const hijriDate     = prayerData?.date?.hijri;
   const gregorianDate = prayerData?.date?.readable;
 
-  const DebugOverlay = () => (
-    <TouchableOpacity
-      onPress={(e) => { e.stopPropagation(); setDebugVisible(v => !v); }}
-      style={{
-        position: 'absolute', top: 8, right: 8, zIndex: 999,
-        backgroundColor: debugVisible ? 'rgba(0,0,0,0.88)' : 'rgba(0,0,0,0.45)',
-        borderRadius: 8, padding: debugVisible ? 10 : 6,
-        borderWidth: 1,
-        borderColor: debugVisible ? '#00e5ff' : 'rgba(255,255,255,0.2)',
-      }}
-    >
-      {debugVisible ? (
-        <View style={{ gap: 4 }}>
-          {[
-            { label: 'HZ',     value: debugStats.hz,     unit: '',   good: (v) => v >= 25 },
-            { label: 'JITTER', value: debugStats.jitter,  unit: '°', good: (v) => parseFloat(v) <= 5  },
-            { label: 'DELTA',  value: debugStats.delta,   unit: '°', good: (v) => parseFloat(v) <= 10 },
-            { label: 'LAG',    value: debugStats.lag,     unit: '°', good: (v) => parseFloat(v) <= 15 },
-          ].map(({ label, value, unit, good }) => (
-            <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 14 }}>
-              <Text style={{ color: '#888', fontSize: 10, fontWeight: '700' }}>{label}</Text>
-              <Text style={{ color: good(value) ? '#22c55e' : '#ff6b6b', fontSize: 10, fontWeight: '700' }}>
-                {value}{unit}
-              </Text>
-            </View>
-          ))}
-          <Text style={{ color: '#444', fontSize: 8, marginTop: 2, textAlign: 'center' }}>tap to hide</Text>
-        </View>
-      ) : (
-        <Text style={{ color: '#00e5ff', fontSize: 9, fontWeight: '700' }}>DEBUG</Text>
-      )}
-    </TouchableOpacity>
-  );
-
   const CompactCompass = () => (
-    <View style={{ alignItems: 'center', marginTop: 6 }}>
+    <View pointerEvents="none" style={{ alignItems: 'center', marginTop: 6 }}>
       <View style={styles.triangleSmall} />
-      <View style={[
+      <View pointerEvents="none" style={[
         styles.compassOuter,
         { width: 120, height: 120, borderRadius: 60 },
         facingMakkah && styles.compassOuterAligned,
       ]}>
-        <Animated.View style={[styles.compassGlow, pulseRingStyle, { borderRadius: 60 }]} />
-        <Animated.View style={[
+        <Animated.View pointerEvents="none" style={[styles.compassGlow, pulseRingStyle, { borderRadius: 60 }]} />
+        <Animated.View pointerEvents="none" style={[
           styles.compassDisc,
           { width: 118, height: 118, borderRadius: 59, top: '50%', left: '50%', marginTop: -59, marginLeft: -59 },
           animatedCompassStyle,
@@ -529,21 +490,21 @@ export default function PrayerScreen() {
           })()}
         </Animated.View>
         <NeedleSmall />
-        <View style={styles.compassCenterDot} />
+        <View pointerEvents="none" style={styles.compassCenterDot} />
       </View>
     </View>
   );
 
   const FullCompass = () => (
-    <View style={{ alignItems: 'center', marginTop: 10 }}>
+    <View pointerEvents="none" style={{ alignItems: 'center', marginTop: 10 }}>
       <View style={styles.triangleLarge} />
-      <View style={[
+      <View pointerEvents="none" style={[
         styles.compassOuter,
         { width: 280, height: 280, borderRadius: 140 },
         facingMakkah && styles.compassOuterAligned,
       ]}>
-        <Animated.View style={[styles.compassGlow, pulseRingStyle, { borderRadius: 140 }]} />
-        <Animated.View style={[
+        <Animated.View pointerEvents="none" style={[styles.compassGlow, pulseRingStyle, { borderRadius: 140 }]} />
+        <Animated.View pointerEvents="none" style={[
           styles.compassDisc,
           { width: 234, height: 234, borderRadius: 117, top: '50%', left: '50%', marginTop: -117, marginLeft: -117 },
           animatedCompassStyle,
@@ -600,7 +561,7 @@ export default function PrayerScreen() {
           })()}
         </Animated.View>
         <NeedleLarge />
-        <View style={styles.compassCenterDotLarge} />
+        <View pointerEvents="none" style={styles.compassCenterDotLarge} />
       </View>
       <View style={styles.headingBadge}>
         <Text style={styles.headingDeg}>{Math.round(compassHeading)}°</Text>
@@ -641,7 +602,7 @@ export default function PrayerScreen() {
         </View>
       )}
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 80 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 80 }} showsVerticalScrollIndicator={false} delayPressIn={0} directionalLockEnabled={true}>
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <Text style={styles.headerSub}>BISMILLAH</Text>
           <Text style={styles.screenTitle}>Prayer Times</Text>
@@ -721,7 +682,7 @@ export default function PrayerScreen() {
         </View>
 
         {compassExpanded && (
-          <TouchableOpacity activeOpacity={0.95} onPress={() => setCompassExpanded(false)} style={styles.compassExpandedCard}>
+          <TouchableOpacity activeOpacity={0.95} onPress={() => setCompassExpanded(false)} style={styles.compassExpandedCard} delayPressIn={0} pressRetentionOffset={{top: 10, left: 10, right: 10, bottom: 10}}>
             <View style={styles.compassExpandedHeader}>
               <View>
                 <Text style={styles.compassExpandedTitle}>🧭 Qibla Compass</Text>
@@ -747,7 +708,7 @@ export default function PrayerScreen() {
 
         {!compassExpanded && (
           <View style={styles.twoCol}>
-            <TouchableOpacity activeOpacity={0.9} onPress={() => setCompassExpanded(true)} style={[styles.card, styles.halfCard]}>
+            <TouchableOpacity activeOpacity={0.9} onPress={() => setCompassExpanded(true)} style={[styles.card, styles.halfCard]} delayPressIn={0} pressRetentionOffset={{top: 10, left: 10, right: 10, bottom: 10}}>
               <View style={{ position: 'relative', width: '100%', alignItems: 'center' }}>
                 <View style={styles.iconRing}><Text style={{ fontSize: 22 }}>🧭</Text></View>
                 <Text style={styles.cardTitle}>Qibla</Text>
