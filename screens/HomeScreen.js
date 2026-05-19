@@ -795,8 +795,14 @@ export default function HomeScreen({ navigation }) {
 
   useFocusEffect(
     useCallback(() => {
+      followingRef.current?.setActive(index === 0);
+      foryouRef.current?.setActive(index === 1);
       const entry = SystemBars.pushStackEntry({ style: index === 2 ? 'dark' : 'light' });
-      return () => SystemBars.popStackEntry(entry);
+      return () => {
+        followingRef.current?.setActive(false);
+        foryouRef.current?.setActive(false);
+        SystemBars.popStackEntry(entry);
+      };
     }, [index])
   );
 

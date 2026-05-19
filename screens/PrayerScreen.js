@@ -296,17 +296,37 @@ export default function PrayerScreen() {
 
   function startMagnetometer() {
     Magnetometer.setUpdateInterval(16);
-    let targetAngle   = 0;
-    let visualAngle   = rotation.value;
+
+    let targetAngle    = 0;
+    let visualAngle    = rotation.value;
     let visualVelocity = 0;
-    let initialized   = false;
-    let lastTarget    = -1;
-    let rejectCount   = 0;
+    let initialized    = false;
+    let lastTarget     = -1;
+    let rejectCount    = 0;
+
+    let filteredX    = 0;
+    let filteredY    = 0;
+    let lastRawAngle = 0;
 
     magnetometerSub.current = Magnetometer.addListener(({ x, y }) => {
-      let rawAngle = Math.atan2(y, x) * (180 / Math.PI) - 90;
-      rawAngle = (rawAngle + 360) % 360;
+      const instantAngle = (Math.atan2(y, x) * (180 / Math.PI) - 90 + 360) % 360;
+      let moveDelta = Math.abs(instantAngle - lastRawAngle);
+      if (moveDelta > 180) moveDelta = 360 - moveDelta;
+
+      const ALPHA = Math.min(0.1 + moveDelta * 0.018, 0.45);
+      filteredX = filteredX + ALPHA * (x - filteredX);
+      filteredY = filteredY + ALPHA * (y - filteredY);
+
+      let rawAngle = (Math.atan2(filteredY, filteredX) * (180 / Math.PI) - 90 + 360) % 360;
       setCompassHeading(rawAngle);
+
+      const now = Date.now();
+      let jitter = Math.abs(rawAngle - lastRawAngle);
+      if (jitter > 180) jitter = 360 - jitter;
+      let lag = Math.abs(rawAngle - (-rotation.value));
+      if (lag > 180) lag = 360 - lag;
+      lastRawAngle = rawAngle;
+
       if (lastTarget === -1) { lastTarget = rawAngle; targetAngle = rawAngle; initialized = true; return; }
       const sensorDelta    = rawAngle - lastTarget;
       const sensorShortest = sensorDelta > 180 ? sensorDelta - 360 : sensorDelta < -180 ? sensorDelta + 360 : sensorDelta;
@@ -323,11 +343,17 @@ export default function PrayerScreen() {
       let delta = targetAngle - visualAngle;
       if (delta > 180)  delta -= 360;
       if (delta < -180) delta += 360;
-      const force = delta * 0.04;
+      const absDelta = Math.abs(delta);
+      const predictedVelocity = visualVelocity;
+      const prediction = predictedVelocity * 1.5;
+      const predictedDelta = delta + prediction;
+      const force = predictedDelta * (absDelta > 40 ? 0.14 : absDelta > 15 ? 0.08 : 0.04);
+      const damping = absDelta > 40 ? 0.80 : absDelta > 15 ? 0.86 : 0.92;
+      const maxSpeed = absDelta > 40 ? 18 : absDelta > 15 ? 12 : 6;
       visualVelocity += force;
-      visualVelocity *= 0.92;
-      if (visualVelocity >  6) visualVelocity =  6;
-      if (visualVelocity < -6) visualVelocity = -6;
+      visualVelocity *= damping;
+      if (visualVelocity >  maxSpeed) visualVelocity =  maxSpeed;
+      if (visualVelocity < -maxSpeed) visualVelocity = -maxSpeed;
       visualAngle    += visualVelocity;
       rotation.value  = -visualAngle;
       rafRef.current  = requestAnimationFrame(physicsLoop);
@@ -413,40 +439,60 @@ export default function PrayerScreen() {
   const hijriDate     = prayerData?.date?.hijri;
   const gregorianDate = prayerData?.date?.readable;
 
-  // ── COMPACT COMPASS — same logic as FullCompass ───────────────────────────
-  // Cardinals + 🕋 live INSIDE the rotating compassDisc, same as FullCompass.
+  const DebugOverlay = () => (
+    <TouchableOpacity
+      onPress={(e) => { e.stopPropagation(); setDebugVisible(v => !v); }}
+      style={{
+        position: 'absolute', top: 8, right: 8, zIndex: 999,
+        backgroundColor: debugVisible ? 'rgba(0,0,0,0.88)' : 'rgba(0,0,0,0.45)',
+        borderRadius: 8, padding: debugVisible ? 10 : 6,
+        borderWidth: 1,
+        borderColor: debugVisible ? '#00e5ff' : 'rgba(255,255,255,0.2)',
+      }}
+    >
+      {debugVisible ? (
+        <View style={{ gap: 4 }}>
+          {[
+            { label: 'HZ',     value: debugStats.hz,     unit: '',   good: (v) => v >= 25 },
+            { label: 'JITTER', value: debugStats.jitter,  unit: '°', good: (v) => parseFloat(v) <= 5  },
+            { label: 'DELTA',  value: debugStats.delta,   unit: '°', good: (v) => parseFloat(v) <= 10 },
+            { label: 'LAG',    value: debugStats.lag,     unit: '°', good: (v) => parseFloat(v) <= 15 },
+          ].map(({ label, value, unit, good }) => (
+            <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 14 }}>
+              <Text style={{ color: '#888', fontSize: 10, fontWeight: '700' }}>{label}</Text>
+              <Text style={{ color: good(value) ? '#22c55e' : '#ff6b6b', fontSize: 10, fontWeight: '700' }}>
+                {value}{unit}
+              </Text>
+            </View>
+          ))}
+          <Text style={{ color: '#444', fontSize: 8, marginTop: 2, textAlign: 'center' }}>tap to hide</Text>
+        </View>
+      ) : (
+        <Text style={{ color: '#00e5ff', fontSize: 9, fontWeight: '700' }}>DEBUG</Text>
+      )}
+    </TouchableOpacity>
+  );
+
   const CompactCompass = () => (
     <View style={{ alignItems: 'center', marginTop: 6 }}>
-
-      {/* ▼ Fixed green triangle */}
       <View style={styles.triangleSmall} />
-
-      {/* Compass bezel */}
       <View style={[
         styles.compassOuter,
         { width: 120, height: 120, borderRadius: 60 },
         facingMakkah && styles.compassOuterAligned,
       ]}>
-        <Animated.View style={[
-          styles.compassGlow,
-          pulseRingStyle,
-          { borderRadius: 60 },
-        ]} />
-
-        {/* Rotating disc — ticks + cardinals + Kaaba all inside, same as FullCompass */}
+        <Animated.View style={[styles.compassGlow, pulseRingStyle, { borderRadius: 60 }]} />
         <Animated.View style={[
           styles.compassDisc,
           { width: 118, height: 118, borderRadius: 59, top: '50%', left: '50%', marginTop: -59, marginLeft: -59 },
           animatedCompassStyle,
         ]}>
           {renderCompassTicks(118)}
-
-          {/* Cardinals */}
           {[
-            { label: 'N', deg: 0,   color: '#ff6b6b', topOff: -14, leftOff: -7 },
-            { label: 'E', deg: 90,  color: '#ffffff', topOff: -7,  leftOff:  2 },
-            { label: 'S', deg: 180, color: '#ffffff', topOff:  3,  leftOff: -7 },
-            { label: 'W', deg: 270, color: '#f8f8f8', topOff: -7,  leftOff: -16 },
+            { label: 'N', deg: 0,   color: '#ff6b6b', topOff: -14, leftOff: -7  },
+            { label: 'E', deg: 90,  color: '#ffffff',  topOff: -7,  leftOff:  2  },
+            { label: 'S', deg: 180, color: '#ffffff',  topOff:  3,  leftOff: -7  },
+            { label: 'W', deg: 270, color: '#f8f8f8',  topOff: -7,  leftOff: -16 },
           ].map(({ label, deg, color, topOff, leftOff }) => {
             const rad    = (deg * Math.PI) / 180;
             const outerR = 118 / 2 - 7;
@@ -456,23 +502,15 @@ export default function PrayerScreen() {
             return (
               <Text key={label} style={{
                 position: 'absolute',
-                left: cx + leftOff,
-                top: cy + topOff,
-                fontSize: 11,
-                fontWeight: '900',
-                letterSpacing: 0.5,
-                color,
-                width: 14,
-                textAlign: 'center',
-                lineHeight: 14,
+                left: cx + leftOff, top: cy + topOff,
+                fontSize: 11, fontWeight: '900', letterSpacing: 0.5,
+                color, width: 14, textAlign: 'center', lineHeight: 14,
                 textShadowColor: '#000000',
                 textShadowOffset: { width: 0, height: 0 },
                 textShadowRadius: 8,
               }}>{label}</Text>
             );
           })}
-
-          {/* 🕋 at Qibla bearing */}
           {(() => {
             const rad = ((qiblaAngle ?? 0) * Math.PI) / 180;
             const r   = 118 / 2 - 8;
@@ -480,64 +518,37 @@ export default function PrayerScreen() {
             const cy  = 59 - r * Math.cos(rad);
             return (
               <View style={{
-                position: 'absolute',
-                left: cx - 13,
-                top: cy - 11,
-                width: 26,
-                height: 26,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(240,201,106,0.25)',
-                borderRadius: 13,
-                borderWidth: 1.5,
-                borderColor: 'rgba(240,201,106,0.6)',
+                position: 'absolute', left: cx - 13, top: cy - 11,
+                width: 26, height: 26, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: 'rgba(240,201,106,0.25)', borderRadius: 13,
+                borderWidth: 1.5, borderColor: 'rgba(240,201,106,0.6)',
               }}>
-                <Text style={{
-                  fontSize: 14,
-                  textShadowColor: 'rgba(240,201,106,0.9)',
-                  textShadowOffset: { width: 0, height: 0 },
-                  textShadowRadius: 8,
-                }}>🕋</Text>
+                <Text style={{ fontSize: 14, textShadowColor: 'rgba(240,201,106,0.9)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8 }}>🕋</Text>
               </View>
             );
           })()}
         </Animated.View>
-
-        {/* Fixed needle — does NOT rotate */}
         <NeedleSmall />
         <View style={styles.compassCenterDot} />
       </View>
     </View>
   );
 
-  // ── FULL / EXPANDED COMPASS ───────────────────────────────────────────────
   const FullCompass = () => (
     <View style={{ alignItems: 'center', marginTop: 10 }}>
-
-      {/* ▼ Fixed green triangle */}
       <View style={styles.triangleLarge} />
-
-      {/* Compass bezel */}
       <View style={[
         styles.compassOuter,
         { width: 280, height: 280, borderRadius: 140 },
         facingMakkah && styles.compassOuterAligned,
       ]}>
-        <Animated.View style={[
-          styles.compassGlow,
-          pulseRingStyle,
-          { borderRadius: 140 },
-        ]} />
-
-        {/* Rotating dial */}
+        <Animated.View style={[styles.compassGlow, pulseRingStyle, { borderRadius: 140 }]} />
         <Animated.View style={[
           styles.compassDisc,
           { width: 234, height: 234, borderRadius: 117, top: '50%', left: '50%', marginTop: -117, marginLeft: -117 },
           animatedCompassStyle,
         ]}>
           {renderCompassTicks(234)}
-
-          {/* Degree numbers every 30° */}
           {[30, 60, 120, 150, 210, 240, 300, 330].map((deg) => {
             const rad = (deg * Math.PI) / 180;
             const r   = 234 / 2 - 28;
@@ -551,36 +562,26 @@ export default function PrayerScreen() {
               }}>{deg}°</Text>
             );
           })}
-
-          {/* Cardinals */}
           {[
-            { label: 'N', deg: 0,   color: '#ff6b6b',    topOff: -21, leftOff: -9 },
-            { label: 'E', deg: 90,  color: 'rgba(255,255,255,0.85)', topOff: -7.5, leftOff:  2 },
-            { label: 'S', deg: 180, color: 'rgba(255,255,255,0.85)', topOff:  5,   leftOff: -9 },
+            { label: 'N', deg: 0,   color: '#ff6b6b',               topOff: -21,  leftOff: -9  },
+            { label: 'E', deg: 90,  color: 'rgba(255,255,255,0.85)', topOff: -7.5, leftOff:  2  },
+            { label: 'S', deg: 180, color: 'rgba(255,255,255,0.85)', topOff:  5,   leftOff: -9  },
             { label: 'W', deg: 270, color: 'rgba(255,255,255,0.85)', topOff: -7.5, leftOff: -20 },
           ].map(({ label, deg, color, topOff, leftOff }) => {
-            const rad = (deg * Math.PI) / 180;
+            const rad    = (deg * Math.PI) / 180;
             const outerR = 234 / 2 - 7;
-            const r = outerR - 2;
-            const cx = 117 + r * Math.sin(rad);
-            const cy = 117 - r * Math.cos(rad);
+            const r      = outerR - 2;
+            const cx     = 117 + r * Math.sin(rad);
+            const cy     = 117 - r * Math.cos(rad);
             return (
               <Text key={label} style={{
                 position: 'absolute',
-                left: cx + leftOff,
-                top: cy + topOff,
-                fontSize: 16,
-                fontWeight: '800',
-                letterSpacing: 0.5,
-                color,
-                width: 18,
-                textAlign: 'center',
-                lineHeight: 16,
+                left: cx + leftOff, top: cy + topOff,
+                fontSize: 16, fontWeight: '800', letterSpacing: 0.5,
+                color, width: 18, textAlign: 'center', lineHeight: 16,
               }}>{label}</Text>
             );
           })}
-
-          {/* 🕋 at Qibla bearing */}
           {(() => {
             const rad = ((qiblaAngle ?? 0) * Math.PI) / 180;
             const r   = 234 / 2 - 8;
@@ -588,34 +589,19 @@ export default function PrayerScreen() {
             const cy  = 117 - r * Math.cos(rad);
             return (
               <View style={{
-                position: 'absolute',
-                left: cx - 18,
-                top: cy - 13,
-                width: 36,
-                height: 36,
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'rgba(240,201,106,0.15)',
-                borderRadius: 18,
-                borderWidth: 1,
-                borderColor: 'rgba(240,201,106,0.4)',
+                position: 'absolute', left: cx - 18, top: cy - 13,
+                width: 36, height: 36, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: 'rgba(240,201,106,0.15)', borderRadius: 18,
+                borderWidth: 1, borderColor: 'rgba(240,201,106,0.4)',
               }}>
-                <Text style={{
-                  fontSize: 24,
-                  textShadowColor: 'rgba(240,201,106,0.8)',
-                  textShadowOffset: { width: 0, height: 0 },
-                  textShadowRadius: 8,
-                }}>🕋</Text>
+                <Text style={{ fontSize: 24, textShadowColor: 'rgba(240,201,106,0.8)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 8 }}>🕋</Text>
               </View>
             );
           })()}
         </Animated.View>
-
-        {/* Fixed needle — does NOT rotate */}
         <NeedleLarge />
         <View style={styles.compassCenterDotLarge} />
       </View>
-
       <View style={styles.headingBadge}>
         <Text style={styles.headingDeg}>{Math.round(compassHeading)}°</Text>
         <Text style={styles.headingLabel}>{getCardinalDirection(compassHeading)}</Text>
@@ -762,15 +748,17 @@ export default function PrayerScreen() {
         {!compassExpanded && (
           <View style={styles.twoCol}>
             <TouchableOpacity activeOpacity={0.9} onPress={() => setCompassExpanded(true)} style={[styles.card, styles.halfCard]}>
-              <View style={styles.iconRing}><Text style={{ fontSize: 22 }}>🧭</Text></View>
-              <Text style={styles.cardTitle}>Qibla</Text>
-              <Text style={styles.cardValue}>{qiblaAngle !== null ? `${Math.round(qiblaAngle)}°` : '--'}</Text>
-              <Text style={styles.cardSub}>{qiblaAngle !== null ? `${getCardinalDirection(qiblaAngle)} toward Mecca` : ''}</Text>
-              <CompactCompass />
-              <Text style={[styles.facingLabel, { color: facingMakkah ? '#22c55e' : COLORS.gold }]}>
-                {facingMakkah ? '✓ Facing Makkah!' : '🕋 Find Makkah'}
-              </Text>
-              <Text style={styles.tapHint}>Tap to expand</Text>
+              <View style={{ position: 'relative', width: '100%', alignItems: 'center' }}>
+                <View style={styles.iconRing}><Text style={{ fontSize: 22 }}>🧭</Text></View>
+                <Text style={styles.cardTitle}>Qibla</Text>
+                <Text style={styles.cardValue}>{qiblaAngle !== null ? `${Math.round(qiblaAngle)}°` : '--'}</Text>
+                <Text style={styles.cardSub}>{qiblaAngle !== null ? `${getCardinalDirection(qiblaAngle)} toward Mecca` : ''}</Text>
+                <CompactCompass />
+                <Text style={[styles.facingLabel, { color: facingMakkah ? '#22c55e' : COLORS.gold }]}>
+                  {facingMakkah ? '✓ Facing Makkah!' : '🕋 Find Makkah'}
+                </Text>
+                <Text style={styles.tapHint}>Tap to expand</Text>
+              </View>
             </TouchableOpacity>
 
             <View style={[styles.card, styles.halfCard]}>
@@ -879,20 +867,16 @@ const styles = StyleSheet.create({
   cardSub: { fontSize: 11, color: '#666', textAlign: 'center', marginBottom: 4 },
 
   triangleSmall: {
-    width: 0, height: 0,
-    backgroundColor: 'transparent',
+    width: 0, height: 0, backgroundColor: 'transparent',
     borderLeftWidth: 10, borderRightWidth: 10, borderBottomWidth: 18,
     borderLeftColor: 'transparent', borderRightColor: 'transparent',
-    borderBottomColor: '#1db954',
-    zIndex: 20, marginBottom: 4,
+    borderBottomColor: '#1db954', zIndex: 20, marginBottom: 4,
   },
   triangleLarge: {
-    width: 0, height: 0,
-    backgroundColor: 'transparent',
+    width: 0, height: 0, backgroundColor: 'transparent',
     borderLeftWidth: 16, borderRightWidth: 16, borderBottomWidth: 28,
     borderLeftColor: 'transparent', borderRightColor: 'transparent',
-    borderBottomColor: '#1db954',
-    zIndex: 20, marginBottom: 6,
+    borderBottomColor: '#1db954', zIndex: 20, marginBottom: 6,
   },
 
   compassGlow: {
@@ -914,17 +898,12 @@ const styles = StyleSheet.create({
     shadowColor: '#22c55e', shadowOpacity: 0.6, shadowRadius: 18,
   },
   compassDisc: {
-    position: 'absolute',
-    backgroundColor: 'transparent',
+    position: 'absolute', backgroundColor: 'transparent',
     alignItems: 'center', justifyContent: 'center',
   },
 
-  needleFixedSmall: {
-    position: 'absolute', alignItems: 'center', justifyContent: 'center', zIndex: 10,
-  },
-  needleFixedLarge: {
-    position: 'absolute', alignItems: 'center', justifyContent: 'center', zIndex: 10,
-  },
+  needleFixedSmall: { position: 'absolute', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
+  needleFixedLarge: { position: 'absolute', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
 
   compassCenterDot: {
     width: 10, height: 10, borderRadius: 5,
