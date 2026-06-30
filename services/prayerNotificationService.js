@@ -43,11 +43,13 @@ const PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const DISPLAY_PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
 // ── Setup notification channel (Android) ──────────────────────────────────────
+const ADHAN_ALERT_SOUND = 'adhan_alert.wav';
+
 export async function setupNotificationChannel(withSound = true) {
   await Notifications.setNotificationChannelAsync(PRAYER_CHANNEL, {
     name: 'Prayer Times',
     importance: Notifications.AndroidImportance.MAX,
-    sound: withSound,
+    sound: withSound ? ADHAN_ALERT_SOUND : null,
     vibrationPattern: withSound ? [0, 250, 250, 250] : null,
     enableVibrate: withSound,
     bypassDnd: true,
@@ -68,7 +70,7 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
       content: {
         title: `🕌 ${getPrayerEmoji(prayer)} ${prayer} Prayer Time`,
         body: `It's time for ${prayer} prayer. Allahu Akbar!`,
-        sound: withSound,
+        sound: withSound ? ADHAN_ALERT_SOUND : false,
         channelId: PRAYER_CHANNEL,
         data: { type: 'prayer', prayer },
       },
@@ -196,6 +198,8 @@ export async function initPrayerNotifications(withSound = true) {
       return;
     }
 
+    await setupNotificationChannel(withSound);
+
     // Load cached prayer data
     const cached = await loadPrayerCache();
     if (cached?.data?.timings) {
@@ -228,4 +232,20 @@ export async function getPrayerNotifChoice() {
 
 export async function setPrayerNotifChoice(choice) {
   await AsyncStorage.setItem('prayerNotifChoice', choice);
+}
+
+// TEMPORARY — for testing the adhan sound only. Remove once confirmed working.
+export async function scheduleTestNotification() {
+  await setupNotificationChannel(true);
+  await Notifications.scheduleNotificationAsync({
+    identifier: 'prayer-test',
+    content: {
+      title: '🕌 Test Adhan Notification',
+      body: 'If you hear the short Adhan clip, it worked!',
+      sound: ADHAN_ALERT_SOUND,
+      channelId: PRAYER_CHANNEL,
+      data: { type: 'test' },
+    },
+    trigger: { type: 'timeInterval', seconds: 10, repeats: false },
+  });
 }

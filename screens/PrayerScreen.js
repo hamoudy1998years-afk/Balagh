@@ -1,9 +1,9 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, ActivityIndicator, Vibration
+  Switch, ActivityIndicator, Vibration, TextInput, Linking
 } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import Animated, { 
-  useSharedValue, 
+import Animated, {
+  useSharedValue,
   useAnimatedStyle,
   withRepeat,
   withSequence,
@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { Magnetometer } from 'expo-sensors';
+import * as Location from 'expo-location';
 import { Audio } from 'expo-av';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,9 +21,10 @@ import { COLORS } from '../constants/theme';
 import {
   getCoordinates, getPrayerTimes, getMonthlyTimetable,
   getNextPrayer, formatTime, getPrayerEmoji,
-  savePrayerCache, loadPrayerCache,
+  savePrayerCache, loadPrayerCache, searchCity, reverseGeocode,
+  saveCoordinatesPermanently, loadSavedCoordinates,
 } from '../services/prayerApi';
-import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications } from '../services/prayerNotificationService';
+import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, scheduleTestNotification } from '../services/prayerNotificationService';
 
 const PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const MECCA = { lat: 21.4225, lng: 39.8262 };
@@ -76,6 +78,10 @@ function renderCompassTicks(size) {
   }
   return ticks;
 }
+
+// Pre-computed once at module load — avoids regenerating 72 Views on every re-render
+const COMPASS_TICKS_118 = renderCompassTicks(118);
+const COMPASS_TICKS_234 = renderCompassTicks(234);
 
 function NeedleSmall() {
   return (
@@ -137,23 +143,36 @@ function NeedleLarge() {
 
 export default function PrayerScreen() {
   const insets = useSafeAreaInsets();
-  const [loading, setLoading]               = useState(true);
-  const [error, setError]                   = useState(null);
-  const [coords, setCoords]                 = useState(null);
-  const [prayerData, setPrayerData]         = useState(null);
-  const [nextPrayer, setNextPrayer]         = useState(null);
-  const [monthlyData, setMonthlyData]       = useState(null);
-  const [showMonthly, setShowMonthly]       = useState(false);
-  const [notifications, setNotifications]   = useState({});
-  const [adhanStyle, setAdhanStyle]         = useState(0);
-  const [adhanEnabled, setAdhanEnabled]     = useState(true);
-  const [qiblaAngle, setQiblaAngle]         = useState(null);
-  const [compassHeading, setCompassHeading] = useState(0);
-  const [sound, setSound]                   = useState(null);
-  const [playingAdhan, setPlayingAdhan]     = useState(false);
-  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
-  const [notifsEnabled, setNotifsEnabled]   = useState(true);
-  const [compassExpanded, setCompassExpanded] = useState(false);
+  const [loading, setLoading]                   = useState(true);
+  const [error, setError]                       = useState(null);
+  const [coords, setCoords]                     = useState(null);
+  const [prayerData, setPrayerData]             = useState(null);
+  const [nextPrayer, setNextPrayer]             = useState(null);
+  const [monthlyData, setMonthlyData]           = useState(null);
+  const [showMonthly, setShowMonthly]           = useState(false);
+  const [notifications, setNotifications]       = useState({});
+  const [adhanStyle, setAdhanStyle]             = useState(0);
+  const [adhanEnabled, setAdhanEnabled]         = useState(true);
+  const [qiblaAngle, setQiblaAngle]             = useState(null);
+  const [compassHeading, setCompassHeading]     = useState(0);
+  const [sound, setSound]                       = useState(null);
+  const [playingAdhan, setPlayingAdhan]         = useState(false);
+  const [showNotifPrompt, setShowNotifPrompt]   = useState(false);
+  const [notifsEnabled, setNotifsEnabled]       = useState(true);
+  const [compassExpanded, setCompassExpanded]   = useState(false);
+
+  // Location mode
+  const [locationMode, setLocationMode]             = useState(null);
+  const [manualCity, setManualCity]                 = useState(null);
+  const [showLocationChoice, setShowLocationChoice] = useState(false);
+  const [showChangeLocationModal, setShowChangeLocationModal] = useState(false);
+  const [showCitySearch, setShowCitySearch]         = useState(false);
+  const [citySearch, setCitySearch]                 = useState('');
+  const [cityResults, setCityResults]               = useState([]);
+  const [citySearchLoading, setCitySearchLoading]   = useState(false);
+  const [updatingLocation, setUpdatingLocation]     = useState(false);
+  const [locationUpdateMsg, setLocationUpdateMsg]   = useState(null); // { type: 'success'|'error', text }
+  const [gpsCityName, setGpsCityName]               = useState(null);
 
   const countdownRef        = useRef(null);
   const magnetometerSub     = useRef(null);
@@ -200,6 +219,14 @@ export default function PrayerScreen() {
       pulseScale.value  = withTiming(1, { duration: 300 });
     }
   }, [facingMakkah]);
+
+  // Auto-dismiss location update banner after 5 seconds
+  useEffect(() => {
+    if (locationUpdateMsg) {
+      const timer = setTimeout(() => setLocationUpdateMsg(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [locationUpdateMsg]);
 
   useFocusEffect(
     useCallback(() => {
@@ -258,30 +285,195 @@ export default function PrayerScreen() {
     } catch (e) {}
   }
 
+  // ── Core load: Manual city > Saved coordinates (no GPS) > Fresh GPS (first launch only) ──
   async function loadPrayerData() {
     try {
       setError(null);
-      const cached = await loadPrayerCache();
-      if (cached) {
-        setPrayerData(cached.data);
-        setNextPrayer(getNextPrayer(cached.data.timings));
-        setCoords(cached.coords);
-        setQiblaAngle(calculateQibla(cached.coords.latitude, cached.coords.longitude));
-        setLoading(false);
-      } else {
-        setLoading(true);
+      setShowLocationChoice(false);
+
+      const savedMode = await AsyncStorage.getItem('locationMode');
+      const savedCity = await AsyncStorage.getItem('manualCity');
+
+      // 1) Manual city mode — never needs GPS
+      if (savedMode === 'manual' && savedCity) {
+        const city = JSON.parse(savedCity);
+        setManualCity(city);
+        setLocationMode('manual');
+        const cached = await loadPrayerCache();
+        if (cached) {
+          setPrayerData(cached.data);
+          setNextPrayer(getNextPrayer(cached.data.timings));
+          setCoords(cached.coords);
+          setQiblaAngle(calculateQibla(cached.coords.latitude, cached.coords.longitude));
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
+        const data = await getPrayerTimes(city.latitude, city.longitude);
+        setPrayerData(data);
+        setNextPrayer(getNextPrayer(data.timings));
+        setCoords({ latitude: city.latitude, longitude: city.longitude });
+        setQiblaAngle(calculateQibla(city.latitude, city.longitude));
+        await savePrayerCache(data, { latitude: city.latitude, longitude: city.longitude });
+        return;
       }
+
+      // 2) GPS mode, but we already have saved coordinates — no GPS needed
+      const savedCoords = await loadSavedCoordinates();
+      if (savedCoords) {
+        setLocationMode('gps');
+        setCoords(savedCoords);
+        setQiblaAngle(calculateQibla(savedCoords.latitude, savedCoords.longitude));
+        const savedName = await AsyncStorage.getItem('savedLocationName');
+        if (savedName) setGpsCityName(savedName);
+        const cached = await loadPrayerCache();
+        if (cached) {
+          setPrayerData(cached.data);
+          setNextPrayer(getNextPrayer(cached.data.timings));
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
+        const data = await getPrayerTimes(savedCoords.latitude, savedCoords.longitude);
+        setPrayerData(data);
+        setNextPrayer(getNextPrayer(data.timings));
+        await savePrayerCache(data, savedCoords);
+        return;
+      }
+
+      // 3) First launch ever — no saved coords, no manual city. Need GPS once.
+      setLocationMode('gps');
+      setLoading(true);
       const location = await getCoordinates();
+      setCoords(location);
+      setQiblaAngle(calculateQibla(location.latitude, location.longitude));
+      await saveCoordinatesPermanently(location);
+
+      // Run reverse geocoding (display name only) and prayer times fetch in parallel —
+      // prayer times don't need to wait on the city name lookup.
+      const [data] = await Promise.all([
+        getPrayerTimes(location.latitude, location.longitude),
+        reverseGeocode(location.latitude, location.longitude)
+          .then(async (name) => {
+            if (name) {
+              await AsyncStorage.setItem('savedLocationName', name);
+              setGpsCityName(name);
+            }
+          })
+          .catch(() => {}),
+      ]);
+
+      setPrayerData(data);
+      setNextPrayer(getNextPrayer(data.timings));
+      await savePrayerCache(data, location);
+      await AsyncStorage.setItem('locationMode', 'gps');
+    } catch (e) {
+      if (e.message === 'PERMISSION_PERMANENTLY_DENIED' || e.message === 'PERMISSION_DENIED') {
+        setShowLocationChoice(true);
+      } else {
+        if (!prayerData) setError(e.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Manual "Update My Location" — only time GPS is requested again ─────────
+  async function updateLocationNow() {
+    setShowChangeLocationModal(false);
+    setShowCitySearch(false);
+    setUpdatingLocation(true);
+    setLocationUpdateMsg(null);
+    try {
+      const location = await getCoordinates();
+      await saveCoordinatesPermanently(location);
+      try {
+        const name = await reverseGeocode(location.latitude, location.longitude);
+        if (name) {
+          await AsyncStorage.setItem('savedLocationName', name);
+          setGpsCityName(name);
+        } else {
+          await AsyncStorage.removeItem('savedLocationName');
+          setGpsCityName(null);
+        }
+      } catch (e) {}
+      await AsyncStorage.setItem('locationMode', 'gps');
+      await AsyncStorage.removeItem('manualCity');
+      setManualCity(null);
+      setLocationMode('gps');
       setCoords(location);
       setQiblaAngle(calculateQibla(location.latitude, location.longitude));
       const data = await getPrayerTimes(location.latitude, location.longitude);
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
       await savePrayerCache(data, location);
+      setError(null);
+      setLocationUpdateMsg({
+        type: 'success',
+        text: '✅ Location updated! You can turn off GPS now — Bushrann will remember this location.',
+      });
     } catch (e) {
-      if (!prayerData) setError(e.message);
+      if (e.message === 'PERMISSION_PERMANENTLY_DENIED') {
+        setLocationUpdateMsg({
+          type: 'error',
+          text: '📍 Location permission is off. Please enable it in your phone Settings, then try again.',
+        });
+      } else if (e.message === 'PERMISSION_DENIED') {
+        setLocationUpdateMsg({
+          type: 'error',
+          text: '📍 Please allow location access when prompted, then try again.',
+        });
+      } else if (e.message === 'Please enable location services') {
+        setLocationUpdateMsg({
+          type: 'error',
+          text: '📡 Please turn on GPS/Location in your phone settings, then tap Update again.',
+        });
+      } else {
+        setLocationUpdateMsg({ type: 'error', text: 'Something went wrong. Please try again.' });
+      }
+    } finally {
+      setUpdatingLocation(false);
+    }
+  }
+
+  async function handleCitySelect(city) {
+    setManualCity(city);
+    setLocationMode('manual');
+    setShowCitySearch(false);
+    setShowLocationChoice(false);
+    setShowChangeLocationModal(false);
+    setCitySearch('');
+    setCityResults([]);
+    await AsyncStorage.setItem('locationMode', 'manual');
+    await AsyncStorage.setItem('manualCity', JSON.stringify(city));
+    setLoading(true);
+    try {
+      const data = await getPrayerTimes(city.latitude, city.longitude);
+      setPrayerData(data);
+      setNextPrayer(getNextPrayer(data.timings));
+      setCoords({ latitude: city.latitude, longitude: city.longitude });
+      setQiblaAngle(calculateQibla(city.latitude, city.longitude));
+      await savePrayerCache(data, { latitude: city.latitude, longitude: city.longitude });
+      setError(null);
+      setLocationUpdateMsg({ type: 'success', text: `✅ Location set to ${city.shortName}` });
+    } catch (e) {
+      setError(e.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCitySearch(text) {
+    setCitySearch(text);
+    if (text.length < 3) { setCityResults([]); return; }
+    setCitySearchLoading(true);
+    try {
+      const results = await searchCity(text);
+      setCityResults(results);
+    } catch (e) {
+      setCityResults([]);
+    } finally {
+      setCitySearchLoading(false);
     }
   }
 
@@ -307,6 +499,7 @@ export default function PrayerScreen() {
     let filteredX    = 0;
     let filteredY    = 0;
     let lastRawAngle = 0;
+    let lastHeadingUpdate = 0;
 
     magnetometerSub.current = Magnetometer.addListener(({ x, y }) => {
       const instantAngle = (Math.atan2(y, x) * (180 / Math.PI) - 90 + 360) % 360;
@@ -318,8 +511,14 @@ export default function PrayerScreen() {
       filteredY = filteredY + ALPHA * (y - filteredY);
 
       let rawAngle = (Math.atan2(filteredY, filteredX) * (180 / Math.PI) - 90 + 360) % 360;
-      setCompassHeading(rawAngle);
 
+      // Throttle React state update — full re-render only ~7x/sec instead of 60x/sec.
+      // The needle itself stays perfectly smooth since it's driven by rotation.value (Reanimated), not this state.
+      const now = Date.now();
+      if (now - lastHeadingUpdate > 150) {
+        setCompassHeading(rawAngle);
+        lastHeadingUpdate = now;
+      }
       lastRawAngle = rawAngle;
 
       if (lastTarget === -1) { lastTarget = rawAngle; targetAngle = rawAngle; initialized = true; return; }
@@ -419,12 +618,86 @@ export default function PrayerScreen() {
     );
   }
 
-  if (error) {
+  // Location choice screen (first launch / permission denied — no cancel)
+  if (showLocationChoice) {
     return (
-      <View style={[styles.center, { paddingTop: insets.top }]}>
-        <Text style={styles.errorIcon}>⚠️</Text>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={loadPrayerData}>
+      <View style={[styles.center, { paddingTop: insets.top, paddingHorizontal: 24 }]}>
+        {!showCitySearch ? (
+          <>
+            <Text style={{ fontSize: 40, marginBottom: 16 }}>📍</Text>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#1a2e44', marginBottom: 8, textAlign: 'center' }}>
+              Location Access Needed
+            </Text>
+            <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 22, marginBottom: 32 }}>
+              Bushrann needs your location once to calculate accurate prayer times and Qibla direction. After that, you can turn GPS off — we'll remember it.
+            </Text>
+            <TouchableOpacity
+              style={[styles.retryBtn, { width: '100%', alignItems: 'center', marginBottom: 12, paddingVertical: 14 }]}
+              onPress={() => Linking.openSettings()}
+            >
+              <Text style={styles.retryText}>📍 Enable Location in Settings</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ width: '100%', alignItems: 'center', paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: COLORS.gold, backgroundColor: 'rgba(201,168,76,0.08)', marginBottom: 12 }}
+              onPress={() => setShowCitySearch(true)}
+            >
+              <Text style={{ color: '#b8860b', fontWeight: '700', fontSize: 14 }}>🔍 Search City Manually</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => loadPrayerData()}>
+              <Text style={{ color: '#888', fontSize: 13 }}>Try Again</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#1a2e44', marginBottom: 16 }}>🔍 Search Your City</Text>
+            <TextInput
+              style={{
+                width: '100%', borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)',
+                borderRadius: 12, padding: 14, fontSize: 15, backgroundColor: '#fff',
+                marginBottom: 12, color: '#1a2e44',
+              }}
+              placeholder="Type city name..."
+              placeholderTextColor="#aaa"
+              value={citySearch}
+              onChangeText={handleCitySearch}
+              autoFocus
+            />
+            {citySearchLoading && <ActivityIndicator color={COLORS.gold} style={{ marginBottom: 12 }} />}
+            <ScrollView style={{ width: '100%', maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+              {cityResults.map((city, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.06)', backgroundColor: '#fff', borderRadius: 8, marginBottom: 4 }}
+                  onPress={() => handleCitySelect(city)}
+                >
+                  <Text style={{ fontSize: 13, color: '#1a2e44', fontWeight: '600' }}>{city.shortName}</Text>
+                  <Text style={{ fontSize: 11, color: '#888', marginTop: 2 }} numberOfLines={1}>{city.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setShowCitySearch(false)} style={{ marginTop: 16 }}>
+              <Text style={{ color: '#888', fontSize: 13 }}>← Back</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    );
+  }
+
+  if (error) {
+    const isGpsOff = error === 'Please enable location services';
+    return (
+      <View style={[styles.center, { paddingTop: insets.top, paddingHorizontal: 24 }]}>
+        <Text style={styles.errorIcon}>{isGpsOff ? '📡' : '⚠️'}</Text>
+        <Text style={[styles.errorText, { fontWeight: '700', fontSize: 16, color: '#1a2e44', marginBottom: 8 }]}>
+          {isGpsOff ? 'GPS is Turned Off' : 'Something went wrong'}
+        </Text>
+        <Text style={styles.errorText}>
+          {isGpsOff
+            ? 'Please turn on Location/GPS in your phone settings (swipe down notifications and tap the Location icon), then tap Try Again.'
+            : error}
+        </Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={() => loadPrayerData()}>
           <Text style={styles.retryText}>Try Again</Text>
         </TouchableOpacity>
       </View>
@@ -448,7 +721,7 @@ export default function PrayerScreen() {
           { width: 118, height: 118, borderRadius: 59, top: '50%', left: '50%', marginTop: -59, marginLeft: -59 },
           animatedCompassStyle,
         ]}>
-          {renderCompassTicks(118)}
+          {COMPASS_TICKS_118}
           {[
             { label: 'N', deg: 0,   color: '#ff6b6b', topOff: -14, leftOff: -7  },
             { label: 'E', deg: 90,  color: '#ffffff',  topOff: -7,  leftOff:  2  },
@@ -509,7 +782,7 @@ export default function PrayerScreen() {
           { width: 234, height: 234, borderRadius: 117, top: '50%', left: '50%', marginTop: -117, marginLeft: -117 },
           animatedCompassStyle,
         ]}>
-          {renderCompassTicks(234)}
+          {COMPASS_TICKS_234}
           {[30, 60, 120, 150, 210, 240, 300, 330].map((deg) => {
             const rad = (deg * Math.PI) / 180;
             const r   = 234 / 2 - 28;
@@ -602,6 +875,100 @@ export default function PrayerScreen() {
         </View>
       )}
 
+      {showChangeLocationModal && (
+        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9998, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%' }}>
+            {!showCitySearch ? (
+              <>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: '#1a2e44', marginBottom: 8 }}>📍 Change Location</Text>
+                <Text style={{ fontSize: 13, color: '#666', marginBottom: 20, lineHeight: 20 }}>
+                  Currently using: {locationMode === 'manual' && manualCity ? `📌 ${manualCity.shortName}` : `🛰 ${gpsCityName ?? 'GPS (saved)'}`}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#888', marginBottom: 14, lineHeight: 18 }}>
+                  Only use "Update My Location" if you've traveled to a different city. Otherwise your saved location already works without GPS.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.retryBtn, { width: '100%', alignItems: 'center', marginBottom: 10, paddingVertical: 14, opacity: updatingLocation ? 0.6 : 1 }]}
+                  onPress={updateLocationNow}
+                  disabled={updatingLocation}
+                >
+                  {updatingLocation ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.retryText}>🛰 Update My Location (GPS)</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ width: '100%', alignItems: 'center', paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: COLORS.gold, backgroundColor: 'rgba(201,168,76,0.08)', marginBottom: 10 }}
+                  onPress={() => setShowCitySearch(true)}
+                >
+                  <Text style={{ color: '#b8860b', fontWeight: '700', fontSize: 14 }}>🔍 Search City Manually</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ width: '100%', alignItems: 'center', paddingVertical: 13, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', backgroundColor: 'rgba(0,0,0,0.03)' }}
+                  onPress={() => { setShowChangeLocationModal(false); setShowCitySearch(false); }}
+                >
+                  <Text style={{ color: '#555', fontSize: 14, fontWeight: '600' }}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: '#1a2e44', marginBottom: 16 }}>🔍 Search Your City</Text>
+                <TextInput
+                  style={{
+                    width: '100%', borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)',
+                    borderRadius: 12, padding: 14, fontSize: 15, backgroundColor: '#f9f9f9',
+                    marginBottom: 12, color: '#1a2e44',
+                  }}
+                  placeholder="Type city name..."
+                  placeholderTextColor="#aaa"
+                  value={citySearch}
+                  onChangeText={handleCitySearch}
+                  autoFocus
+                />
+                {citySearchLoading && <ActivityIndicator color={COLORS.gold} style={{ marginBottom: 8 }} />}
+                <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
+                  {cityResults.map((city, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.06)', borderRadius: 8, marginBottom: 4 }}
+                      onPress={() => handleCitySelect(city)}
+                    >
+                      <Text style={{ fontSize: 13, color: '#1a2e44', fontWeight: '600' }}>{city.shortName}</Text>
+                      <Text style={{ fontSize: 11, color: '#888', marginTop: 2 }} numberOfLines={1}>{city.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <TouchableOpacity
+                  style={{ width: '100%', alignItems: 'center', paddingVertical: 13, marginTop: 8, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', backgroundColor: 'rgba(0,0,0,0.03)' }}
+                  onPress={() => setShowCitySearch(false)}
+                >
+                  <Text style={{ color: '#555', fontSize: 14, fontWeight: '600' }}>← Back</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* Location update success/error banner */}
+      {locationUpdateMsg && (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => setLocationUpdateMsg(null)}
+          style={{
+            position: 'absolute', top: insets.top + 10, left: 12, right: 12, zIndex: 9997,
+            backgroundColor: locationUpdateMsg.type === 'success' ? '#1a7a3c' : '#b8860b',
+            borderRadius: 14, padding: 14,
+            shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 6,
+          }}
+        >
+          <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600', lineHeight: 19 }}>
+            {locationUpdateMsg.text}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 80 }} showsVerticalScrollIndicator={false} delayPressIn={0} directionalLockEnabled={true}>
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <Text style={styles.headerSub}>BISMILLAH</Text>
@@ -610,7 +977,23 @@ export default function PrayerScreen() {
             <View style={styles.hijriPill}>
               <Text style={styles.hijriText}>{hijriDate?.day} {hijriDate?.month?.en} {hijriDate?.year} AH</Text>
             </View>
-            <Text style={styles.locationText}>📍 {prayerData?.meta?.timezone?.split('/')[1]?.replace('_', ' ') ?? 'Your Location'}</Text>
+            <TouchableOpacity
+              onPress={() => { setShowChangeLocationModal(true); setShowCitySearch(false); }}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 6,
+                backgroundColor: 'rgba(201,168,76,0.18)',
+                borderWidth: 1, borderColor: 'rgba(201,168,76,0.35)',
+                borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7,
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={[styles.locationText, { color: '#f0c96a', fontWeight: '700' }]}>
+                {locationMode === 'manual' && manualCity
+                  ? `📌 ${manualCity.shortName}`
+                  : `📍 ${gpsCityName ?? prayerData?.meta?.timezone?.split('/')[1]?.replace('_', ' ') ?? 'Your Location'}`}
+              </Text>
+              <Text style={{ color: '#f0c96a', fontSize: 11 }}>✎</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -635,6 +1018,9 @@ export default function PrayerScreen() {
             <View>
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#1a2e44' }}>🔔 Prayer Notifications</Text>
               <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{notifsEnabled ? 'Enabled' : 'Disabled'}</Text>
+              <TouchableOpacity onPress={scheduleTestNotification} style={{ marginTop: 6 }}>
+                <Text style={{ fontSize: 11, color: COLORS.gold, fontWeight: '700' }}>🧪 Test Adhan (fires in 10s)</Text>
+              </TouchableOpacity>
             </View>
             <Switch
               value={notifsEnabled}
@@ -842,9 +1228,7 @@ const styles = StyleSheet.create({
 
   compassGlow: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(34,197,94,0.12)',
-    shadowColor: '#22c55e', shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.7, shadowRadius: 20, elevation: 6,
+    backgroundColor: 'rgba(34,197,94,0.45)',
   },
   compassOuter: {
     borderWidth: 3, borderColor: '#c9a84c',
@@ -856,7 +1240,6 @@ const styles = StyleSheet.create({
   },
   compassOuterAligned: {
     borderColor: '#22c55e',
-    shadowColor: '#22c55e', shadowOpacity: 0.6, shadowRadius: 18,
   },
   compassDisc: {
     position: 'absolute', backgroundColor: 'transparent',

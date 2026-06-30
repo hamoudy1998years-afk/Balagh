@@ -1,4 +1,4 @@
-﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -168,10 +168,22 @@ function MainTabs({ session }) {
       />
       <Tab.Screen
         name="Upload"
-        component={ComingSoonScreen}
+        component={UploadScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'add-circle' : 'add-circle-outline'} size={size} color={color} />
+          ),
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate(ROUTES.LOGIN);
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
           ),
         }}
       />
@@ -199,18 +211,42 @@ function MainTabs({ session }) {
       />
       <Tab.Screen
         name="Notifications"
-        component={ComingSoonScreen}
+        component={NotificationsScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={size} color={color} />
+          ),
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate(ROUTES.LOGIN);
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
           ),
         }}
       />
       <Tab.Screen
         name="Profile"
-        component={ComingSoonScreen}
+        component={ProfileScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => <ProfileTabIcon color={color} size={size} focused={focused} />,
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate(ROUTES.LOGIN);
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
+          ),
         }}
       />
     </Tab.Navigator>

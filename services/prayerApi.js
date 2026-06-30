@@ -4,48 +4,101 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const BASE_URL = 'https://api.aladhan.com/v1';
 
 export async function getCoordinates() {
-  const { status } = await Location.requestForegroundPermissionsAsync();
-  if (status !== 'granted') throw new Error('Location permission denied');
+  const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+  if (status !== 'granted') {
+    if (!canAskAgain) {
+      throw new Error('PERMISSION_PERMANENTLY_DENIED');
+    }
+    throw new Error('PERMISSION_DENIED');
+  }
 
   const enabled = await Location.hasServicesEnabledAsync();
   if (!enabled) throw new Error('Please enable location services');
 
   const location = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.High,
+    accuracy: Location.Accuracy.Balanced,
   });
 
   const { latitude, longitude } = location.coords;
-  
-  // Warn if coords look wrong (Manila is ~14.5, 121.0; Zamboanga is ~6.9, 122.0)
-  if (latitude > 10) {
-    console.warn('[PrayerApi] WARNING: Got coords north of 10°N. If you are in Zamboanga/Mindanao, this is WRONG. Emulator may be set to Manila.');
-    console.warn('[PrayerApi] Coords:', latitude, longitude);
-  }
-  
   console.log('[PrayerApi] GPS coords:', latitude, longitude);
   return { latitude, longitude };
+}
+
+// ── Permanent saved coordinates (no GPS needed after first save) ───────────
+const SAVED_COORDS_KEY = 'savedCoordinates';
+
+export async function saveCoordinatesPermanently(coords) {
+  try {
+    await AsyncStorage.setItem(SAVED_COORDS_KEY, JSON.stringify(coords));
+  } catch (e) {}
+}
+
+export async function loadSavedCoordinates() {
+  try {
+    const raw = await AsyncStorage.getItem(SAVED_COORDS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function reverseGeocode(latitude, longitude) {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'Bushrann Prayer App' }
+  });
+  const data = await response.json();
+  const shortName = [
+    data.address?.city ||
+    data.address?.town ||
+    data.address?.village ||
+    data.address?.municipality ||
+    data.address?.county,
+    data.address?.country
+  ].filter(Boolean).join(', ');
+  return shortName || null;
+}
+
+export async function searchCity(query) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'Bushrann Prayer App' }
+  });
+  const data = await response.json();
+  return data.map(item => ({
+    name: item.display_name,
+    shortName: [
+      item.address?.city ||
+      item.address?.town ||
+      item.address?.village ||
+      item.address?.county,
+      item.address?.country
+    ].filter(Boolean).join(', '),
+    latitude: parseFloat(item.lat),
+    longitude: parseFloat(item.lon),
+  }));
 }
 
 export async function getPrayerTimes(latitude, longitude) {
   const date = new Date();
   const timestamp = Math.floor(date.getTime() / 1000);
-  
+
   const params = new URLSearchParams({
     latitude: latitude.toString(),
     longitude: longitude.toString(),
     method: '3',
     school: '0',
     timezonestring: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    tune: '0,0,0,0,-1,0,0,0,0',  // -1 min Asr (format: Imsak,Fajr,Sunrise,Dhuhr,Asr,Maghrib,Sunset,Isha,Midnight)
+    tune: '0,0,0,0,-1,0,0,0,0',
   });
-  
+
   const url = `${BASE_URL}/timings/${timestamp}?${params.toString()}`;
   console.log('[PrayerApi] Full URL:', url);
-  
+
   const response = await fetch(url);
   const data = await response.json();
   if (data.code !== 200) throw new Error('Failed to fetch prayer times');
-  
+
   console.log('[PrayerApi] Times:', data.data.timings);
   return data.data;
 }
@@ -54,16 +107,16 @@ export async function getMonthlyTimetable(latitude, longitude) {
   const date = new Date();
   const month = date.getMonth() + 1;
   const year = date.getFullYear();
-  
+
   const params = new URLSearchParams({
     latitude: latitude.toString(),
     longitude: longitude.toString(),
     method: '3',
     school: '0',
     timezonestring: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    tune: '0,0,0,0,-1,0,0,0,0',  // ← ADD THIS
+    tune: '0,0,0,0,-1,0,0,0,0',
   });
-  
+
   const response = await fetch(
     `${BASE_URL}/calendar/${year}/${month}?${params.toString()}`
   );
@@ -92,7 +145,6 @@ export function getNextPrayer(timings) {
       };
     }
   }
-  // All prayers passed, next is Fajr tomorrow
   const [hours, minutes] = timings['Fajr'].split(':').map(Number);
   const fajrMinutes = hours * 60 + minutes + 1440;
   const diff = fajrMinutes - currentMinutes;
@@ -126,7 +178,7 @@ export function getPrayerEmoji(prayer) {
 }
 
 const CACHE_KEY = 'prayerTimesCache';
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const CACHE_TTL = 10 * 60 * 1000;
 
 export async function savePrayerCache(data, coords) {
   try {

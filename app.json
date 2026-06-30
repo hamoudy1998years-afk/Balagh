@@ -86,7 +86,7 @@
         {
           "icon": "./assets/icon.png",
           "color": "#B76E79",
-          "sounds": []
+          "sounds": ["./assets/audio/adhan_alert.wav"]
         }
       ],
       [
