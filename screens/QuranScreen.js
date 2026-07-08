@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────
 //  QuranScreen.js — Surah List Browser
-//  Fixed: ModernDialog-style playback picker
+//  Performance: surah list cached in AsyncStorage
+//  after first load — instant on all subsequent opens.
 // ─────────────────────────────────────────────
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -23,12 +24,15 @@ import { fetchSurahs, fetchVerses, fetchVerseAudioUrl } from '../services/quranA
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
-import PlaybackModeDialog from '../components/PlaybackModeDialog';  // ADDED
+import PlaybackModeDialog from '../components/PlaybackModeDialog';
 
 const REVELATION_COLORS = {
   Makkah: '#c9a84c',
   Madinah: '#4c9ac9',
 };
+
+const SURAHS_CACHE_KEY = 'quran_surahs_cache';
+const SURAHS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 1 week — Quran doesn't change
 
 export default function QuranScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -39,8 +43,8 @@ export default function QuranScreen({ navigation }) {
   const [error, setError] = useState(null);
   const [isPlayingQuran, setIsPlayingQuran] = useState(false);
   const [resumePosition, setResumePosition] = useState(null);
-  const [playbackDialogVisible, setPlaybackDialogVisible] = useState(false);  // ADDED
-  const [pendingPlayParams, setPendingPlayParams] = useState({ si: 0, vi: 0 });  // ADDED
+  const [playbackDialogVisible, setPlaybackDialogVisible] = useState(false);
+  const [pendingPlayParams, setPendingPlayParams] = useState({ si: 0, vi: 0 });
   const quranPlayingRef = useRef(false);
   const soundRef = useRef(null);
   const surahsRef = useRef([]);
@@ -70,12 +74,57 @@ export default function QuranScreen({ navigation }) {
 
   async function loadSurahs() {
     try {
-      setLoading(true);
       setError(null);
+
+      // ── Fast path: load from AsyncStorage cache first ──
+      // The Quran surah list never changes, so we cache it for 1 week.
+      // This makes the screen appear instantly on all opens after the first.
+      try {
+        const raw = await AsyncStorage.getItem(SURAHS_CACHE_KEY);
+        if (raw) {
+          const { data, timestamp } = JSON.parse(raw);
+          const isExpired = Date.now() - timestamp > SURAHS_CACHE_TTL;
+          if (!isExpired && data?.length > 0) {
+            setSurahs(data);
+            surahsRef.current = data;
+            setFiltered(data);
+            setLoading(false);
+            // Silently refresh in background — don't show spinner
+            fetchSurahs().then(async (fresh) => {
+              if (fresh?.length > 0) {
+                setSurahs(fresh);
+                surahsRef.current = fresh;
+                setFiltered((prev) => {
+                  // Only update filtered if not currently searching
+                  if (search.trim()) return prev;
+                  return fresh;
+                });
+                await AsyncStorage.setItem(SURAHS_CACHE_KEY, JSON.stringify({
+                  data: fresh,
+                  timestamp: Date.now(),
+                }));
+              }
+            }).catch(() => {});
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // ── Slow path: no cache or expired — fetch from API ──
+      setLoading(true);
       const data = await fetchSurahs();
       setSurahs(data);
       surahsRef.current = data;
       setFiltered(data);
+
+      // Save to cache for next time
+      try {
+        await AsyncStorage.setItem(SURAHS_CACHE_KEY, JSON.stringify({
+          data,
+          timestamp: Date.now(),
+        }));
+      } catch (_) {}
+
     } catch (e) {
       setError('Could not load surahs. Check your connection.');
     } finally {
@@ -219,7 +268,6 @@ export default function QuranScreen({ navigation }) {
     }
   }
 
-  // FIXED: Show dialog instead of Alert
   function playEntireQuran(startSurahIndex = 0, startVerseIndex = 0) {
     if (surahs.length === 0) return;
 
@@ -238,7 +286,6 @@ export default function QuranScreen({ navigation }) {
     setPlaybackDialogVisible(true);
   }
 
-  // ADDED: Handle mode selection from dialog
   function handleModeSelect(mode) {
     const { si, vi } = pendingPlayParams;
     runPlay(si, vi, mode);
@@ -378,7 +425,6 @@ export default function QuranScreen({ navigation }) {
         />
       )}
 
-      {/* ADDED: Playback mode dialog */}
       <PlaybackModeDialog
         visible={playbackDialogVisible}
         onSelect={handleModeSelect}

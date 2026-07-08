@@ -15,12 +15,30 @@ export async function getCoordinates() {
   const enabled = await Location.hasServicesEnabledAsync();
   if (!enabled) throw new Error('Please enable location services');
 
+  // ── Fast path: try last known position first (instant, no GPS wait) ──
+  // Android caches the last GPS fix from any app (Maps, weather, etc.)
+  // If it's recent enough and accurate enough, use it directly.
+  try {
+    const last = await Location.getLastKnownPositionAsync({
+      maxAge: 5 * 60 * 1000,       // must be less than 5 minutes old
+      requiredAccuracy: 5000,       // within 5km is fine for prayer times
+    });
+    if (last) {
+      const { latitude, longitude } = last.coords;
+      console.log('[PrayerApi] Using last known position (fast path):', latitude, longitude);
+      return { latitude, longitude };
+    }
+  } catch (e) {
+    // Last known position unavailable — fall through to fresh GPS
+  }
+
+  // ── Slow path: fresh GPS fix (first ever launch, or last position too old) ──
   const location = await Location.getCurrentPositionAsync({
     accuracy: Location.Accuracy.Balanced,
   });
 
   const { latitude, longitude } = location.coords;
-  console.log('[PrayerApi] GPS coords:', latitude, longitude);
+  console.log('[PrayerApi] GPS coords (fresh):', latitude, longitude);
   return { latitude, longitude };
 }
 
@@ -179,6 +197,38 @@ export function getPrayerEmoji(prayer) {
 
 const CACHE_KEY = 'prayerTimesCache';
 const CACHE_TTL = 10 * 60 * 1000;
+
+const MONTHLY_CACHE_KEY = 'monthlyPrayerCache';
+
+export async function saveMonthlyCache(monthlyData, coords, month, year) {
+  try {
+    await AsyncStorage.setItem(MONTHLY_CACHE_KEY, JSON.stringify({
+      monthlyData,
+      coords,
+      month,
+      year,
+    }));
+  } catch (e) {}
+}
+
+export async function loadMonthlyCache() {
+  try {
+    const raw = await AsyncStorage.getItem(MONTHLY_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Finds today's exact timings from a saved month's data, using the real device date
+export function getTodayTimingsFromMonthly(monthlyData) {
+  if (!monthlyData) return null;
+  const today = new Date();
+  const dayNum = String(today.getDate()).padStart(2, '0');
+  const dayEntry = monthlyData.find(d => d.date.gregorian.day === dayNum);
+  return dayEntry ? dayEntry.timings : null;
+}
 
 export async function savePrayerCache(data, coords) {
   try {

@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, ActivityIndicator, Vibration, TextInput, Linking
+  Switch, ActivityIndicator, Vibration, TextInput, Linking, Platform
 } from 'react-native';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -17,14 +17,16 @@ import * as Location from 'expo-location';
 import { Audio } from 'expo-av';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { COLORS } from '../constants/theme';
 import {
   getCoordinates, getPrayerTimes, getMonthlyTimetable,
   getNextPrayer, formatTime, getPrayerEmoji,
   savePrayerCache, loadPrayerCache, searchCity, reverseGeocode,
   saveCoordinatesPermanently, loadSavedCoordinates,
+  saveMonthlyCache,
 } from '../services/prayerApi';
-import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, scheduleTestNotification } from '../services/prayerNotificationService';
+import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, getNextOccurrence, requestExactAlarmPermission, requestDndAccess, updatePersistentNotification } from '../services/prayerNotificationService';
 
 const PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const MECCA = { lat: 21.4225, lng: 39.8262 };
@@ -141,6 +143,116 @@ function NeedleLarge() {
   );
 }
 
+const HUAWEI_STEP_DATA = [
+  {
+    key: 'launchManager',
+    title: '1. Launch Manager',
+    instructions: [
+      'Tap "Open Settings" below.',
+      'Go to Apps & services → Launch manager.',
+      'Find Bushrann and turn OFF "Manage automatically".',
+      'Make sure all 3 toggles underneath are ON.',
+    ],
+  },
+  {
+    key: 'exactAlarm',
+    title: '2. Exact Alarms',
+    instructions: [
+      'Tap "Open Settings" below.',
+      'Find and tap Bushrann in the list.',
+      'Allow Bushrann to schedule exact alarms when prompted.',
+    ],
+  },
+  {
+    key: 'batteryOpt',
+    title: '3. Battery Optimization',
+    instructions: [
+      'Tap "Open Settings" below.',
+      'Tap the filter at the top (may say "Not allowed") and choose "All apps".',
+      'Find Bushrann in the list and tap it.',
+      'Select "Don\'t allow", then tap OK.',
+    ],
+  },
+];
+
+const HuaweiStepRow = memo(function HuaweiStepRow({ title, instructions, checked, onToggle, onOpen }) {
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+        <TouchableOpacity
+          onPress={onToggle}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={{
+            width: 22, height: 22, borderRadius: 6, marginRight: 8,
+            borderWidth: 2, borderColor: checked ? '#1a7a3c' : 'rgba(0,0,0,0.25)',
+            backgroundColor: checked ? '#1a7a3c' : 'transparent',
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {checked && <Text style={{ color: '#fff', fontSize: 13, fontWeight: '900' }}>✓</Text>}
+        </TouchableOpacity>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: '#1a2e44', flex: 1 }}>{title}</Text>
+      </View>
+      <View style={{ marginLeft: 30, marginBottom: 10 }}>
+        {instructions.map((line, i) => (
+          <Text key={i} style={{ fontSize: 12, color: '#555', lineHeight: 19 }}>{i + 1}. {line}</Text>
+        ))}
+      </View>
+      <TouchableOpacity
+        style={{
+          marginLeft: 30, alignSelf: 'flex-start',
+          paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10,
+          backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.35)',
+        }}
+        onPress={onOpen}
+      >
+        <Text style={{ color: '#b8860b', fontSize: 12, fontWeight: '700' }}>⚙️ Open Settings</Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+const HuaweiSetupCard = memo(function HuaweiSetupCard({
+  huaweiSteps, huaweiTipExpanded, onToggleExpanded, onToggleStep,
+  onOpenLaunchManager, onOpenExactAlarm, onOpenBatteryOpt,
+}) {
+  const allDone = huaweiSteps.launchManager && huaweiSteps.exactAlarm && huaweiSteps.batteryOpt;
+  const doneCount = [huaweiSteps.launchManager, huaweiSteps.exactAlarm, huaweiSteps.batteryOpt].filter(Boolean).length;
+  const openFns = { launchManager: onOpenLaunchManager, exactAlarm: onOpenExactAlarm, batteryOpt: onOpenBatteryOpt };
+
+  return (
+    <TouchableOpacity
+      style={[styles.card, { borderColor: allDone ? 'rgba(201,168,76,0.2)' : 'rgba(201,168,76,0.4)', borderWidth: 1, backgroundColor: allDone ? '#fff' : 'rgba(201,168,76,0.05)' }]}
+      onPress={onToggleExpanded}
+      activeOpacity={0.9}
+    >
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: '#1a2e44' }}>
+          📱 Huawei Adhan Setup {allDone ? '✓' : `(${doneCount}/3)`}
+        </Text>
+        <Text style={{ color: COLORS.gold, fontSize: 13, fontWeight: '700' }}>{huaweiTipExpanded ? '▴' : '▾'}</Text>
+      </View>
+      {huaweiTipExpanded && (
+        <View style={{ marginTop: 14 }}>
+          <Text style={{ fontSize: 12, color: '#666', lineHeight: 18, marginBottom: 16 }}>
+            Huawei/Honor phones need these 3 settings for Adhan to play on time. Check off each step after completing it.
+          </Text>
+          {HUAWEI_STEP_DATA.map((step) => (
+            <HuaweiStepRow
+              key={step.key}
+              title={step.title}
+              instructions={step.instructions}
+              checked={!!huaweiSteps[step.key]}
+              onToggle={() => onToggleStep(step.key)}
+              onOpen={(e) => { e.stopPropagation?.(); openFns[step.key](); }}
+            />
+          ))}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+});
+
 export default function PrayerScreen() {
   const insets = useSafeAreaInsets();
   const [loading, setLoading]                   = useState(true);
@@ -171,8 +283,15 @@ export default function PrayerScreen() {
   const [cityResults, setCityResults]               = useState([]);
   const [citySearchLoading, setCitySearchLoading]   = useState(false);
   const [updatingLocation, setUpdatingLocation]     = useState(false);
-  const [locationUpdateMsg, setLocationUpdateMsg]   = useState(null); // { type: 'success'|'error', text }
+  const [locationUpdateMsg, setLocationUpdateMsg]   = useState(null);
   const [gpsCityName, setGpsCityName]               = useState(null);
+
+  // Huawei/Honor setup — 3 steps: launchManager, exactAlarm, batteryOpt
+  const [isHuawei, setIsHuawei]                     = useState(false);
+  const [huaweiSteps, setHuaweiSteps]               = useState({ launchManager: false, exactAlarm: false, batteryOpt: false });
+  const [huaweiTipExpanded, setHuaweiTipExpanded]   = useState(true);
+  const [huaweiUndoBanner, setHuaweiUndoBanner]     = useState(false);
+  const huaweiUndoTimerRef                           = useRef(null);
 
   const countdownRef        = useRef(null);
   const magnetometerSub     = useRef(null);
@@ -228,6 +347,29 @@ export default function PrayerScreen() {
     }
   }, [locationUpdateMsg]);
 
+  // Huawei/Honor detection
+  useEffect(() => {
+    async function checkHuaweiTip() {
+      try {
+        const manufacturer = Platform.OS === 'android'
+          ? ((Platform.constants && (Platform.constants.Manufacturer || Platform.constants.Brand)) || '').toLowerCase()
+          : '';
+        if (!manufacturer.includes('huawei') && !manufacturer.includes('honor')) return;
+        setIsHuawei(true);
+        const saved = await AsyncStorage.getItem('huaweiSteps');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setHuaweiSteps(parsed);
+          const allDone = parsed.launchManager && parsed.exactAlarm && parsed.batteryOpt;
+          setHuaweiTipExpanded(!allDone);
+        }
+      } catch (e) {}
+    }
+    checkHuaweiTip();
+  }, []);
+
+  // (Removed — Huawei setup now uses manual per-step checkboxes instead of AppState detection)
+
   useFocusEffect(
     useCallback(() => {
       const entry = SystemBars.pushStackEntry({ style: 'light' });
@@ -267,10 +409,13 @@ export default function PrayerScreen() {
     if (prayerData) {
       countdownRef.current = setInterval(() => {
         setNextPrayer(getNextPrayer(prayerData.timings));
+        if (notifsEnabled) {
+          updatePersistentNotification(prayerData.timings);
+        }
       }, 60000);
     }
     return () => clearInterval(countdownRef.current);
-  }, [prayerData]);
+  }, [prayerData, notifsEnabled]);
 
   async function loadSavedSettings() {
     try {
@@ -315,6 +460,12 @@ export default function PrayerScreen() {
         setCoords({ latitude: city.latitude, longitude: city.longitude });
         setQiblaAngle(calculateQibla(city.latitude, city.longitude));
         await savePrayerCache(data, { latitude: city.latitude, longitude: city.longitude });
+
+        try {
+          const monthly = await getMonthlyTimetable(city.latitude, city.longitude);
+          const now = new Date();
+          await saveMonthlyCache(monthly, { latitude: city.latitude, longitude: city.longitude }, now.getMonth() + 1, now.getFullYear());
+        } catch (e) {}
         return;
       }
 
@@ -338,6 +489,12 @@ export default function PrayerScreen() {
         setPrayerData(data);
         setNextPrayer(getNextPrayer(data.timings));
         await savePrayerCache(data, savedCoords);
+
+        try {
+          const monthly = await getMonthlyTimetable(savedCoords.latitude, savedCoords.longitude);
+          const now = new Date();
+          await saveMonthlyCache(monthly, savedCoords, now.getMonth() + 1, now.getFullYear());
+        } catch (e) {}
         return;
       }
 
@@ -349,8 +506,7 @@ export default function PrayerScreen() {
       setQiblaAngle(calculateQibla(location.latitude, location.longitude));
       await saveCoordinatesPermanently(location);
 
-      // Run reverse geocoding (display name only) and prayer times fetch in parallel —
-      // prayer times don't need to wait on the city name lookup.
+      // Run reverse geocoding and prayer times fetch in parallel
       const [data] = await Promise.all([
         getPrayerTimes(location.latitude, location.longitude),
         reverseGeocode(location.latitude, location.longitude)
@@ -367,6 +523,12 @@ export default function PrayerScreen() {
       setNextPrayer(getNextPrayer(data.timings));
       await savePrayerCache(data, location);
       await AsyncStorage.setItem('locationMode', 'gps');
+
+      try {
+        const monthly = await getMonthlyTimetable(location.latitude, location.longitude);
+        const now = new Date();
+        await saveMonthlyCache(monthly, location, now.getMonth() + 1, now.getFullYear());
+      } catch (e) {}
     } catch (e) {
       if (e.message === 'PERMISSION_PERMANENTLY_DENIED' || e.message === 'PERMISSION_DENIED') {
         setShowLocationChoice(true);
@@ -435,6 +597,52 @@ export default function PrayerScreen() {
       setUpdatingLocation(false);
     }
   }
+
+  const toggleHuaweiStep = useCallback(async (stepKey) => {
+    const updated = { ...huaweiSteps, [stepKey]: !huaweiSteps[stepKey] };
+    setHuaweiSteps(updated);
+    await AsyncStorage.setItem('huaweiSteps', JSON.stringify(updated));
+
+    const allDone = updated.launchManager && updated.exactAlarm && updated.batteryOpt;
+    if (allDone) {
+      setHuaweiUndoBanner(true);
+      huaweiUndoTimerRef.current = setTimeout(() => {
+        setHuaweiUndoBanner(false);
+        setHuaweiTipExpanded(false);
+      }, 5000);
+    } else {
+      clearTimeout(huaweiUndoTimerRef.current);
+      setHuaweiUndoBanner(false);
+    }
+  }, [huaweiSteps]);
+
+  async function undoHuaweiConfirm() {
+    clearTimeout(huaweiUndoTimerRef.current);
+    setHuaweiUndoBanner(false);
+    setHuaweiTipExpanded(true);
+  }
+
+  const openHuaweiSettings = useCallback(async () => {
+    try {
+      await IntentLauncher.startActivityAsync('android.settings.SETTINGS');
+    } catch (e) {}
+  }, []);
+
+  const openExactAlarmSettings = useCallback(async () => {
+    try {
+      await requestExactAlarmPermission();
+    } catch (e) {
+      try { await IntentLauncher.startActivityAsync('android.settings.SETTINGS'); } catch (e2) {}
+    }
+  }, []);
+
+  const openBatteryOptimizationSettings = useCallback(async () => {
+    try {
+      await IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS');
+    } catch (e) {
+      try { await IntentLauncher.startActivityAsync('android.settings.SETTINGS'); } catch (e2) {}
+    }
+  }, []);
 
   async function handleCitySelect(city) {
     setManualCity(city);
@@ -512,8 +720,7 @@ export default function PrayerScreen() {
 
       let rawAngle = (Math.atan2(filteredY, filteredX) * (180 / Math.PI) - 90 + 360) % 360;
 
-      // Throttle React state update — full re-render only ~7x/sec instead of 60x/sec.
-      // The needle itself stays perfectly smooth since it's driven by rotation.value (Reanimated), not this state.
+      // Throttle React state update — ~7x/sec instead of 60x/sec
       const now = Date.now();
       if (now - lastHeadingUpdate > 150) {
         setCompassHeading(rawAngle);
@@ -564,25 +771,6 @@ export default function PrayerScreen() {
     const updated = { ...notifications, [prayer]: !notifications[prayer] };
     setNotifications(updated);
     await AsyncStorage.setItem('prayerNotifications', JSON.stringify(updated));
-    if (updated[prayer] && prayerData) {
-      await schedulePrayerNotification(prayer, prayerData.timings[prayer]);
-    } else {
-      await Notifications.cancelScheduledNotificationAsync(`prayer-${prayer}`);
-    }
-  }
-
-  async function schedulePrayerNotification(prayer, time24) {
-    const [hours, minutes] = time24.split(':').map(Number);
-    await Notifications.scheduleNotificationAsync({
-      identifier: `prayer-${prayer}`,
-      content: {
-        title: `🕌 ${prayer} Prayer Time`,
-        body: `It's time for ${prayer} prayer. Allahu Akbar!`,
-        sound: true, channelId: 'prayer-times',
-        data: { type: 'prayer', prayer },
-      },
-      trigger: { type: 'daily', hour: hours, minute: minutes },
-    });
   }
 
   async function playAdhan() {
@@ -1018,9 +1206,6 @@ export default function PrayerScreen() {
             <View>
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#1a2e44' }}>🔔 Prayer Notifications</Text>
               <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{notifsEnabled ? 'Enabled' : 'Disabled'}</Text>
-              <TouchableOpacity onPress={scheduleTestNotification} style={{ marginTop: 6 }}>
-                <Text style={{ fontSize: 11, color: COLORS.gold, fontWeight: '700' }}>🧪 Test Adhan (fires in 10s)</Text>
-              </TouchableOpacity>
             </View>
             <Switch
               value={notifsEnabled}
@@ -1038,7 +1223,39 @@ export default function PrayerScreen() {
               thumbColor={notifsEnabled ? COLORS.gold : 'rgba(0,0,0,0.3)'}
             />
           </View>
+          <TouchableOpacity onPress={requestDndAccess} style={{ marginTop: 10 }}>
+            <Text style={{ color: '#b8860b', fontSize: 12, fontWeight: '700' }}>
+              🔕 Allow Adhan during Do Not Disturb
+            </Text>
+          </TouchableOpacity>
         </View>
+        
+        {isHuawei && (
+          <HuaweiSetupCard
+            huaweiSteps={huaweiSteps}
+            huaweiTipExpanded={huaweiTipExpanded}
+            onToggleExpanded={() => setHuaweiTipExpanded(prev => !prev)}
+            onToggleStep={toggleHuaweiStep}
+            onOpenLaunchManager={openHuaweiSettings}
+            onOpenExactAlarm={openExactAlarmSettings}
+            onOpenBatteryOpt={openBatteryOptimizationSettings}
+          />
+        )}
+
+        {/* Undo banner — appears for 5 seconds after all 3 steps checked */}
+        {huaweiUndoBanner && (
+          <TouchableOpacity
+            onPress={undoHuaweiConfirm}
+            style={{
+              marginHorizontal: 12, marginBottom: 10,
+              backgroundColor: '#1a7a3c', borderRadius: 14, padding: 14,
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>✅ All 3 steps complete</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>↩ Tap to undo (5s)</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>TODAY'S PRAYERS</Text>
@@ -1056,10 +1273,10 @@ export default function PrayerScreen() {
                 <Text style={[styles.prayerName, isNext && styles.prayerNameActive]}>{prayer}</Text>
                 <Text style={[styles.prayerTime, isNext && styles.prayerTimeActive]}>{formatTime(prayerData?.timings?.[prayer] ?? '00:00')}</Text>
                 <Switch
-                  value={!!notifications[prayer]}
+                  value={notifications[prayer] !== false}
                   onValueChange={() => toggleNotification(prayer)}
                   trackColor={{ false: 'rgba(0,0,0,0.1)', true: COLORS.gold + '80' }}
-                  thumbColor={notifications[prayer] ? COLORS.gold : 'rgba(0,0,0,0.3)'}
+                  thumbColor={notifications[prayer] !== false ? COLORS.gold : 'rgba(0,0,0,0.3)'}
                   style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
                 />
               </View>
