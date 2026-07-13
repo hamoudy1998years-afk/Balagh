@@ -222,10 +222,11 @@ export async function loadMonthlyCache() {
 }
 
 // Finds today's exact timings from a saved month's data, using the real device date
-export function getTodayTimingsFromMonthly(monthlyData) {
+export function getTomorrowTimingsFromMonthly(monthlyData) {
   if (!monthlyData) return null;
-  const today = new Date();
-  const dayNum = String(today.getDate()).padStart(2, '0');
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dayNum = String(tomorrow.getDate()).padStart(2, '0');
   const dayEntry = monthlyData.find(d => d.date.gregorian.day === dayNum);
   return dayEntry ? dayEntry.timings : null;
 }

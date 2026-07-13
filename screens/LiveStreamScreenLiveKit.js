@@ -179,8 +179,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         handleNotification: async () => ({
           shouldShowBanner: true,
           shouldShowList: true,
-          shouldPlaySound: true,
-          shouldSetBadge: true,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
         }),
       });
       cleanup();

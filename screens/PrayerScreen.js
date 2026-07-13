@@ -173,6 +173,16 @@ const HUAWEI_STEP_DATA = [
       'Select "Don\'t allow", then tap OK.',
     ],
   },
+  {
+    key: 'notifImportance',
+    title: '4. Notification Importance',
+    instructions: [
+      'Tap "Open Settings" below.',
+      'Find Bushrann and tap it.',
+      'Tap "Prayer Times" channel.',
+      'Change Importance from "Recommended" to "Urgent".',
+    ],
+  },
 ];
 
 const HuaweiStepRow = memo(function HuaweiStepRow({ title, instructions, checked, onToggle, onOpen }) {
@@ -214,11 +224,11 @@ const HuaweiStepRow = memo(function HuaweiStepRow({ title, instructions, checked
 
 const HuaweiSetupCard = memo(function HuaweiSetupCard({
   huaweiSteps, huaweiTipExpanded, onToggleExpanded, onToggleStep,
-  onOpenLaunchManager, onOpenExactAlarm, onOpenBatteryOpt,
+  onOpenLaunchManager, onOpenExactAlarm, onOpenBatteryOpt, onOpenNotifImportance,
 }) {
-  const allDone = huaweiSteps.launchManager && huaweiSteps.exactAlarm && huaweiSteps.batteryOpt;
-  const doneCount = [huaweiSteps.launchManager, huaweiSteps.exactAlarm, huaweiSteps.batteryOpt].filter(Boolean).length;
-  const openFns = { launchManager: onOpenLaunchManager, exactAlarm: onOpenExactAlarm, batteryOpt: onOpenBatteryOpt };
+  const allDone = huaweiSteps.launchManager && huaweiSteps.exactAlarm && huaweiSteps.batteryOpt && huaweiSteps.notifImportance;
+  const doneCount = [huaweiSteps.launchManager, huaweiSteps.exactAlarm, huaweiSteps.batteryOpt, huaweiSteps.notifImportance].filter(Boolean).length;
+  const openFns = { launchManager: onOpenLaunchManager, exactAlarm: onOpenExactAlarm, batteryOpt: onOpenBatteryOpt, notifImportance: onOpenNotifImportance };
 
   return (
     <TouchableOpacity
@@ -228,7 +238,7 @@ const HuaweiSetupCard = memo(function HuaweiSetupCard({
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={{ fontSize: 14, fontWeight: '700', color: '#1a2e44' }}>
-          📱 Huawei Adhan Setup {allDone ? '✓' : `(${doneCount}/3)`}
+          📱 Huawei Adhan Setup {allDone ? '✓' : `(${doneCount}/4)`}
         </Text>
         <Text style={{ color: COLORS.gold, fontSize: 13, fontWeight: '700' }}>{huaweiTipExpanded ? '▴' : '▾'}</Text>
       </View>
@@ -288,7 +298,7 @@ export default function PrayerScreen() {
 
   // Huawei/Honor setup — 3 steps: launchManager, exactAlarm, batteryOpt
   const [isHuawei, setIsHuawei]                     = useState(false);
-  const [huaweiSteps, setHuaweiSteps]               = useState({ launchManager: false, exactAlarm: false, batteryOpt: false });
+  const [huaweiSteps, setHuaweiSteps]               = useState({ launchManager: false, exactAlarm: false, batteryOpt: false, notifImportance: false });
   const [huaweiTipExpanded, setHuaweiTipExpanded]   = useState(true);
   const [huaweiUndoBanner, setHuaweiUndoBanner]     = useState(false);
   const huaweiUndoTimerRef                           = useRef(null);
@@ -641,6 +651,21 @@ export default function PrayerScreen() {
       await IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS');
     } catch (e) {
       try { await IntentLauncher.startActivityAsync('android.settings.SETTINGS'); } catch (e2) {}
+    }
+  }, []);
+
+  const openNotifImportanceSettings = useCallback(async () => {
+    try {
+      await IntentLauncher.startActivityAsync('android.settings.CHANNEL_NOTIFICATION_SETTINGS', {
+        'android.provider.extra.APP_PACKAGE': 'com.bushrann.app',
+        'android.provider.extra.CHANNEL_ID': 'prayer-times-v3',
+      });
+    } catch (e) {
+      try { await IntentLauncher.startActivityAsync('android.settings.APP_NOTIFICATION_SETTINGS', {
+        'android.provider.extra.APP_PACKAGE': 'com.bushrann.app',
+      }); } catch (e2) {
+        try { await IntentLauncher.startActivityAsync('android.settings.SETTINGS'); } catch (e3) {}
+      }
     }
   }, []);
 
@@ -1239,6 +1264,7 @@ export default function PrayerScreen() {
             onOpenLaunchManager={openHuaweiSettings}
             onOpenExactAlarm={openExactAlarmSettings}
             onOpenBatteryOpt={openBatteryOptimizationSettings}
+            onOpenNotifImportance={openNotifImportanceSettings}
           />
         )}
 

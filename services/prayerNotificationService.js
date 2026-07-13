@@ -111,6 +111,41 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
   }
 });
 
+async function handlePrayerEvent(content) {
+  try {
+    const prayer = content.data.prayer;
+    const savedAdhanStyle = await AsyncStorage.getItem('adhanStyle');
+    const adhanIndex = savedAdhanStyle ? parseInt(savedAdhanStyle) : 0;
+    
+    const ADHAN_SOURCES = [
+      require('../assets/audio/adhan_makkah.mp3'),
+      require('../assets/audio/adhan_madinah.mp3'),
+      require('../assets/audio/adhan_aqsa.mp3'),
+      require('../assets/audio/adhan_fajr.mp3'),
+    ];
+
+    const source = prayer === 'Fajr' ? ADHAN_SOURCES[3] : ADHAN_SOURCES[adhanIndex];
+
+    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true });
+    Vibration.vibrate([0, 1000, 500, 1000, 500, 1000], true);
+    const { sound, status } = await Audio.Sound.createAsync(source, { shouldPlay: true });
+    currentAdhanSound = sound;
+
+    if (status?.durationMillis) {
+      setTimeout(() => { Vibration.cancel(); }, status.durationMillis / 2);
+    }
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (status.didJustFinish) {
+        sound.unloadAsync();
+        if (currentAdhanSound === sound) currentAdhanSound = null;
+        Vibration.cancel();
+      }
+    });
+  } catch (e) {
+    __DEV__ && console.warn('[PrayerNotif] handlePrayerEvent error:', e.message);
+  }
+}
+
 const PRAYER_TASK = 'PRAYER_NOTIFICATION_TASK';
 const PRAYER_CHANNEL = 'prayer-times-v3';
 const PERSISTENT_ID = 'prayer-persistent';
@@ -352,6 +387,13 @@ export async function initPrayerNotifications(withSound = true) {
     }
     await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
 
+    Notifications.addNotificationReceivedListener((notification) => {
+      const content = notification.request.content;
+      if (content?.data?.type === 'prayer') {
+        handlePrayerEvent(content);
+      }
+    });
+
     Notifications.addNotificationResponseReceivedListener((response) => {
       if (response.actionIdentifier === 'stop-adhan') {
         stopCurrentAdhan();
@@ -437,11 +479,16 @@ export async function requestDndAccess() {
     try {
       await IntentLauncher.startActivityAsync('android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS');
     } catch (e) {
-      __DEV__ && console.warn('[PrayerNotif] DND access error:', e.message);
+      try {
+        await IntentLauncher.startActivityAsync('android.settings.APP_NOTIFICATION_SETTINGS', {
+          'android.provider.extra.APP_PACKAGE': 'com.bushrann.app',
+        });
+      } catch (e2) {
+        __DEV__ && console.warn('[PrayerNotif] DND access error:', e2.message);
+      }
     }
   }
 }
-
 // ── Check if user has made a choice ───────────────────────────────────────────
 export async function getPrayerNotifChoice() {
   const choice = await AsyncStorage.getItem('prayerNotifChoice');
@@ -450,27 +497,4 @@ export async function getPrayerNotifChoice() {
 
 export async function setPrayerNotifChoice(choice) {
   await AsyncStorage.setItem('prayerNotifChoice', choice);
-}
-
-// TEMPORARY — for testing the adhan sound only. Remove once confirmed working.
-export async function scheduleTestNotification() {
-  await Notifications.setNotificationChannelAsync('test-channel-fresh', {
-    name: 'Test Channel Fresh',
-    importance: Notifications.AndroidImportance.MAX,
-    sound: ADHAN_ALERT_SOUND,
-    vibrationPattern: [0, 250, 250, 250],
-    enableVibrate: true,
-    bypassDnd: true,
-  });
-  await Notifications.scheduleNotificationAsync({
-    identifier: 'prayer-test-' + Date.now(),
-    content: {
-      title: '🕌 Test Adhan Notification',
-      body: 'If you hear the short Adhan clip, it worked!',
-      sound: ADHAN_ALERT_SOUND,
-      channelId: 'test-channel-fresh',
-      data: { type: 'test' },
-    },
-    trigger: { type: 'timeInterval', seconds: 10, repeats: false },
-  });
 }

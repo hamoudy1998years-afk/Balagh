@@ -89,8 +89,8 @@ export default function WatchLiveScreen({ navigation, route }) {
         handleNotification: async () => ({
           shouldShowBanner: true,
           shouldShowList: true,
-          shouldPlaySound: true,
-          shouldSetBadge: true,
+          shouldPlaySound: false,
+          shouldSetBadge: false,
         }),
       });
     };

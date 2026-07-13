@@ -23,6 +23,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
+import { useFocusEffect } from '@react-navigation/native';
+import { SystemBars } from 'react-native-edge-to-edge';
 import { fetchVerses, fetchVerseAudioUrl } from '../services/quranApi';
 import { COLORS } from '../constants/theme';
 
@@ -42,6 +44,13 @@ export default function QuranReaderScreen({ navigation, route }) {
   const [isPlayingSurah, setIsPlayingSurah] = useState(false);
   const surahPlayingRef = useRef(false);
   const soundRef = useRef(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      return () => SystemBars.popStackEntry(entry);
+    }, [])
+  );
 
   // Load verses + saved progress
   useEffect(() => {
@@ -324,7 +333,7 @@ export default function QuranReaderScreen({ navigation, route }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {surah.name_simple}
@@ -340,7 +349,7 @@ export default function QuranReaderScreen({ navigation, route }) {
           <Ionicons
             name={memorizeMode ? 'eye-off' : 'school-outline'}
             size={18}
-            color={memorizeMode ? '#000' : '#fff'}
+            color="#000"
           />
           <Text style={[styles.modeBtnText, memorizeMode && { color: '#000' }]}>
             {memorizeMode ? 'Memorize' : 'Read'}
