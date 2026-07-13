@@ -26,7 +26,7 @@ import {
   saveCoordinatesPermanently, loadSavedCoordinates,
   saveMonthlyCache,
 } from '../services/prayerApi';
-import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, getNextOccurrence, requestExactAlarmPermission, requestDndAccess, updatePersistentNotification } from '../services/prayerNotificationService';
+import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, schedulePrayerNotifications, getNextOccurrence, requestExactAlarmPermission, requestDndAccess, updatePersistentNotification } from '../services/prayerNotificationService';
 
 const PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const MECCA = { lat: 21.4225, lng: 39.8262 };
@@ -370,7 +370,7 @@ export default function PrayerScreen() {
         if (saved) {
           const parsed = JSON.parse(saved);
           setHuaweiSteps(parsed);
-          const allDone = parsed.launchManager && parsed.exactAlarm && parsed.batteryOpt;
+          const allDone = parsed.launchManager && parsed.exactAlarm && parsed.batteryOpt && parsed.notifImportance;
           setHuaweiTipExpanded(!allDone);
         }
       } catch (e) {}
@@ -613,7 +613,7 @@ export default function PrayerScreen() {
     setHuaweiSteps(updated);
     await AsyncStorage.setItem('huaweiSteps', JSON.stringify(updated));
 
-    const allDone = updated.launchManager && updated.exactAlarm && updated.batteryOpt;
+    const allDone = updated.launchManager && updated.exactAlarm && updated.batteryOpt && updated.notifImportance;
     if (allDone) {
       setHuaweiUndoBanner(true);
       huaweiUndoTimerRef.current = setTimeout(() => {
@@ -793,9 +793,14 @@ export default function PrayerScreen() {
   }
 
   async function toggleNotification(prayer) {
-    const updated = { ...notifications, [prayer]: !notifications[prayer] };
+    const currentlyOn = notifications[prayer] !== false; // matches what the Switch displays
+    const updated = { ...notifications, [prayer]: !currentlyOn };
     setNotifications(updated);
     await AsyncStorage.setItem('prayerNotifications', JSON.stringify(updated));
+
+    if (prayerData?.timings) {
+      await schedulePrayerNotifications(prayerData.timings, adhanEnabled);
+    }
   }
 
   async function playAdhan() {
@@ -1278,7 +1283,7 @@ export default function PrayerScreen() {
               flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>✅ All 3 steps complete</Text>
+            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>✅ All 4 steps complete</Text>
             <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>↩ Tap to undo (5s)</Text>
           </TouchableOpacity>
         )}

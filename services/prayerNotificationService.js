@@ -34,7 +34,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
             title: '🕌 Today\'s Prayer Times',
             body: freshLines,
             sound: false,
-            channelId: 'prayer-times-v3',
+            channelId: STATUS_CHANNEL,
             data: { type: 'daily-summary', hours: freshHours, minutes: freshMinutes },
             android: {
               style: { type: 'bigText', text: freshLines, summaryText: 'Tap to expand all prayer times' },
@@ -42,7 +42,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
               priority: 'high',
             },
           },
-          trigger: { type: 'date', date: nextDay, channelId: 'prayer-times-v3' },
+          trigger: { type: 'date', date: nextDay, channelId: STATUS_CHANNEL },
         });
       }
     } catch (e) {
@@ -148,6 +148,7 @@ async function handlePrayerEvent(content) {
 
 const PRAYER_TASK = 'PRAYER_NOTIFICATION_TASK';
 const PRAYER_CHANNEL = 'prayer-times-v3';
+const STATUS_CHANNEL = 'prayer-status-v1'; // silent channel — persistent + daily summary live here now
 const PERSISTENT_ID = 'prayer-persistent';
 const PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const DISPLAY_PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
@@ -163,6 +164,15 @@ export async function setupNotificationChannel(withSound = true) {
     vibrationPattern: withSound ? [0, 250, 250, 250] : null,
     enableVibrate: withSound,
     bypassDnd: true,
+  });
+
+  // Separate, always-silent channel — sound:false on a PRAYER_CHANNEL
+  // notification gets ignored, the channel's own Adhan sound fires anyway.
+  await Notifications.setNotificationChannelAsync(STATUS_CHANNEL, {
+    name: 'Prayer Status',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    sound: null,
+    enableVibrate: false,
   });
 }
 
@@ -221,7 +231,7 @@ async function scheduleDailySummaryNow(timings) {
         title: '🕌 Today\'s Prayer Times',
         body: lines,
         sound: false,
-        channelId: PRAYER_CHANNEL,
+        channelId: STATUS_CHANNEL,
         data: { type: 'daily-summary' },
         android: {
           style: {
@@ -259,8 +269,8 @@ export async function scheduleDailySummary(timings, withSound = true) {
       content: {
         title: '🕌 Today\'s Prayer Times',
         body: lines,
-        sound: withSound,
-        channelId: PRAYER_CHANNEL,
+        sound: false,
+        channelId: STATUS_CHANNEL,
         data: { type: 'daily-summary', hours, minutes },
         android: {
           style: {
@@ -275,7 +285,7 @@ export async function scheduleDailySummary(timings, withSound = true) {
       trigger: {
         type: 'date',
         date: triggerDate,
-        channelId: PRAYER_CHANNEL,
+        channelId: STATUS_CHANNEL,
       },
     });
   } catch (e) {
@@ -335,7 +345,7 @@ export async function showPersistentNotification(timings) {
         },
       },
       trigger: {
-        channelId: PRAYER_CHANNEL,
+        channelId: STATUS_CHANNEL,
       },
     });
   } catch (e) {
