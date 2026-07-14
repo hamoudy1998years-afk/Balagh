@@ -14,6 +14,17 @@ let currentAdhanSound = null;
 
 TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => {
   if (error) return;
+  if (data?.notification?.request?.content?.data?.type === 'daily-summary-check') {
+    try {
+      const reliableTimings = await getReliableTodayTimings();
+      if (reliableTimings) {
+        await checkAndRestoreDailySummary(reliableTimings); // only touches it if it's missing
+        await scheduleSwipeCheck(reliableTimings); // arms the next check, 30 min before the following prayer
+      }
+    } catch (e) {
+      __DEV__ && console.warn('[PrayerNotif] Swipe check error:', e.message);
+    }
+  }
   if (data?.notification?.request?.content?.data?.type === 'daily-summary') {
     try {
       const reliableTimings = await getReliableTodayTimings();
@@ -87,7 +98,6 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
       const reliableTimingsForRefresh = await getReliableTodayTimings();
       if (reliableTimingsForRefresh) {
         await showPersistentNotification(reliableTimingsForRefresh);
-        await checkAndRestoreDailySummary(reliableTimingsForRefresh);
       }
 
       // Reschedule this prayer for tomorrow (same clock time), exact trigger
@@ -177,6 +187,17 @@ export async function setupNotificationChannel(withSound = true) {
 }
 
 // ── Schedule all 5 prayer notifications ───────────────────────────────────────
+function getNextPrayerNameAndTime(timings) {
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  for (const prayer of PRAYERS) {
+    const [h, m] = timings[prayer].split(':').map(Number);
+    if (h * 60 + m > nowMinutes) return { hours: h, minutes: m };
+  }
+  const [h, m] = timings['Fajr'].split(':').map(Number);
+  return { hours: h, minutes: m }; // tomorrow's Fajr
+}
+
 export function getNextOccurrence(hours, minutes) {
   const now = new Date();
   const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0, 0);
@@ -293,6 +314,41 @@ export async function scheduleDailySummary(timings, withSound = true) {
   }
 }
 
+// Silent, invisible trigger — its only job is to wake the background task
+// 30 minutes before the next prayer to check if the daily summary was swiped away.
+export async function scheduleSwipeCheck(timings) {
+  try {
+    await Notifications.cancelScheduledNotificationAsync('daily-summary-check');
+
+    const { hours: nextH, minutes: nextM } = getNextPrayerNameAndTime(timings);
+    const rawTrigger = getNextOccurrence(nextH, nextM);
+    const triggerDate = new Date(rawTrigger.getTime() - 30 * 60 * 1000);
+
+    if (triggerDate.getTime() <= Date.now()) {
+      // Already inside the 30-min window — run the check right now instead
+      await checkAndRestoreDailySummary(timings);
+      return;
+    }
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: 'daily-summary-check',
+      content: {
+        title: '',
+        body: '',
+        sound: false,
+        data: { type: 'daily-summary-check' },
+      },
+      trigger: {
+        type: 'date',
+        date: triggerDate,
+        channelId: STATUS_CHANNEL,
+      },
+    });
+  } catch (e) {
+    __DEV__ && console.warn('[PrayerNotif] scheduleSwipeCheck error:', e.message);
+  }
+}
+
 // ── Cancel all prayer notifications ───────────────────────────────────────────
 export async function cancelPrayerNotifications() {
   for (const prayer of PRAYERS) {
@@ -382,6 +438,7 @@ export async function initPrayerNotifications(withSound = true) {
     if (cached?.data?.timings) {
       await schedulePrayerNotifications(cached.data.timings, withSound);
       await scheduleDailySummary(cached.data.timings, withSound);
+      await scheduleSwipeCheck(cached.data.timings);
       await showPersistentNotification(cached.data.timings);
     }
 
@@ -393,6 +450,7 @@ export async function initPrayerNotifications(withSound = true) {
       await savePrayerCache(data, location.coords);
       await schedulePrayerNotifications(data.timings, withSound);
       await scheduleDailySummary(data.timings, withSound);
+      await scheduleSwipeCheck(data.timings);
       await showPersistentNotification(data.timings);
     }
     await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
@@ -417,16 +475,12 @@ export async function initPrayerNotifications(withSound = true) {
 // ── Request exact alarm permission (Android 12+) ──────────────────────────────
 async function checkAndRestoreDailySummary(timings) {
   try {
-    const today = new Date().toDateString();
-    const lastRestore = await AsyncStorage.getItem('dailySummaryRestoredDate');
-    if (lastRestore === today) return; // already restored once today
-
     const presented = await Notifications.getPresentedNotificationsAsync();
     const isVisible = presented.some(n => n.request.identifier === 'prayer-daily-summary');
 
     if (!isVisible) {
+      // Swiped away — restore it, no daily limit
       await scheduleDailySummaryNow(timings);
-      await AsyncStorage.setItem('dailySummaryRestoredDate', today);
     }
   } catch (e) {
     __DEV__ && console.warn('[PrayerNotif] checkAndRestoreDailySummary error:', e.message);

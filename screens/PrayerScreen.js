@@ -26,7 +26,7 @@ import {
   saveCoordinatesPermanently, loadSavedCoordinates,
   saveMonthlyCache,
 } from '../services/prayerApi';
-import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, schedulePrayerNotifications, getNextOccurrence, requestExactAlarmPermission, requestDndAccess, updatePersistentNotification } from '../services/prayerNotificationService';
+import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, schedulePrayerNotifications, getNextOccurrence, requestExactAlarmPermission, updatePersistentNotification } from '../services/prayerNotificationService';
 
 const PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const MECCA = { lat: 21.4225, lng: 39.8262 };
@@ -159,8 +159,8 @@ const HUAWEI_STEP_DATA = [
     title: '2. Exact Alarms',
     instructions: [
       'Tap "Open Settings" below.',
-      'Find and tap Bushrann in the list.',
-      'Allow Bushrann to schedule exact alarms when prompted.',
+      'You\'ll land on "Alarms & reminders" — find and tap Bushrann.',
+      'Turn ON "Set alarms and reminders".',
     ],
   },
   {
@@ -175,12 +175,11 @@ const HUAWEI_STEP_DATA = [
   },
   {
     key: 'notifImportance',
-    title: '4. Notification Importance',
+    title: '4. Allow During Do Not Disturb',
     instructions: [
       'Tap "Open Settings" below.',
-      'Find Bushrann and tap it.',
-      'Tap "Prayer Times" channel.',
-      'Change Importance from "Recommended" to "Urgent".',
+      'You\'ll land on App info — tap "Notifications".',
+      'Turn ON "Allow interruptions".',
     ],
   },
 ];
@@ -209,9 +208,10 @@ const HuaweiStepRow = memo(function HuaweiStepRow({ title, instructions, checked
         ))}
       </View>
       <TouchableOpacity
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         style={{
           marginLeft: 30, alignSelf: 'flex-start',
-          paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10,
+          paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10,
           backgroundColor: 'rgba(201,168,76,0.12)', borderWidth: 1, borderColor: 'rgba(201,168,76,0.35)',
         }}
         onPress={onOpen}
@@ -245,7 +245,7 @@ const HuaweiSetupCard = memo(function HuaweiSetupCard({
       {huaweiTipExpanded && (
         <View style={{ marginTop: 14 }}>
           <Text style={{ fontSize: 12, color: '#666', lineHeight: 18, marginBottom: 16 }}>
-            Huawei/Honor phones need these 3 settings for Adhan to play on time. Check off each step after completing it.
+            Huawei/Honor phones need these 4 settings for Adhan to play on time. Check off each step after completing it.
           </Text>
           {HUAWEI_STEP_DATA.map((step) => (
             <HuaweiStepRow
@@ -656,17 +656,10 @@ export default function PrayerScreen() {
 
   const openNotifImportanceSettings = useCallback(async () => {
     try {
-      await IntentLauncher.startActivityAsync('android.settings.CHANNEL_NOTIFICATION_SETTINGS', {
-        'android.provider.extra.APP_PACKAGE': 'com.bushrann.app',
-        'android.provider.extra.CHANNEL_ID': 'prayer-times-v3',
+      await IntentLauncher.startActivityAsync('android.settings.APPLICATION_DETAILS_SETTINGS', {
+        data: 'package:com.bushrann.app',
       });
-    } catch (e) {
-      try { await IntentLauncher.startActivityAsync('android.settings.APP_NOTIFICATION_SETTINGS', {
-        'android.provider.extra.APP_PACKAGE': 'com.bushrann.app',
-      }); } catch (e2) {
-        try { await IntentLauncher.startActivityAsync('android.settings.SETTINGS'); } catch (e3) {}
-      }
-    }
+    } catch (e) {}
   }, []);
 
   async function handleCitySelect(city) {
@@ -1246,6 +1239,7 @@ export default function PrayerScreen() {
                 else {
                   await cancelPrayerNotifications();
                   await Notifications.cancelScheduledNotificationAsync('prayer-daily-summary');
+                  await Notifications.cancelScheduledNotificationAsync('daily-summary-check');
                   await Notifications.dismissNotificationAsync('prayer-persistent');
                 }
               }}
@@ -1253,12 +1247,7 @@ export default function PrayerScreen() {
               thumbColor={notifsEnabled ? COLORS.gold : 'rgba(0,0,0,0.3)'}
             />
           </View>
-          <TouchableOpacity onPress={requestDndAccess} style={{ marginTop: 10 }}>
-            <Text style={{ color: '#b8860b', fontSize: 12, fontWeight: '700' }}>
-              🔕 Allow Adhan during Do Not Disturb
-            </Text>
-          </TouchableOpacity>
-        </View>
+          </View>
         
         {isHuawei && (
           <HuaweiSetupCard
