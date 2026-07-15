@@ -3,14 +3,40 @@ import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { Platform, Vibration } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { getPrayerTimes, getNextPrayer, formatTime, getPrayerEmoji, loadPrayerCache, savePrayerCache, loadMonthlyCache, saveMonthlyCache, getTodayTimingsFromMonthly, getMonthlyTimetable } from './prayerApi';
 
 const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND-NOTIFICATION-TASK';
 
-// Keeps a reference to the currently playing Adhan so we can stop it on tap
-let currentAdhanSound = null;
+// Holds all currently playing Adhan audio player instances
+let adhanPlayers = [];
+let audioModeSetupDone = false;
+
+async function ensureAudioModeReady() {
+  if (audioModeSetupDone) return;
+  await setAudioModeAsync({
+    playsInSilentMode: true,
+    shouldPlayInBackground: true,
+    interruptionMode: 'duckOthers',
+  });
+  audioModeSetupDone = true;
+}
+
+async function playAdhanTrack(source, prayer) {
+  await ensureAudioModeReady();
+
+  const player = createAudioPlayer(source);
+  adhanPlayers.push(player);
+  player.addListener('playbackStatusUpdate', (status) => {
+    if (status.didJustFinish) {
+      Vibration.cancel();
+      adhanPlayers = adhanPlayers.filter(p => p !== player);
+    }
+  });
+  player.play();
+}
 
 TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => {
   if (error) return;
@@ -76,23 +102,8 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
       // Fajr uses special adhan
       const source = prayer === 'Fajr' ? ADHAN_SOURCES[3] : ADHAN_SOURCES[adhanIndex];
 
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true });
       Vibration.vibrate([0, 1000, 500, 1000, 500, 1000], true);
-      const { sound, status } = await Audio.Sound.createAsync(source, { shouldPlay: true });
-      currentAdhanSound = sound;
-
-      if (status?.durationMillis) {
-        setTimeout(() => {
-          Vibration.cancel();
-        }, status.durationMillis / 2);
-      }
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.didJustFinish) {
-          sound.unloadAsync();
-          if (currentAdhanSound === sound) currentAdhanSound = null;
-          Vibration.cancel();
-        }
-      });
+      await playAdhanTrack(source, prayer);
 
       // Refresh the persistent notification right at this prayer's exact time
       const reliableTimingsForRefresh = await getReliableTodayTimings();
@@ -101,8 +112,9 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
       }
 
       // Reschedule this prayer for tomorrow (same clock time), exact trigger
-      const { hours, minutes } = data.notification.request.content.data;
-      if (hours != null && minutes != null) {
+      // Skip for test notifications so they don't overwrite the real prayer's schedule
+      const { hours, minutes, test } = data.notification.request.content.data;
+      if (!test && hours != null && minutes != null) {
         const nextDay = new Date();
         nextDay.setDate(nextDay.getDate() + 1);
         nextDay.setHours(hours, minutes, 0, 0);
@@ -112,7 +124,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
             ...data.notification.request.content,
             categoryIdentifier: 'prayer-actions',
           },
-          trigger: { type: 'date', date: nextDay, channelId: 'prayer-times-v3' },
+          trigger: { type: 'date', date: nextDay, channelId: PRAYER_CHANNEL },
         });
       }
     } catch (e) {
@@ -121,7 +133,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
   }
 });
 
-async function handlePrayerEvent(content) {
+async function handlePrayerEvent(content, notifId) {
   try {
     const prayer = content.data.prayer;
     const savedAdhanStyle = await AsyncStorage.getItem('adhanStyle');
@@ -136,35 +148,22 @@ async function handlePrayerEvent(content) {
 
     const source = prayer === 'Fajr' ? ADHAN_SOURCES[3] : ADHAN_SOURCES[adhanIndex];
 
-    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true });
     Vibration.vibrate([0, 1000, 500, 1000, 500, 1000], true);
-    const { sound, status } = await Audio.Sound.createAsync(source, { shouldPlay: true });
-    currentAdhanSound = sound;
-
-    if (status?.durationMillis) {
-      setTimeout(() => { Vibration.cancel(); }, status.durationMillis / 2);
-    }
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if (status.didJustFinish) {
-        sound.unloadAsync();
-        if (currentAdhanSound === sound) currentAdhanSound = null;
-        Vibration.cancel();
-      }
-    });
+    await playAdhanTrack(source, prayer);
   } catch (e) {
     __DEV__ && console.warn('[PrayerNotif] handlePrayerEvent error:', e.message);
   }
 }
 
 const PRAYER_TASK = 'PRAYER_NOTIFICATION_TASK';
-const PRAYER_CHANNEL = 'prayer-times-v3';
+const PRAYER_CHANNEL = 'prayer-times-v5';
 const STATUS_CHANNEL = 'prayer-status-v1'; // silent channel — persistent + daily summary live here now
 const PERSISTENT_ID = 'prayer-persistent';
 const PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const DISPLAY_PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
 // ── Setup notification channel (Android) ──────────────────────────────────────
-const ADHAN_ALERT_SOUND = 'adhan_alert.wav';
+const ADHAN_ALERT_SOUND = 'adhan_silent.wav';
 
 export async function setupNotificationChannel(withSound = true) {
   await Notifications.setNotificationChannelAsync(PRAYER_CHANNEL, {
@@ -229,6 +228,8 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
         channelId: PRAYER_CHANNEL,
         categoryIdentifier: 'prayer-actions',
         data: { type: 'prayer', prayer, hours, minutes },
+        sticky: true,
+        android: { ongoing: true },
       },
       trigger: {
         type: 'date',
@@ -458,7 +459,7 @@ export async function initPrayerNotifications(withSound = true) {
     Notifications.addNotificationReceivedListener((notification) => {
       const content = notification.request.content;
       if (content?.data?.type === 'prayer') {
-        handlePrayerEvent(content);
+        handlePrayerEvent(content, notification.request.identifier);
       }
     });
 
@@ -517,14 +518,26 @@ async function getReliableTodayTimings() {
 
 async function stopCurrentAdhan() {
   Vibration.cancel();
-  if (currentAdhanSound) {
-    try {
-      await currentAdhanSound.stopAsync();
-      await currentAdhanSound.unloadAsync();
-    } catch (e) {
-      __DEV__ && console.warn('[PrayerNotif] stopCurrentAdhan error:', e.message);
+  try {
+    for (const player of adhanPlayers) {
+      try {
+        player.pause();
+        player.remove();
+      } catch (e) {}
     }
-    currentAdhanSound = null;
+    adhanPlayers = [];
+  } catch (e) {
+    __DEV__ && console.warn('[PrayerNotif] stopCurrentAdhan error:', e.message);
+  }
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    for (const n of presented) {
+      if (n.request.content.data?.type === 'prayer') {
+        await Notifications.dismissNotificationAsync(n.request.identifier);
+      }
+    }
+  } catch (e) {
+    __DEV__ && console.warn('[PrayerNotif] dismiss error:', e.message);
   }
 }
 
@@ -561,4 +574,26 @@ export async function getPrayerNotifChoice() {
 
 export async function setPrayerNotifChoice(choice) {
   await AsyncStorage.setItem('prayerNotifChoice', choice);
+}
+
+// TEMPORARY — fires a real prayer-type Adhan 5 sec from now, using the currently
+// selected Adhan style, so it goes through the exact same path (sound, channel,
+// banner, Stop button) as a real prayer notification. test:true stops it from
+// overwriting the real Dhuhr schedule. Remove once banner testing is done.
+export async function scheduleTestAdhanNotification() {
+  const fireDate = new Date(Date.now() + 5000);
+  await Notifications.scheduleNotificationAsync({
+    identifier: 'prayer-test-adhan-' + Date.now(),
+    content: {
+      title: '🕌 🧪 Dhuhr Prayer Time',
+      body: `It's time for Dhuhr prayer. Allahu Akbar!`,
+      sound: ADHAN_ALERT_SOUND,
+      channelId: PRAYER_CHANNEL,
+      categoryIdentifier: 'prayer-actions',
+      data: { type: 'prayer', prayer: 'Dhuhr', test: true, hours: fireDate.getHours(), minutes: fireDate.getMinutes() },
+      sticky: true,
+      android: { ongoing: true },
+    },
+    trigger: { type: 'date', date: fireDate, channelId: PRAYER_CHANNEL },
+  });
 }

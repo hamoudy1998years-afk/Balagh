@@ -87,7 +87,9 @@
         {
           "icon": "./assets/icon.png",
           "color": "#B76E79",
-          "sounds": ["./assets/audio/adhan_alert.wav"]
+          "sounds": [
+            "./assets/audio/adhan_alert.wav"
+          ]
         }
       ],
       [
@@ -119,7 +121,13 @@
         }
       ],
       "react-native-video",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true
+        }
+      ]
     ],
     "extra": {
       "eas": {
