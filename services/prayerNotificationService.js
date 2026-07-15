@@ -29,9 +29,20 @@ async function playAdhanTrack(source, prayer) {
 
   const player = createAudioPlayer(source);
   adhanPlayers.push(player);
+  let halfDurationTimer = null;
+  let halfPointSet = false;
+
   player.addListener('playbackStatusUpdate', (status) => {
+    if (!halfPointSet && status.duration) {
+      halfPointSet = true;
+      const halfMs = (status.duration / 2) * 1000;
+      halfDurationTimer = setTimeout(() => {
+        Vibration.cancel();
+      }, halfMs);
+    }
     if (status.didJustFinish) {
       Vibration.cancel();
+      if (halfDurationTimer) clearTimeout(halfDurationTimer);
       adhanPlayers = adhanPlayers.filter(p => p !== player);
     }
   });
