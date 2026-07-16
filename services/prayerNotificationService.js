@@ -113,6 +113,16 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
       // Fajr uses special adhan
       const source = prayer === 'Fajr' ? ADHAN_SOURCES[3] : ADHAN_SOURCES[adhanIndex];
 
+      // Dismiss any previous un-stopped Adhan notification before this one takes over
+      try {
+        const presented = await Notifications.getPresentedNotificationsAsync();
+        for (const n of presented) {
+          if (n.request.content.data?.type === 'prayer' && n.request.identifier !== data.notification.request.identifier) {
+            await Notifications.dismissNotificationAsync(n.request.identifier);
+          }
+        }
+      } catch (e) {}
+
       Vibration.vibrate([0, 1000, 500, 1000, 500, 1000], true);
       await playAdhanTrack(source, prayer);
 
@@ -158,6 +168,16 @@ async function handlePrayerEvent(content, notifId) {
     ];
 
     const source = prayer === 'Fajr' ? ADHAN_SOURCES[3] : ADHAN_SOURCES[adhanIndex];
+
+    // Dismiss any previous un-stopped Adhan notification before this one takes over
+    try {
+      const presented = await Notifications.getPresentedNotificationsAsync();
+      for (const n of presented) {
+        if (n.request.content.data?.type === 'prayer' && n.request.identifier !== notifId) {
+          await Notifications.dismissNotificationAsync(n.request.identifier);
+        }
+      }
+    } catch (e) {}
 
     Vibration.vibrate([0, 1000, 500, 1000, 500, 1000], true);
     await playAdhanTrack(source, prayer);
@@ -234,7 +254,7 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
       identifier: `prayer-${prayer}`,
       content: {
         title: `🕌 ${getPrayerEmoji(prayer)} ${prayer} Prayer Time`,
-        body: `It's time for ${prayer} prayer. Allahu Akbar!`,
+        body: `Allahu Akbar!`,
         sound: withSound ? ADHAN_ALERT_SOUND : false,
         channelId: PRAYER_CHANNEL,
         categoryIdentifier: 'prayer-actions',
@@ -597,7 +617,7 @@ export async function scheduleTestAdhanNotification() {
     identifier: 'prayer-test-adhan-' + Date.now(),
     content: {
       title: '🕌 🧪 Dhuhr Prayer Time',
-      body: `It's time for Dhuhr prayer. Allahu Akbar!`,
+      body: `Allahu Akbar!`,
       sound: ADHAN_ALERT_SOUND,
       channelId: PRAYER_CHANNEL,
       categoryIdentifier: 'prayer-actions',

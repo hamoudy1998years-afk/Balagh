@@ -88,7 +88,8 @@
           "icon": "./assets/icon.png",
           "color": "#B76E79",
           "sounds": [
-            "./assets/audio/adhan_alert.wav"
+            "./assets/audio/adhan_alert.wav",
+            "./assets/audio/adhan_silent.wav"
           ]
         }
       ],
