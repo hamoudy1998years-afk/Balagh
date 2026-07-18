@@ -1,4 +1,4 @@
-﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -232,7 +232,8 @@ const linking = {
 
 function App() {
   const [session, setSession] = useState(undefined);
-  const [ageVerified, setAgeVerified] = useState(null);
+  // TEMP-DISABLED: Age gate removed for production (Quran/Prayer focus). Re-enable when UGC/streaming features launch.
+  const [ageVerified, setAgeVerified] = useState(true);
   const [onboardingCompleted, setOnboardingCompleted] = useState(null);
   const [jsSplashVisible, setJsSplashVisible] = useState(true);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
@@ -267,9 +268,11 @@ function App() {
     async function checkAge() {
       try {
         const verified = await AsyncStorage.getItem('ageVerified');
-        setAgeVerified(verified === 'true');
+        // TEMP-DISABLED: age gate bypassed
+        // setAgeVerified(verified === 'true');
       } catch (e) {
-        setAgeVerified(false);
+        // TEMP-DISABLED: age gate bypassed
+        // setAgeVerified(false);
       }
     }
     checkAge();

@@ -22,7 +22,7 @@ export async function loadBannedWords() {
     wordsLoaded = true;
     // Banned words loaded silently
   } catch (error) {
-    console.error('[MODERATION] Failed to load words. Message:', error?.message, 'Code:', error?.code, 'Details:', error?.details, 'Hint:', error?.hint);
+    __DEV__ && console.warn('[MODERATION] Failed to load words. Message:', error?.message, 'Code:', error?.code, 'Details:', error?.details, 'Hint:', error?.hint);
     dynamicBannedWords = DEFAULT_BANNED_WORDS;
     wordsLoaded = true;
   }

@@ -1,4 +1,4 @@
-{
+﻿{
   "expo": {
     "name": "Bushrann",
     "slug": "Balagh",
@@ -87,10 +87,7 @@
         {
           "icon": "./assets/icon.png",
           "color": "#B76E79",
-          "sounds": [
-            "./assets/audio/adhan_alert.wav",
-            "./assets/audio/adhan_silent.wav"
-          ]
+          "sounds": ["./assets/audio/adhan_alert.wav", "./assets/audio/adhan_ios_makkah.wav", "./assets/audio/adhan_ios_madinah.wav", "./assets/audio/adhan_ios_aqsa.wav", "./assets/audio/adhan_ios_fajr.wav"]
         }
       ],
       [
@@ -122,13 +119,7 @@
         }
       ],
       "react-native-video",
-      "expo-asset",
-      [
-        "expo-audio",
-        {
-          "enableBackgroundPlayback": true
-        }
-      ]
+      "expo-asset"
     ],
     "extra": {
       "eas": {

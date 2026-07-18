@@ -26,7 +26,7 @@ import {
   saveCoordinatesPermanently, loadSavedCoordinates,
   saveMonthlyCache,
 } from '../services/prayerApi';
-import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, schedulePrayerNotifications, getNextOccurrence, requestExactAlarmPermission, updatePersistentNotification, scheduleTestAdhanNotification } from '../services/prayerNotificationService';
+import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, schedulePrayerNotifications, getNextOccurrence, requestExactAlarmPermission, updatePersistentNotification } from '../services/prayerNotificationService';
 
 const PRAYERS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const MECCA = { lat: 21.4225, lng: 39.8262 };
@@ -1235,8 +1235,6 @@ export default function PrayerScreen() {
                 if (val) { await initPrayerNotifications(adhanEnabled); }
                 else {
                   await cancelPrayerNotifications();
-                  await Notifications.cancelScheduledNotificationAsync('prayer-daily-summary');
-                  await Notifications.cancelScheduledNotificationAsync('daily-summary-check');
                   await Notifications.dismissNotificationAsync('prayer-persistent');
                 }
               }}
@@ -1360,9 +1358,6 @@ export default function PrayerScreen() {
               </View>
               <TouchableOpacity style={styles.playBtn} onPress={playAdhan}>
                 <Text style={styles.playBtnText}>{playingAdhan ? '⏹ Stop' : '▶️ Preview'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.playBtn, { marginTop: 6 }]} onPress={scheduleTestAdhanNotification}>
-                <Text style={styles.playBtnText}>🧪 Test Adhan</Text>
               </TouchableOpacity>
             </View>
           </View>
