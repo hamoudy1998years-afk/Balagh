@@ -78,7 +78,7 @@ object AdhanPersistentNotification {
                 else -> {
                     val parts = t.split(":")
                     val mins = (parts[0].toIntOrNull() ?: 0) * 60 + (parts[1].toIntOrNull() ?: 0)
-                    if (mins < nowMinutes) "✅" else "🔲"
+                    if (mins <= nowMinutes) "✅" else "🔲"
                 }
             }
             sb.append("$status $prayer: ${formatTime(t)}\n")
