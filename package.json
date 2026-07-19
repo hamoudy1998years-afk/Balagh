@@ -11,7 +11,6 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@gorhom/bottom-sheet": "^5.2.8",
-    "@livekit/react-native": "^2.9.8",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "11.5.2",
     "@react-navigation/bottom-tabs": "^7.15.5",
@@ -46,8 +45,6 @@
     "expo-video": "2",
     "expo-video-thumbnails": "~55.0.10",
     "expo-web-browser": "~55.0.9",
-    "livekit-client": "^2.0.0",
-    "livekit-server-sdk": "^2.15.1",
     "react": "19.2.0",
     "react-native": "0.83.2",
     "react-native-agora": "^4.6.2",

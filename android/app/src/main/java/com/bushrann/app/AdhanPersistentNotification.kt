@@ -31,6 +31,7 @@ object AdhanPersistentNotification {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
             val nm = context.getSystemService(NotificationManager::class.java)
+            nm.deleteNotificationChannel("prayer-persistent") // remove legacy v1 channel from older installs
             nm.createNotificationChannel(channel)
         }
     }

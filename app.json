@@ -1,9 +1,9 @@
-﻿{
+{
   "expo": {
     "name": "Bushrann",
     "slug": "Balagh",
     "scheme": "bushrann",
-    "version": "1.6.9",
+    "version": "1.7.0",
     "privacyPolicyUrl": "https://sites.google.com/view/bushrann/privacy-policy ",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -27,7 +27,7 @@
       }
     },
     "android": {
-      "versionCode": 21,
+      "versionCode": 22,
       "minSdkVersion": 24,
       "largeHeap": true,
       "navigationBar": {

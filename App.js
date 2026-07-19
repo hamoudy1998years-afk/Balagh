@@ -15,8 +15,6 @@ import ProfileScreen from './screens/ProfileScreen';
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import ProfileVideosScreen from './screens/ProfileVideosScreen';
-import LiveStreamScreen from './screens/LiveStreamScreenLiveKit';
-import WatchLiveScreen from './screens/WatchLiveScreen';
 import { homeRefreshRef } from './utils/refs';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -224,8 +222,6 @@ const linking = {
       ResetPassword: 'auth/callback',
       VideoDetail: 'video/:id',
       UserProfile: 'user/:id',
-      WatchLive: 'live/:streamId',
-      LiveStream: 'go-live',
     },
   },
 };
@@ -297,8 +293,6 @@ function App() {
       const data = response.notification.request.content.data;
       if (data?.type === 'video' && data?.videoId) {
         navigationRef.current?.navigate('VideoDetail', { id: data.videoId });
-      } else if (data?.type === 'live' && data?.streamId) {
-        navigationRef.current?.navigate('WatchLive', { stream: { id: data.streamId } });
       } else if (data?.type === 'follow' && data?.userId) {
         navigationRef.current?.navigate('UserProfile', { profileUserId: data.userId });
       } else if (data?.type === 'message') {
@@ -496,8 +490,6 @@ function App() {
                       <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
                       <Stack.Screen name="Search" component={SearchScreen} />
                       <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
-                      <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
-                      <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
                       <Stack.Screen name="FollowList" component={FollowListScreen} />
                       <Stack.Screen name="Settings" component={SettingsScreen} />
                       <Stack.Screen name="UserProfile" component={ProfileScreen} />

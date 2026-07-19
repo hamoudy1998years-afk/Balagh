@@ -47,3 +47,6 @@ yarn-error.*
 
 # asset compression backups
 assets/*.backup
+
+*.jks
+keystore.properties
