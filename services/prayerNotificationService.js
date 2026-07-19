@@ -14,6 +14,7 @@ let currentAdhanSound = null;
 
 TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => {
   if (error) return;
+  if (Platform.OS === 'android') return; // Android: native module owns adhan playback
   if (data?.notification?.request?.content?.data?.type === 'prayer') {
     try {
       const prayer = data.notification.request.content.data.prayer;
@@ -386,6 +387,7 @@ export async function initPrayerNotifications(withSound = true) {
     await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
 
     Notifications.addNotificationReceivedListener((notification) => {
+      if (Platform.OS === 'android') return; // Android: native module owns adhan playback
       const content = notification.request.content;
       if (content?.data?.type === 'prayer') {
         handlePrayerEvent(content);
