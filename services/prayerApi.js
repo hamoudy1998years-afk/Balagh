@@ -101,6 +101,9 @@ export async function getPrayerTimes(latitude, longitude) {
   const date = new Date();
   const timestamp = Math.floor(date.getTime() / 1000);
 
+  const hijriAdj = await AsyncStorage.getItem('hijriAdjustment');
+  const adjustmentDays = hijriAdj ? parseInt(hijriAdj) : 0;
+
   const params = new URLSearchParams({
     latitude: latitude.toString(),
     longitude: longitude.toString(),
@@ -108,6 +111,7 @@ export async function getPrayerTimes(latitude, longitude) {
     school: '0',
     timezonestring: Intl.DateTimeFormat().resolvedOptions().timeZone,
     tune: '0,0,0,0,-1,0,0,0,0',
+    adjustment: adjustmentDays.toString(),
   });
 
   const url = `${BASE_URL}/timings/${timestamp}?${params.toString()}`;
@@ -126,6 +130,9 @@ export async function getMonthlyTimetable(latitude, longitude) {
   const month = date.getMonth() + 1;
   const year = date.getFullYear();
 
+  const hijriAdj = await AsyncStorage.getItem('hijriAdjustment');
+  const adjustmentDays = hijriAdj ? parseInt(hijriAdj) : 0;
+
   const params = new URLSearchParams({
     latitude: latitude.toString(),
     longitude: longitude.toString(),
@@ -133,6 +140,7 @@ export async function getMonthlyTimetable(latitude, longitude) {
     school: '0',
     timezonestring: Intl.DateTimeFormat().resolvedOptions().timeZone,
     tune: '0,0,0,0,-1,0,0,0,0',
+    adjustment: adjustmentDays.toString(),
   });
 
   const response = await fetch(

@@ -282,6 +282,7 @@ export default function PrayerScreen() {
   const [showNotifPrompt, setShowNotifPrompt]   = useState(false);
   const [notifsEnabled, setNotifsEnabled]       = useState(true);
   const [compassExpanded, setCompassExpanded]   = useState(false);
+  const [hijriAdjustment, setHijriAdjustment]   = useState(0);
 
   // Location mode
   const [locationMode, setLocationMode]             = useState(null);
@@ -434,6 +435,8 @@ export default function PrayerScreen() {
       if (savedAdhanEnabled !== null) setAdhanEnabled(savedAdhanEnabled === 'true');
       const savedNotifsEnabled = await AsyncStorage.getItem('notifsEnabled');
       if (savedNotifsEnabled !== null) setNotifsEnabled(savedNotifsEnabled === 'true');
+      const savedHijriAdj = await AsyncStorage.getItem('hijriAdjustment');
+      if (savedHijriAdj !== null) setHijriAdjustment(parseInt(savedHijriAdj));
     } catch (e) {}
   }
 
@@ -1243,6 +1246,28 @@ export default function PrayerScreen() {
             />
           </View>
           </View>
+
+        <View style={styles.card}>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: '#1a2e44' }}>🌙 Hijri Date Adjustment</Text>
+          <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>If the Islamic date doesn't match your local mosque announcement, adjust it here.</Text>
+          <View style={styles.adhanStyles}>
+            {[-2, -1, 0, 1, 2].map((n) => (
+              <TouchableOpacity
+                key={n}
+                style={[styles.adhanChip, hijriAdjustment === n && styles.adhanChipActive]}
+                onPress={async () => {
+                  setHijriAdjustment(n);
+                  await AsyncStorage.setItem('hijriAdjustment', String(n));
+                  loadPrayerData();
+                }}
+              >
+                <Text style={[styles.adhanChipText, hijriAdjustment === n && styles.adhanChipTextActive]}>
+                  {n > 0 ? `+${n}` : String(n)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
         
         {isHuawei && (
           <HuaweiSetupCard

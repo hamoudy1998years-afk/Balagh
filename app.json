@@ -27,7 +27,7 @@
       }
     },
     "android": {
-      "versionCode": 22,
+      "versionCode": 24,
       "minSdkVersion": 24,
       "largeHeap": true,
       "navigationBar": {
