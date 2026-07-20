@@ -19,11 +19,16 @@ class AdhanForegroundService : Service() {
     private var mediaPlayer: MediaPlayer? = null
     private var vibrator: Vibrator? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var currentPrayer: String = ""
+    private var currentHours: Int = 0
+    private var currentMinutes: Int = 0
 
     companion object {
         const val CHANNEL_ID = "adhan-foreground-service"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "com.bushrann.app.STOP_ADHAN"
+        private val LAST_ADHAN_CHANNEL_ID = "adhan-history"
+        private val LAST_ADHAN_NOTIFICATION_ID = 1004
     }
 
     override fun onCreate() {
@@ -36,6 +41,7 @@ class AdhanForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            postLastAdhanNote()
             stopAdhan()
             stopSelf()
             return START_NOT_STICKY
@@ -44,6 +50,9 @@ class AdhanForegroundService : Service() {
         val prayer = intent?.getStringExtra("prayer") ?: "Prayer"
         val hours = intent?.getIntExtra("hours", 0) ?: 0
         val minutes = intent?.getIntExtra("minutes", 0) ?: 0
+        currentPrayer = prayer
+        currentHours = hours
+        currentMinutes = minutes
 
         val styleIndex = intent?.getIntExtra("styleIndex", 0) ?: 0
         startForeground(NOTIFICATION_ID, buildNotification(prayer))
@@ -126,6 +135,7 @@ class AdhanForegroundService : Service() {
 
             mediaPlayer = MediaPlayer.create(this, resId).apply {
                 setOnCompletionListener {
+                    postLastAdhanNote()
                     stopAdhan()
                     stopSelf()
                 }
@@ -138,6 +148,40 @@ class AdhanForegroundService : Service() {
             e.printStackTrace()
             stopSelf()
         }
+    }
+
+    private fun postLastAdhanNote() {
+        if (currentPrayer.isEmpty()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                LAST_ADHAN_CHANNEL_ID,
+                "Last Adhan",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows the most recent adhan that played"
+                setShowBadge(false)
+            }
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(channel)
+        }
+
+        val openIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val openPending = PendingIntent.getActivity(
+            this, 0, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, LAST_ADHAN_CHANNEL_ID)
+            .setContentTitle("🕌 It's $currentPrayer time")
+            .setContentText("It's time to pray now")
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openPending)
+            .build()
+
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(LAST_ADHAN_NOTIFICATION_ID, notification)
     }
 
     private fun stopAdhan() {

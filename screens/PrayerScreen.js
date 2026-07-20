@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, ActivityIndicator, Vibration, TextInput, Linking, Platform
+  Switch, ActivityIndicator, Vibration, TextInput, Linking, Platform, AppState
 } from 'react-native';
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import Animated, {
@@ -167,39 +167,33 @@ const HUAWEI_STEP_DATA = [
     key: 'batteryOpt',
     title: '3. Battery Optimization',
     instructions: [
-      'Tap "Open Settings" below.',
-      'Tap the filter at the top (may say "Not allowed") and choose "All apps".',
-      'Find Bushrann in the list and tap it.',
-      'Select "Don\'t allow", then tap OK.',
-    ],
-  },
-  {
-    key: 'notifImportance',
-    title: '4. Allow During Do Not Disturb',
-    instructions: [
-      'Tap "Open Settings" below.',
-      'You\'ll land on App info — tap "Notifications".',
-      'Turn ON "Allow interruptions".',
+      'Tap "Open Settings" below, then tap "Allow" (or "Disable") in the dialog. That\'s it!',
     ],
   },
 ];
 
-const HuaweiStepRow = memo(function HuaweiStepRow({ title, instructions, checked, onToggle, onOpen }) {
+const HuaweiStepRow = memo(function HuaweiStepRow({ stepKey, title, instructions, checked, onToggle, onOpen }) {
   return (
     <View style={{ marginBottom: 16 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-        <TouchableOpacity
-          onPress={onToggle}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={{
-            width: 22, height: 22, borderRadius: 6, marginRight: 8,
-            borderWidth: 2, borderColor: checked ? '#1a7a3c' : 'rgba(0,0,0,0.25)',
-            backgroundColor: checked ? '#1a7a3c' : 'transparent',
-            alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          {checked && <Text style={{ color: '#fff', fontSize: 13, fontWeight: '900' }}>✓</Text>}
-        </TouchableOpacity>
+        {stepKey === 'launchManager' ? (
+          <TouchableOpacity
+            onPress={onToggle}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={{
+              width: 22, height: 22, borderRadius: 6, marginRight: 8,
+              borderWidth: 2, borderColor: checked ? '#1a7a3c' : 'rgba(0,0,0,0.25)',
+              backgroundColor: checked ? '#1a7a3c' : 'transparent',
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            {checked && <Text style={{ color: '#fff', fontSize: 13, fontWeight: '900' }}>✓</Text>}
+          </TouchableOpacity>
+        ) : (
+          <Text style={{ fontSize: 13, fontWeight: '600', color: checked ? '#4CAF50' : '#999', marginRight: 8 }}>
+            {checked ? '✅ Verified' : '⏳ Pending'}
+          </Text>
+        )}
         <Text style={{ fontSize: 13, fontWeight: '700', color: '#1a2e44', flex: 1 }}>{title}</Text>
       </View>
       <View style={{ marginLeft: 30, marginBottom: 10 }}>
@@ -226,9 +220,9 @@ const HuaweiSetupCard = memo(function HuaweiSetupCard({
   huaweiSteps, huaweiTipExpanded, onToggleExpanded, onToggleStep,
   onOpenLaunchManager, onOpenExactAlarm, onOpenBatteryOpt, onOpenNotifImportance,
 }) {
-  const allDone = huaweiSteps.launchManager && huaweiSteps.exactAlarm && huaweiSteps.batteryOpt && huaweiSteps.notifImportance;
-  const doneCount = [huaweiSteps.launchManager, huaweiSteps.exactAlarm, huaweiSteps.batteryOpt, huaweiSteps.notifImportance].filter(Boolean).length;
-  const openFns = { launchManager: onOpenLaunchManager, exactAlarm: onOpenExactAlarm, batteryOpt: onOpenBatteryOpt, notifImportance: onOpenNotifImportance };
+  const allDone = huaweiSteps.launchManager && huaweiSteps.exactAlarm && huaweiSteps.batteryOpt;
+  const doneCount = [huaweiSteps.launchManager, huaweiSteps.exactAlarm, huaweiSteps.batteryOpt].filter(Boolean).length;
+  const openFns = { launchManager: onOpenLaunchManager, exactAlarm: onOpenExactAlarm, batteryOpt: onOpenBatteryOpt };
 
   return (
     <TouchableOpacity
@@ -238,18 +232,19 @@ const HuaweiSetupCard = memo(function HuaweiSetupCard({
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={{ fontSize: 14, fontWeight: '700', color: '#1a2e44' }}>
-          📱 Huawei Adhan Setup {allDone ? '✓' : `(${doneCount}/4)`}
+        📱 Huawei Adhan Setup {allDone ? '✓' : `(${doneCount}/3)`}
         </Text>
         <Text style={{ color: COLORS.gold, fontSize: 13, fontWeight: '700' }}>{huaweiTipExpanded ? '▴' : '▾'}</Text>
       </View>
       {huaweiTipExpanded && (
         <View style={{ marginTop: 14 }}>
           <Text style={{ fontSize: 12, color: '#666', lineHeight: 18, marginBottom: 16 }}>
-            Huawei/Honor phones need these 4 settings for Adhan to play on time. Check off each step after completing it.
+            Huawei/Honor phones need these 3 settings for Adhan to play on time. Check off each step after completing it.
           </Text>
           {HUAWEI_STEP_DATA.map((step) => (
             <HuaweiStepRow
               key={step.key}
+              stepKey={step.key}
               title={step.title}
               instructions={step.instructions}
               checked={!!huaweiSteps[step.key]}
@@ -299,7 +294,7 @@ export default function PrayerScreen() {
 
   // Huawei/Honor setup — 3 steps: launchManager, exactAlarm, batteryOpt
   const [isHuawei, setIsHuawei]                     = useState(false);
-  const [huaweiSteps, setHuaweiSteps]               = useState({ launchManager: false, exactAlarm: false, batteryOpt: false, notifImportance: false });
+  const [huaweiSteps, setHuaweiSteps]               = useState({ launchManager: false, exactAlarm: false, batteryOpt: false });
   const [huaweiTipExpanded, setHuaweiTipExpanded]   = useState(true);
   const [huaweiUndoBanner, setHuaweiUndoBanner]     = useState(false);
   const huaweiUndoTimerRef                           = useRef(null);
@@ -370,14 +365,22 @@ export default function PrayerScreen() {
         const saved = await AsyncStorage.getItem('huaweiSteps');
         if (saved) {
           const parsed = JSON.parse(saved);
-          setHuaweiSteps(parsed);
-          const allDone = parsed.launchManager && parsed.exactAlarm && parsed.batteryOpt && parsed.notifImportance;
+          setHuaweiSteps({ launchManager: !!parsed.launchManager, exactAlarm: !!parsed.exactAlarm, batteryOpt: !!parsed.batteryOpt });
+          const allDone = parsed.launchManager && parsed.exactAlarm && parsed.batteryOpt;
           setHuaweiTipExpanded(!allDone);
         }
       } catch (e) {}
     }
     checkHuaweiTip();
   }, []);
+
+  useEffect(() => {
+    verifyHuaweiSteps();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') verifyHuaweiSteps();
+    });
+    return () => sub.remove();
+  }, [verifyHuaweiSteps]);
 
   // (Removed — Huawei setup now uses manual per-step checkboxes instead of AppState detection)
 
@@ -613,7 +616,7 @@ export default function PrayerScreen() {
     setHuaweiSteps(updated);
     await AsyncStorage.setItem('huaweiSteps', JSON.stringify(updated));
 
-    const allDone = updated.launchManager && updated.exactAlarm && updated.batteryOpt && updated.notifImportance;
+    const allDone = updated.launchManager && updated.exactAlarm && updated.batteryOpt;
     if (allDone) {
       setHuaweiUndoBanner(true);
       huaweiUndoTimerRef.current = setTimeout(() => {
@@ -632,6 +635,28 @@ export default function PrayerScreen() {
     setHuaweiTipExpanded(true);
   }
 
+  const verifyHuaweiSteps = useCallback(async () => {
+    if (Platform.OS !== 'android') return;
+    try {
+      const { NativeModules } = require('react-native');
+      const AdhanModule = NativeModules.AdhanModule;
+      if (!AdhanModule) return;
+      const [exactAlarms, batteryOpt] = await Promise.all([
+        AdhanModule.canScheduleExactAlarms ? AdhanModule.canScheduleExactAlarms() : Promise.resolve(true),
+        AdhanModule.isBatteryOptIgnored ? AdhanModule.isBatteryOptIgnored() : Promise.resolve(false),
+      ]);
+      setHuaweiSteps((prev) => {
+        const updated = {
+          ...prev,
+          exactAlarm: exactAlarms,
+          batteryOpt: batteryOpt,
+        };
+        AsyncStorage.setItem('huaweiSteps', JSON.stringify(updated));
+        return updated;
+      });
+    } catch (e) {}
+  }, []);
+
   const openHuaweiSettings = useCallback(async () => {
     try {
       await IntentLauncher.startActivityAsync('android.settings.SETTINGS');
@@ -648,18 +673,10 @@ export default function PrayerScreen() {
 
   const openBatteryOptimizationSettings = useCallback(async () => {
     try {
-      await IntentLauncher.startActivityAsync('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS');
+      await IntentLauncher.startActivityAsync('android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', { data: 'package:com.bushrann.app' });
     } catch (e) {
       try { await IntentLauncher.startActivityAsync('android.settings.SETTINGS'); } catch (e2) {}
     }
-  }, []);
-
-  const openNotifImportanceSettings = useCallback(async () => {
-    try {
-      await IntentLauncher.startActivityAsync('android.settings.APPLICATION_DETAILS_SETTINGS', {
-        data: 'package:com.bushrann.app',
-      });
-    } catch (e) {}
   }, []);
 
   async function handleCitySelect(city) {
@@ -1278,7 +1295,6 @@ export default function PrayerScreen() {
             onOpenLaunchManager={openHuaweiSettings}
             onOpenExactAlarm={openExactAlarmSettings}
             onOpenBatteryOpt={openBatteryOptimizationSettings}
-            onOpenNotifImportance={openNotifImportanceSettings}
           />
         )}
 
