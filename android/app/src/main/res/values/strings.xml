@@ -1,4 +1,7 @@
 <resources>
   <string name="app_name">Bushrann</string>
   <string name="expo_splash_screen_resize_mode" translatable="false">cover</string>
+  <string name="facebook_app_id">1749165319852187</string>
+  <string name="facebook_client_token">3c8d5294a138bbf686abcccdc91be6d3</string>
+  <string name="fb_login_protocol_scheme">fb1749165319852187</string>
 </resources>

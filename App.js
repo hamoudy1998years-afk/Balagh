@@ -32,6 +32,7 @@ import { COLORS } from './constants/theme';
 import { ROUTES } from './constants/routes';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
+import { AppEventsLogger, Settings } from 'react-native-fbsdk-next';
 import ComingSoonScreen from './screens/ComingSoonScreen';
 import QuranScreen from './screens/QuranScreen';
 import PrayerScreen from './screens/PrayerScreen';
@@ -265,6 +266,23 @@ function App() {
   // Auto-clean old incompatible data on startup
   useEffect(() => {
     migrateOldDataIfNeeded();
+  }, []);
+
+  // Meta SDK: log app open for install tracking
+  useEffect(() => {
+    const setupFacebook = async () => {
+      try {
+        Settings.setAdvertiserIDCollectionEnabled(false);
+        Settings.setAutoLogAppEventsEnabled(true);
+        await Settings.initializeSDK();
+        AppEventsLogger.logEvent('test_button_click_123');
+        AppEventsLogger.flush();
+        console.log('[FB SDK] Initialized and event flushed');
+      } catch (error) {
+        console.error('[FB SDK] Init failed:', error);
+      }
+    };
+    setupFacebook();
   }, []);
 
   // Splash screen prepare effect

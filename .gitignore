@@ -50,3 +50,7 @@ assets/*.backup
 
 *.jks
 keystore.properties
+
+# Debug logs
+fb_log.txt
+full_log*.txt

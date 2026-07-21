@@ -16,7 +16,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "facebookAppId": "${EXPO_PUBLIC_FACEBOOK_APP_ID}",
+      "facebookAppId": "1749165319852187",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow Bushrann to access your photos to update your profile picture.",
         "NSPhotoLibraryAddUsageDescription": "Allow Bushrann to save videos to your photo library.",
@@ -40,7 +40,7 @@
       },
       "package": "com.bushrann.app",
       "googleServicesFile": "./google-services.json",
-      "facebookAppId": "${EXPO_PUBLIC_FACEBOOK_APP_ID}",
+      "facebookAppId": "1749165319852187",
       "permissions": [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
