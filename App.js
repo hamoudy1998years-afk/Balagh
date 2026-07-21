@@ -1,4 +1,4 @@
-import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
+﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -53,6 +53,32 @@ import AdminScreen from './screens/AdminScreen';
 
 // Prevent splash screen from hiding automatically
 SplashScreen.preventAutoHideAsync();
+
+const CURRENT_DATA_VERSION = '1.7.4';
+
+async function migrateOldDataIfNeeded() {
+  try {
+    const storedVersion = await AsyncStorage.getItem('appDataVersion');
+    if (!storedVersion || storedVersion !== CURRENT_DATA_VERSION) {
+      const keys = await AsyncStorage.getAllKeys();
+      const keysToRemove = keys.filter(k =>
+        k.startsWith('video_') ||
+        k.startsWith('feed_') ||
+        k.startsWith('social_') ||
+        k.startsWith('auth_') ||
+        k === 'ageVerified' ||
+        k === 'onboardingCompleted' ||
+        k === 'videoFeedbackGiven'
+      );
+      if (keysToRemove.length > 0) {
+        await AsyncStorage.multiRemove(keysToRemove);
+      }
+      await AsyncStorage.setItem('appDataVersion', CURRENT_DATA_VERSION);
+    }
+  } catch (e) {
+    // Silent fail
+  }
+}
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -235,6 +261,11 @@ function App() {
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
   const navigationRef = useRef(null);
+
+  // Auto-clean old incompatible data on startup
+  useEffect(() => {
+    migrateOldDataIfNeeded();
+  }, []);
 
   // Splash screen prepare effect
   useEffect(() => {

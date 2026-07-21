@@ -242,12 +242,11 @@ export default function QuranReaderScreen({ navigation, route }) {
             {/* Recitation check button */}
             <TouchableOpacity
               onPress={() =>
-                navigation.navigate('RecitationChecker', {
-                  verseKey,
-                  arabicText: item.text_uthmani,
-                  translation: cleanTranslation,
-                  surahName: surah.name_simple,
-                })
+                Alert.alert(
+                  '🚧 Coming Soon',
+                  'AI recitation checker is under preparation. Stay tuned!',
+                  [{ text: 'OK', style: 'default' }]
+                )
               }
               style={styles.controlBtn}
             >
