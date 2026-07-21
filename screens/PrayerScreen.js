@@ -278,6 +278,7 @@ export default function PrayerScreen() {
   const [notifsEnabled, setNotifsEnabled]       = useState(true);
   const [compassExpanded, setCompassExpanded]   = useState(false);
   const [hijriAdjustment, setHijriAdjustment]   = useState(0);
+  const [exactAlarmGranted, setExactAlarmGranted] = useState(true);
 
   // Location mode
   const [locationMode, setLocationMode]             = useState(null);
@@ -376,8 +377,12 @@ export default function PrayerScreen() {
 
   useEffect(() => {
     verifyHuaweiSteps();
+    checkExactAlarmPermission();
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') verifyHuaweiSteps();
+      if (state === 'active') {
+        verifyHuaweiSteps();
+        checkExactAlarmPermission();
+      }
     });
     return () => sub.remove();
   }, [verifyHuaweiSteps]);
@@ -428,7 +433,7 @@ export default function PrayerScreen() {
     return () => clearInterval(countdownRef.current);
   }, [prayerData]);
 
-  async function loadSavedSettings() {
+    async function loadSavedSettings() {
     try {
       const saved = await AsyncStorage.getItem('prayerNotifications');
       if (saved) setNotifications(JSON.parse(saved));
@@ -440,6 +445,18 @@ export default function PrayerScreen() {
       if (savedNotifsEnabled !== null) setNotifsEnabled(savedNotifsEnabled === 'true');
       const savedHijriAdj = await AsyncStorage.getItem('hijriAdjustment');
       if (savedHijriAdj !== null) setHijriAdjustment(parseInt(savedHijriAdj));
+    } catch (e) {}
+  }
+
+  async function checkExactAlarmPermission() {
+    if (Platform.OS !== 'android' || Platform.Version < 31) return;
+    try {
+      const { NativeModules } = require('react-native');
+      const AdhanModule = NativeModules.AdhanModule;
+      if (AdhanModule?.canScheduleExactAlarms) {
+        const granted = await AdhanModule.canScheduleExactAlarms();
+        setExactAlarmGranted(granted);
+      }
     } catch (e) {}
   }
 
@@ -1263,6 +1280,32 @@ export default function PrayerScreen() {
             />
           </View>
           </View>
+        {Platform.OS === 'android' && Platform.Version >= 31 && !exactAlarmGranted && (
+          <TouchableOpacity
+            style={[styles.card, { backgroundColor: 'rgba(220,38,38,0.06)', borderColor: 'rgba(220,38,38,0.25)', borderWidth: 1 }]}
+            onPress={openExactAlarmSettings}
+            activeOpacity={0.8}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+              <Text style={{ fontSize: 18, marginRight: 10, marginTop: 2 }}>⚠️</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#dc2626' }}>
+                  Exact Alarm Permission Needed
+                </Text>
+                <Text style={{ fontSize: 12, color: '#666', marginTop: 3, lineHeight: 18 }}>
+                  Your phone requires this for Adhan to work on time. This is not a bug.
+                </Text>
+                <Text style={{ fontSize: 11, color: '#888', marginTop: 6, lineHeight: 17 }}>
+                  1. Tap here to open Settings{'\n'}
+                  2. Tap "Apps" → find "Bushrann"{'\n'}
+                  3. Tap "Alarms & reminders"{'\n'}
+                  4. Turn ON "Allow setting alarms"{'\n'}
+                  5. Return to Bushrann
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.card}>
           <Text style={{ fontSize: 15, fontWeight: '700', color: '#1a2e44' }}>🌙 Hijri Date Adjustment</Text>
