@@ -17,6 +17,7 @@ import * as Location from 'expo-location';
 import { Audio } from 'expo-av';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { COLORS } from '../constants/theme';
 import {
@@ -278,6 +279,7 @@ export default function PrayerScreen() {
   const [notifsEnabled, setNotifsEnabled]       = useState(true);
   const [compassExpanded, setCompassExpanded]   = useState(false);
   const [hijriAdjustment, setHijriAdjustment]   = useState(0);
+  const [isOffline, setIsOffline] = useState(false);
   const [exactAlarmGranted, setExactAlarmGranted] = useState(true);
 
   // Location mode
@@ -405,10 +407,16 @@ export default function PrayerScreen() {
   useEffect(() => {
     loadSavedSettings();
     loadPrayerData();
+    
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      setIsOffline(!state.isConnected);
+    });
+    
     return () => {
       stopMagnetometer();
       clearInterval(countdownRef.current);
       if (sound) sound.unloadAsync();
+      unsubscribe();
     };
   }, []);
 
@@ -1241,6 +1249,19 @@ export default function PrayerScreen() {
             </TouchableOpacity>
           </View>
         </View>
+        {isOffline && (
+          <View style={{
+            backgroundColor: 'rgba(184,134,11,0.12)',
+            borderWidth: 1, borderColor: 'rgba(184,134,11,0.3)',
+            borderRadius: 12, padding: 12, marginHorizontal: 12, marginBottom: 10,
+            flexDirection: 'row', alignItems: 'center',
+          }}>
+            <Text style={{ fontSize: 16, marginRight: 8 }}>📡</Text>
+            <Text style={{ fontSize: 13, color: '#b8860b', fontWeight: '600' }}>
+              Offline — showing cached data
+            </Text>
+          </View>
+        )}
 
         {nextPrayer && (
           <View style={styles.heroCard}>
