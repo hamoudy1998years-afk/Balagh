@@ -72,58 +72,36 @@ export default function QuranScreen({ navigation }) {
     loadSurahs();
   }, []);
 
-  async function loadSurahs() {
+    async function loadSurahs() {
     try {
       setError(null);
 
-      // ── Fast path: load from AsyncStorage cache first ──
-      // The Quran surah list never changes, so we cache it for 1 week.
-      // This makes the screen appear instantly on all opens after the first.
-      try {
-        const raw = await AsyncStorage.getItem(SURAHS_CACHE_KEY);
-        if (raw) {
-          const { data, timestamp } = JSON.parse(raw);
-          const isExpired = Date.now() - timestamp > SURAHS_CACHE_TTL;
-          if (!isExpired && data?.length > 0) {
-            setSurahs(data);
-            surahsRef.current = data;
-            setFiltered(data);
-            setLoading(false);
-            // Silently refresh in background — don't show spinner
-            fetchSurahs().then(async (fresh) => {
-              if (fresh?.length > 0) {
-                setSurahs(fresh);
-                surahsRef.current = fresh;
-                setFiltered((prev) => {
-                  // Only update filtered if not currently searching
-                  if (search.trim()) return prev;
-                  return fresh;
-                });
-                await AsyncStorage.setItem(SURAHS_CACHE_KEY, JSON.stringify({
-                  data: fresh,
-                  timestamp: Date.now(),
-                }));
-              }
-            }).catch(() => {});
-            return;
-          }
+      // Fast path: load from cache first
+      const raw = await AsyncStorage.getItem(SURAHS_CACHE_KEY);
+      if (raw) {
+        const { data, timestamp } = JSON.parse(raw);
+        const isExpired = Date.now() - timestamp > SURAHS_CACHE_TTL;
+        if (!isExpired && data?.length > 0) {
+          setSurahs(data);
+          surahsRef.current = data;
+          setFiltered(data);
+          setLoading(false);
+          // Don't refresh in background — Quran list never changes
+          return;
         }
-      } catch (_) {}
+      }
 
-      // ── Slow path: no cache or expired — fetch from API ──
+      // Slow path: no cache — fetch from API
       setLoading(true);
       const data = await fetchSurahs();
       setSurahs(data);
       surahsRef.current = data;
       setFiltered(data);
 
-      // Save to cache for next time
-      try {
-        await AsyncStorage.setItem(SURAHS_CACHE_KEY, JSON.stringify({
-          data,
-          timestamp: Date.now(),
-        }));
-      } catch (_) {}
+      await AsyncStorage.setItem(SURAHS_CACHE_KEY, JSON.stringify({
+        data,
+        timestamp: Date.now(),
+      }));
 
     } catch (e) {
       setError('Could not load surahs. Check your connection.');

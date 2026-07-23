@@ -377,16 +377,42 @@ export default function PrayerScreen() {
     checkHuaweiTip();
   }, []);
 
+  const verifyHuaweiSteps = useCallback(async () => {
+    if (Platform.OS !== 'android') return;
+    try {
+      const { NativeModules } = require('react-native');
+      const AdhanModule = NativeModules.AdhanModule;
+      if (!AdhanModule) return;
+      const [exactAlarms, batteryOpt] = await Promise.all([
+        AdhanModule.canScheduleExactAlarms ? AdhanModule.canScheduleExactAlarms() : Promise.resolve(true),
+        AdhanModule.isBatteryOptIgnored ? AdhanModule.isBatteryOptIgnored() : Promise.resolve(false),
+      ]);
+      setHuaweiSteps((prev) => {
+        const updated = {
+          ...prev,
+          exactAlarm: exactAlarms,
+          batteryOpt: batteryOpt,
+        };
+        AsyncStorage.setItem('huaweiSteps', JSON.stringify(updated));
+        return updated;
+      });
+    } catch (e) {}
+  }, []);
+
   useEffect(() => {
     verifyHuaweiSteps();
-    checkExactAlarmPermission();
+    // Delay permission check so it doesn't block initial render
+    const timer = setTimeout(() => checkExactAlarmPermission(), 500);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         verifyHuaweiSteps();
         checkExactAlarmPermission();
       }
     });
-    return () => sub.remove();
+    return () => {
+      clearTimeout(timer);
+      sub.remove();
+    };
   }, [verifyHuaweiSteps]);
 
   // (Removed — Huawei setup now uses manual per-step checkboxes instead of AppState detection)
@@ -426,7 +452,10 @@ export default function PrayerScreen() {
       if (!choice) {
         setTimeout(() => setShowNotifPrompt(true), 1000);
       } else if (choice === 'enabled' || choice === 'silent') {
-        initPrayerNotifications(choice === 'enabled');
+        // Delay notification init so it doesn't block render
+        setTimeout(() => {
+          initPrayerNotifications(choice === 'enabled');
+        }, 2000);
       }
     }
     checkNotifChoice();
@@ -441,17 +470,26 @@ export default function PrayerScreen() {
     return () => clearInterval(countdownRef.current);
   }, [prayerData]);
 
-    async function loadSavedSettings() {
+  async function loadSavedSettings() {
     try {
-      const saved = await AsyncStorage.getItem('prayerNotifications');
+      const [
+        saved,
+        savedAdhan,
+        savedAdhanEnabled,
+        savedNotifsEnabled,
+        savedHijriAdj,
+      ] = await Promise.all([
+        AsyncStorage.getItem('prayerNotifications'),
+        AsyncStorage.getItem('adhanStyle'),
+        AsyncStorage.getItem('adhanEnabled'),
+        AsyncStorage.getItem('notifsEnabled'),
+        AsyncStorage.getItem('hijriAdjustment'),
+      ]);
+
       if (saved) setNotifications(JSON.parse(saved));
-      const savedAdhan = await AsyncStorage.getItem('adhanStyle');
       if (savedAdhan !== null) setAdhanStyle(parseInt(savedAdhan));
-      const savedAdhanEnabled = await AsyncStorage.getItem('adhanEnabled');
       if (savedAdhanEnabled !== null) setAdhanEnabled(savedAdhanEnabled === 'true');
-      const savedNotifsEnabled = await AsyncStorage.getItem('notifsEnabled');
       if (savedNotifsEnabled !== null) setNotifsEnabled(savedNotifsEnabled === 'true');
-      const savedHijriAdj = await AsyncStorage.getItem('hijriAdjustment');
       if (savedHijriAdj !== null) setHijriAdjustment(parseInt(savedHijriAdj));
     } catch (e) {}
   }
@@ -498,7 +536,11 @@ export default function PrayerScreen() {
         setCoords({ latitude: city.latitude, longitude: city.longitude });
         setQiblaAngle(calculateQibla(city.latitude, city.longitude));
         await savePrayerCache(data, { latitude: city.latitude, longitude: city.longitude });
-
+        setTimeout(() => {
+          schedulePrayerNotifications(data.timings, adhanEnabled);
+        }, 100);
+        setError(null);
+        setLocationUpdateMsg({ type: 'success', text: `✅ Location set to ${city.shortName}` });
         try {
           const monthly = await getMonthlyTimetable(city.latitude, city.longitude);
           const now = new Date();
@@ -527,6 +569,9 @@ export default function PrayerScreen() {
         setPrayerData(data);
         setNextPrayer(getNextPrayer(data.timings));
         await savePrayerCache(data, savedCoords);
+        setTimeout(() => {
+          schedulePrayerNotifications(data.timings, adhanEnabled);
+        }, 100);
 
         try {
           const monthly = await getMonthlyTimetable(savedCoords.latitude, savedCoords.longitude);
@@ -560,6 +605,9 @@ export default function PrayerScreen() {
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
       await savePrayerCache(data, location);
+      setTimeout(() => {
+        schedulePrayerNotifications(data.timings, adhanEnabled);
+      }, 100);
       await AsyncStorage.setItem('locationMode', 'gps');
 
       try {
@@ -607,6 +655,9 @@ export default function PrayerScreen() {
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
       await savePrayerCache(data, location);
+      setTimeout(() => {
+        schedulePrayerNotifications(data.timings, adhanEnabled);
+      }, 100);
       setError(null);
       setLocationUpdateMsg({
         type: 'success',
@@ -660,28 +711,6 @@ export default function PrayerScreen() {
     setHuaweiTipExpanded(true);
   }
 
-  const verifyHuaweiSteps = useCallback(async () => {
-    if (Platform.OS !== 'android') return;
-    try {
-      const { NativeModules } = require('react-native');
-      const AdhanModule = NativeModules.AdhanModule;
-      if (!AdhanModule) return;
-      const [exactAlarms, batteryOpt] = await Promise.all([
-        AdhanModule.canScheduleExactAlarms ? AdhanModule.canScheduleExactAlarms() : Promise.resolve(true),
-        AdhanModule.isBatteryOptIgnored ? AdhanModule.isBatteryOptIgnored() : Promise.resolve(false),
-      ]);
-      setHuaweiSteps((prev) => {
-        const updated = {
-          ...prev,
-          exactAlarm: exactAlarms,
-          batteryOpt: batteryOpt,
-        };
-        AsyncStorage.setItem('huaweiSteps', JSON.stringify(updated));
-        return updated;
-      });
-    } catch (e) {}
-  }, []);
-
   const openHuaweiSettings = useCallback(async () => {
     try {
       await IntentLauncher.startActivityAsync('android.settings.SETTINGS');
@@ -722,6 +751,9 @@ export default function PrayerScreen() {
       setCoords({ latitude: city.latitude, longitude: city.longitude });
       setQiblaAngle(calculateQibla(city.latitude, city.longitude));
       await savePrayerCache(data, { latitude: city.latitude, longitude: city.longitude });
+      setTimeout(() => {
+        schedulePrayerNotifications(data.timings, adhanEnabled);
+      }, 100);
       setError(null);
       setLocationUpdateMsg({ type: 'success', text: `✅ Location set to ${city.shortName}` });
     } catch (e) {

@@ -185,8 +185,17 @@ function MainTabs({ session }) {
         }}
         listeners={{
           tabPress: (e) => {
-            e.preventDefault();
-            handleHomePress();
+            const state = navigation.getState();
+            const mainRoute = state?.routes?.find(r => r.name === 'Main');
+            const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
+
+            if (activeTab === 'Home') {
+              e.preventDefault();
+              if (homeRefreshRef.current) {
+                homeRefreshRef.current();
+              }
+            }
+            // else: let default tab switch happen instantly
           },
         }}
         initialParams={{ refreshKey: homeKey }}
