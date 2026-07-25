@@ -110,7 +110,9 @@ object AdhanPersistentNotification {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(openPending)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
 

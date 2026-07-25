@@ -134,7 +134,7 @@ override fun getName() = "AdhanModule"
             putExtra("styleIndex", styleIndex)
         }
         
-                val requestCode = "test_adhan".hashCode()
+        val requestCode = "test_adhan".hashCode()
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             requestCode,

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { useState, useEffect, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -130,7 +130,10 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {showBugDialog && (
-          <View style={styles.bugDialogOverlay}>
+          <KeyboardAvoidingView
+            style={styles.bugDialogOverlay}
+            behavior="padding"
+          >
             <View style={styles.bugDialog}>
               {!bugSubmitted ? (
                 <>
@@ -163,7 +166,7 @@ export default function HomeScreen({ navigation }) {
                 </View>
               )}
             </View>
-          </View>
+          </KeyboardAvoidingView>
         )}
       </ScrollView>
     </View>
@@ -228,7 +231,7 @@ const styles = StyleSheet.create({
   bugDialogOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999,
-    alignItems: 'center', justifyContent: 'center', padding: 24,
+    alignItems: 'center', justifyContent: 'flex-end', padding: 24,
   },
   bugDialog: {
     backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%',

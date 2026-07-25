@@ -55,7 +55,7 @@ import AdminScreen from './screens/AdminScreen';
 // Prevent splash screen from hiding automatically
 SplashScreen.preventAutoHideAsync();
 
-const CURRENT_DATA_VERSION = '1.7.4';
+const CURRENT_DATA_VERSION = '1.7.11';
 
 async function migrateOldDataIfNeeded() {
   try {
@@ -284,9 +284,7 @@ function App() {
         Settings.setAdvertiserIDCollectionEnabled(false);
         Settings.setAutoLogAppEventsEnabled(true);
         await Settings.initializeSDK();
-        AppEventsLogger.logEvent('test_button_click_123');
-        AppEventsLogger.flush();
-        console.log('[FB SDK] Initialized and event flushed');
+        console.log('[FB SDK] Initialized');
       } catch (error) {
         console.error('[FB SDK] Init failed:', error);
       }
@@ -362,6 +360,21 @@ function App() {
 
   useEffect(() => {
     loadBannedWords();
+  }, []);
+
+  useEffect(() => {
+    // Show persistent prayer notification on app launch (only if user has prayer data)
+    if (Platform.OS === 'android') {
+      AsyncStorage.getItem('prayerNotifications').then(saved => {
+        if (saved) {
+          const { NativeModules } = require('react-native');
+          const { AdhanModule } = NativeModules;
+          if (AdhanModule?.showPersistent) {
+            AdhanModule.showPersistent();
+          }
+        }
+      });
+    }
   }, []);
 
   useEffect(() => {

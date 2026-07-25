@@ -141,7 +141,8 @@ class AdhanForegroundService : Service() {
                 }
                 start()
                 // Vibration: 25% of adhan when app open, 50% when app closed/killed
-                val vibrationMillis = if (appOpen) (duration / 4).toLong() else (duration / 2).toLong()
+                val duration = mediaPlayer?.duration?.toLong() ?: 0L
+                val vibrationMillis = if (appOpen) (duration / 4) else (duration / 2)
                 handler.postDelayed({ vibrator?.cancel() }, vibrationMillis)
             }
         } catch (e: Exception) {
