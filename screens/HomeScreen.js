@@ -6,10 +6,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Linking } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { COLORS } from '../constants/theme';
 import { submitVideoFeedback, submitBugReport } from '../services/feedbackApi';
+import * as StoreReview from 'expo-store-review';
 
-const CURRENT_VERSION_CODE = 34; // CHANGE THIS when you bump versionCode
+const CURRENT_VERSION_CODE = 35; // CHANGE THIS when you bump versionCode
 const VERSION_CHECK_URL = 'https://raw.githubusercontent.com/hamoudy1998years-afk/Balagh/main/version.json';
 const UPDATE_CHECK_KEY = 'lastUpdateCheck';
 
@@ -40,6 +42,10 @@ export default function HomeScreen({ navigation }) {
 
   async function checkForUpdate() {
     try {
+      // Skip update check if offline
+      const { isConnected } = await NetInfo.fetch();
+      if (!isConnected) return;
+
       const lastCheck = await AsyncStorage.getItem(UPDATE_CHECK_KEY);
       const now = Date.now();
       if (lastCheck && now - parseInt(lastCheck) < 24 * 60 * 60 * 1000) return;
@@ -89,6 +95,18 @@ export default function HomeScreen({ navigation }) {
       setBugSubmitted(false);
     }, 1500);
   }
+
+  async function handleRateUs() {
+    try {
+      const available = await StoreReview.isAvailableAsync();
+      if (available) {
+        await StoreReview.requestReview();
+      } else {
+        await Linking.openURL('market://details?id=com.bushrann.app');
+      }
+    } catch (e) {}
+  }
+
   async function handleFeedback(wantsVideos) {
     setFeedbackGiven(true);
     setFeedbackAnswer(wantsVideos);
@@ -167,6 +185,15 @@ export default function HomeScreen({ navigation }) {
             )}
           </View>
         )}
+
+        <TouchableOpacity style={styles.reportBtn} onPress={handleRateUs}>
+          <Text style={styles.reportEmoji}>⭐</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.reportTitle}>Enjoying Bushrann?</Text>
+            <Text style={styles.reportSub}>Tap to rate us on the Play Store</Text>
+          </View>
+          <Text style={styles.reportArrow}>›</Text>
+        </TouchableOpacity>
 
         {showBugDialog && (
           <KeyboardAvoidingView

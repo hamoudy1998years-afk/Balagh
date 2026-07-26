@@ -508,6 +508,7 @@ export default function PrayerScreen() {
 
   // ── Core load: Manual city > Saved coordinates (no GPS) > Fresh GPS (first launch only) ──
   async function loadPrayerData() {
+    let hadCache = false;
     try {
       setError(null);
       setShowLocationChoice(false);
@@ -522,6 +523,7 @@ export default function PrayerScreen() {
         setLocationMode('manual');
         const cached = await loadPrayerCache();
         if (cached) {
+          hadCache = true;
           setPrayerData(cached.data);
           setNextPrayer(getNextPrayer(cached.data.timings));
           setCoords(cached.coords);
@@ -559,6 +561,7 @@ export default function PrayerScreen() {
         if (savedName) setGpsCityName(savedName);
         const cached = await loadPrayerCache();
         if (cached) {
+          hadCache = true;
           setPrayerData(cached.data);
           setNextPrayer(getNextPrayer(cached.data.timings));
           setLoading(false);
@@ -616,10 +619,13 @@ export default function PrayerScreen() {
         await saveMonthlyCache(monthly, location, now.getMonth() + 1, now.getFullYear());
       } catch (e) {}
     } catch (e) {
-      if (e.message === 'PERMISSION_PERMANENTLY_DENIED' || e.message === 'PERMISSION_DENIED') {
+      const msg = (e.message || e.toString() || '').toLowerCase();
+      if (msg.includes('permission_permanently_denied') || msg.includes('permission_denied')) {
         setShowLocationChoice(true);
+      } else if (msg.includes('network') || msg.includes('fetch')) {
+        if (!hadCache) setError('OFFLINE_NO_CACHE');
       } else {
-        if (!prayerData) setError(e.message);
+        if (!hadCache) setError(e.message);
       }
     } finally {
       setLoading(false);
@@ -971,19 +977,22 @@ export default function PrayerScreen() {
 
   if (error) {
     const isGpsOff = error === 'Please enable location services';
+    const isOfflineNoCache = error === 'OFFLINE_NO_CACHE';
     return (
       <View style={[styles.center, { paddingTop: insets.top, paddingHorizontal: 24 }]}>
-        <Text style={styles.errorIcon}>{isGpsOff ? '📡' : '⚠️'}</Text>
+        <Text style={styles.errorIcon}>{isGpsOff ? '📡' : isOfflineNoCache ? '📡' : '⚠️'}</Text>
         <Text style={[styles.errorText, { fontWeight: '700', fontSize: 16, color: '#1a2e44', marginBottom: 8 }]}>
-          {isGpsOff ? 'GPS is Turned Off' : 'Something went wrong'}
+          {isGpsOff ? 'GPS is Turned Off' : isOfflineNoCache ? 'No Internet Connection' : 'Something went wrong'}
         </Text>
         <Text style={styles.errorText}>
           {isGpsOff
             ? 'Please turn on Location/GPS in your phone settings (swipe down notifications and tap the Location icon), then tap Try Again.'
+            : isOfflineNoCache
+            ? 'Please connect to WiFi or mobile data to get accurate prayer times schedule. After the first load, Bushrann works offline.'
             : error}
         </Text>
         <TouchableOpacity style={styles.retryBtn} onPress={() => loadPrayerData()}>
-          <Text style={styles.retryText}>Try Again</Text>
+          <Text style={styles.retryText}>{isOfflineNoCache ? 'Retry' : 'Try Again'}</Text>
         </TouchableOpacity>
       </View>
     );
