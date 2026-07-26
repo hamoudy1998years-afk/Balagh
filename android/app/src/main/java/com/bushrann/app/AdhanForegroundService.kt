@@ -133,17 +133,27 @@ class AdhanForegroundService : Service() {
                 }
             }
 
-            mediaPlayer = MediaPlayer.create(this, resId).apply {
+            mediaPlayer = MediaPlayer().apply {
+                val afd = resources.openRawResourceFd(resId)
+                setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                afd.close()
+                setOnPreparedListener {
+                    start()
+                    // Vibration: 25% of adhan when app open, 50% when app closed/killed
+                    val duration = duration.toLong()
+                    val vibrationMillis = if (appOpen) (duration / 4) else (duration / 2)
+                    handler.postDelayed({ vibrator?.cancel() }, vibrationMillis)
+                }
                 setOnCompletionListener {
                     postLastAdhanNote()
                     stopAdhan()
                     stopSelf()
                 }
-                start()
-                // Vibration: 25% of adhan when app open, 50% when app closed/killed
-                val duration = mediaPlayer?.duration?.toLong() ?: 0L
-                val vibrationMillis = if (appOpen) (duration / 4) else (duration / 2)
-                handler.postDelayed({ vibrator?.cancel() }, vibrationMillis)
+                setOnErrorListener { _, _, _ ->
+                    stopSelf()
+                    true
+                }
+                prepareAsync()
             }
         } catch (e: Exception) {
             e.printStackTrace()

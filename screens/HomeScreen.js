@@ -5,8 +5,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert, Linking } from 'react-native';
 import { COLORS } from '../constants/theme';
 import { submitVideoFeedback, submitBugReport } from '../services/feedbackApi';
+
+const CURRENT_VERSION_CODE = 34; // CHANGE THIS when you bump versionCode
+const VERSION_CHECK_URL = 'https://raw.githubusercontent.com/hamoudy1998years-afk/Balagh/main/version.json';
+const UPDATE_CHECK_KEY = 'lastUpdateCheck';
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -16,6 +21,7 @@ export default function HomeScreen({ navigation }) {
   const [showBugDialog, setShowBugDialog] = useState(false);
   const [bugText, setBugText] = useState('');
   const [bugSubmitted, setBugSubmitted] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -27,6 +33,39 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     checkFeedbackStatus();
   }, []);
+
+  useEffect(() => {
+    checkForUpdate();
+  }, []);
+
+  async function checkForUpdate() {
+    try {
+      const lastCheck = await AsyncStorage.getItem(UPDATE_CHECK_KEY);
+      const now = Date.now();
+      if (lastCheck && now - parseInt(lastCheck) < 24 * 60 * 60 * 1000) return;
+
+      const response = await fetch(VERSION_CHECK_URL, { cache: 'no-cache' });
+      if (!response.ok) return;
+      const data = await response.json();
+
+      if (data.latestVersionCode > CURRENT_VERSION_CODE) {
+        setUpdateAvailable(true);
+        Alert.alert(
+          '📦 New Update Available',
+          `Version ${data.latestVersion} is now live!\n\n${data.changelog}`,
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Update Now', onPress: () => Linking.openURL(data.updateUrl) },
+          ],
+          { cancelable: false }
+        );
+      }
+
+      await AsyncStorage.setItem(UPDATE_CHECK_KEY, now.toString());
+    } catch (e) {
+      // Silent fail — don't block app if version check fails
+    }
+  }
 
   async function checkFeedbackStatus() {
     try {

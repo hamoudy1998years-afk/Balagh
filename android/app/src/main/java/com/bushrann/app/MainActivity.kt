@@ -1,4 +1,4 @@
-package com.bushrann.app
+﻿package com.bushrann.app
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
@@ -20,6 +20,18 @@ class MainActivity : ReactActivity() {
     // @generated begin expo-splashscreen - expo prebuild (DO NOT MODIFY) sync-f3ff59a738c56c9a6119210cb55f0b613eb8b6af
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
+
+    val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+      val trace = throwable.stackTraceToString()
+      if (throwable is NullPointerException &&
+          (trace.contains("syncTransferSplashscreenViewTransaction") || trace.contains("SurfaceControl"))) {
+        android.util.Log.w("MainActivity", "Swallowed SplashScreen SurfaceControl NPE: ${throwable.message}")
+      } else {
+        defaultHandler?.uncaughtException(thread, throwable)
+      }
+    }
+
     super.onCreate(null)
   }
 
