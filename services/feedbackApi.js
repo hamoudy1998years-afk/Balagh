@@ -2,6 +2,7 @@ const VIDEO_FORM_ID = '1FAIpQLSd5BmQeM3iJZP4BWoFa3cN4If96Sh51I7U25qzpdE5l89iyNA'
 const BUG_FORM_ID = '1FAIpQLSf0GzFM47jGFXkwXQ9szJ3HsJl37-qE0TJmHDz1rZYpWxCCjQ';
 const VIDEO_ENTRY_ID = 'entry.1153529868';
 const BUG_ENTRY_ID = 'entry.1541127783';
+const PHONE_ENTRY_ID = 'entry.1997987812';
 
 export async function submitVideoFeedback(wantsVideos) {
   try {
@@ -22,10 +23,13 @@ export async function submitVideoFeedback(wantsVideos) {
   }
 }
 
-export async function submitBugReport(message) {
+export async function submitBugReport(message, phoneNumber) {
   try {
     const formData = new URLSearchParams();
     formData.append(BUG_ENTRY_ID, message);
+    if (phoneNumber) {
+      formData.append(PHONE_ENTRY_ID, phoneNumber);
+    }
 
     const response = await fetch(`https://docs.google.com/forms/d/e/${BUG_FORM_ID}/formResponse`, {
       method: 'POST',

@@ -11,7 +11,7 @@ import { COLORS } from '../constants/theme';
 import { submitVideoFeedback, submitBugReport } from '../services/feedbackApi';
 import * as StoreReview from 'expo-store-review';
 
-const CURRENT_VERSION_CODE = 38; // CHANGE THIS when you bump versionCode
+const CURRENT_VERSION_CODE = 39; // CHANGE THIS when you bump versionCode
 const VERSION_CHECK_URL = 'https://raw.githubusercontent.com/hamoudy1998years-afk/Balagh/main/version.json';
 const UPDATE_CHECK_KEY = 'lastUpdateCheck';
 
@@ -22,8 +22,10 @@ export default function HomeScreen({ navigation }) {
   const [checkingFeedback, setCheckingFeedback] = useState(true);
   const [showBugDialog, setShowBugDialog] = useState(false);
   const [bugText, setBugText] = useState('');
+  const [bugPhone, setBugPhone] = useState('');
   const [bugSubmitted, setBugSubmitted] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateUrl, setUpdateUrl] = useState(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -56,6 +58,7 @@ export default function HomeScreen({ navigation }) {
 
       if (data.latestVersionCode > CURRENT_VERSION_CODE) {
         setUpdateAvailable(true);
+        setUpdateUrl(data.updateUrl);
         Alert.alert(
           '📦 New Update Available',
           `Version ${data.latestVersion} is now live!\n\n${data.changelog}`,
@@ -88,10 +91,11 @@ export default function HomeScreen({ navigation }) {
   async function handleBugReport() {
     if (!bugText.trim()) return;
     setBugSubmitted(true);
-    submitBugReport(bugText.trim());
+    submitBugReport(bugText.trim(), bugPhone.trim());
     setTimeout(() => {
       setShowBugDialog(false);
       setBugText('');
+      setBugPhone('');
       setBugSubmitted(false);
     }, 1500);
   }
@@ -125,6 +129,17 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.screenTitle}>Bushrann</Text>
           <Text style={styles.headerTagline}>Your companion for Salah & Quran</Text>
         </View>
+
+        {updateAvailable && (
+          <TouchableOpacity style={styles.updateBanner} onPress={() => Linking.openURL(updateUrl)}>
+            <Text style={styles.updateBannerEmoji}>📦</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.updateBannerTitle}>Update Available</Text>
+              <Text style={styles.updateBannerSub}>Tap to update Bushrann now</Text>
+            </View>
+            <Text style={styles.reportArrow}>›</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.readyCard}>
           <Text style={styles.readyEmoji}>🤲</Text>
@@ -215,8 +230,16 @@ export default function HomeScreen({ navigation }) {
                     onChangeText={setBugText}
                     autoFocus
                   />
+                  <TextInput
+                    style={styles.bugPhoneInput}
+                    placeholder="Your phone number (so we can reply and fix it)"
+                    placeholderTextColor="#aaa"
+                    value={bugPhone}
+                    onChangeText={setBugPhone}
+                    keyboardType="phone-pad"
+                  />
                   <View style={styles.bugDialogButtons}>
-                    <TouchableOpacity style={styles.bugDialogCancel} onPress={() => { setShowBugDialog(false); setBugText(''); }}>
+                    <TouchableOpacity style={styles.bugDialogCancel} onPress={() => { setShowBugDialog(false); setBugText(''); setBugPhone(''); }}>
                       <Text style={styles.bugDialogCancelText}>Cancel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.bugDialogSend} onPress={handleBugReport}>
@@ -240,6 +263,14 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  updateBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: COLORS.gold, borderRadius: 16,
+    padding: 16, marginHorizontal: 16, marginBottom: 12,
+  },
+  updateBannerEmoji: { fontSize: 22, marginRight: 12 },
+  updateBannerTitle: { fontSize: 14, fontWeight: '700', color: '#1a2e44' },
+  updateBannerSub: { fontSize: 12, color: '#1a2e44', marginTop: 2, opacity: 0.8 },
   header: {
     backgroundColor: '#1a2e44', borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
     padding: 20, paddingBottom: 28, marginBottom: 16,
@@ -308,7 +339,12 @@ const styles = StyleSheet.create({
   bugInput: {
     borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 12,
     padding: 14, fontSize: 14, color: '#1a2e44', minHeight: 100,
-    textAlignVertical: 'top', marginBottom: 16, backgroundColor: '#f9f9f9',
+    textAlignVertical: 'top', marginBottom: 12, backgroundColor: '#f9f9f9',
+  },
+  bugPhoneInput: {
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 12,
+    padding: 14, fontSize: 14, color: '#1a2e44',
+    marginBottom: 16, backgroundColor: '#f9f9f9',
   },
   bugDialogButtons: { flexDirection: 'row', gap: 10 },
   bugDialogCancel: {
