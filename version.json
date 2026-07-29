@@ -1,7 +1,7 @@
 {
-  "latestVersion": "1.7.15",
-  "latestVersionCode": 37,
-  "minRequiredVersion": "1.7.15",
+  "latestVersion": "1.7.16",
+  "latestVersionCode": 38,
+  "minRequiredVersion": "1.7.16",
   "updateUrl": "https://play.google.com/store/apps/details?id=com.bushrann.app",
-  "changelog": "Fixed a rare startup crash. Please update for better stability."
+  "changelog": "Fixed an issue causing errors when using the app offline. Please update for better reliability."
 }
