@@ -1,5 +1,6 @@
 package com.bushrann.app
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -19,10 +20,25 @@ class AdhanAlarmReceiver : BroadcastReceiver() {
             putExtra("styleIndex", styleIndex)
         }
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            val blocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+                (e is ForegroundServiceStartNotAllowedException ||
+                 e.message?.contains("not allowed to start") == true)
+            if (blocked) {
+                // Android 15+ blocked FGS start (e.g. right after boot) — fall back
+                // to a notification-driven Adhan instead of dropping it silently.
+                AdhanNotificationHelper.postAdhanNotification(
+                    context, prayer, hours, minutes, styleIndex
+                )
+            } else {
+                e.printStackTrace()
+            }
         }
 
         // Prayer time reached — refresh the persistent notification content

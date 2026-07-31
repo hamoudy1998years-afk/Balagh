@@ -60,6 +60,7 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     
     <receiver android:name=".AdhanAlarmReceiver" android:exported="false"/>
+    <receiver android:name=".AdhanAlarmDismissReceiver" android:exported="false" />
     
     <receiver android:name=".AdhanBootReceiver"
       android:enabled="true"
