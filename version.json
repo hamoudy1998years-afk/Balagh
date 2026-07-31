@@ -1,7 +1,7 @@
 {
-  "latestVersion": "1.7.17",
-  "latestVersionCode": 39,
-  "minRequiredVersion": "1.7.17",
+  "latestVersion": "1.7.19",
+  "latestVersionCode": 41,
+  "minRequiredVersion": "1.7.19",
   "updateUrl": "https://play.google.com/store/apps/details?id=com.bushrann.app",
-  "changelog": "improved bug reporting so we can respond to your issues faster. Please update for the latest fixes."
+  "changelog": "Fixed a crash on Android 15 devices right after phone restart. Please update for the latest fixes."
 }
