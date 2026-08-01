@@ -8,6 +8,7 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -346,6 +347,10 @@ export default function PrayerScreen() {
       glowOpacity.value = withTiming(0, { duration: 400 });
       pulseScale.value  = withTiming(1, { duration: 300 });
     }
+    return () => {
+      cancelAnimation(pulseScale);
+      cancelAnimation(glowOpacity);
+    };
   }, [facingMakkah]);
 
   // Auto-dismiss location update banner after 5 seconds
@@ -1446,7 +1451,7 @@ export default function PrayerScreen() {
         </View>
 
         {compassExpanded && (
-          <TouchableOpacity activeOpacity={0.95} onPress={() => setCompassExpanded(false)} style={styles.compassExpandedCard} delayPressIn={0} pressRetentionOffset={{top: 10, left: 10, right: 10, bottom: 10}}>
+          <TouchableOpacity activeOpacity={0.95} onPress={() => { cancelAnimation(pulseScale); cancelAnimation(glowOpacity); setCompassExpanded(false); }} style={styles.compassExpandedCard} delayPressIn={0} pressRetentionOffset={{top: 10, left: 10, right: 10, bottom: 10}}>
             <View style={styles.compassExpandedHeader}>
               <View>
                 <Text style={styles.compassExpandedTitle}>🧭 Qibla Compass</Text>
@@ -1472,7 +1477,7 @@ export default function PrayerScreen() {
 
         {!compassExpanded && (
           <View style={styles.twoCol}>
-            <TouchableOpacity activeOpacity={0.9} onPress={() => setCompassExpanded(true)} style={[styles.card, styles.halfCard]} delayPressIn={0} pressRetentionOffset={{top: 10, left: 10, right: 10, bottom: 10}}>
+            <TouchableOpacity activeOpacity={0.9} onPress={() => { cancelAnimation(pulseScale); cancelAnimation(glowOpacity); setCompassExpanded(true); }} style={[styles.card, styles.halfCard]} delayPressIn={0} pressRetentionOffset={{top: 10, left: 10, right: 10, bottom: 10}}>
               <View style={{ position: 'relative', width: '100%', alignItems: 'center' }}>
                 <View style={styles.iconRing}><Text style={{ fontSize: 22 }}>🧭</Text></View>
                 <Text style={styles.cardTitle}>Qibla</Text>
