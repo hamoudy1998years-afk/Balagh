@@ -171,33 +171,53 @@ export default function QuranReaderScreen({ navigation, route }) {
 
     // Play Bismillah first (except Surah 1 and 9)
     if (surah.id !== 1 && surah.id !== 9) {
+      try {
         const bismillahUrl = await fetchVerseAudioUrl('1:1');
         await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
         const { sound: bismillahSound } = await Audio.Sound.createAsync({ uri: bismillahUrl }, { shouldPlay: true });
         soundRef.current = bismillahSound;
         await new Promise((resolve) => {
-        bismillahSound.setOnPlaybackStatusUpdate((status) => {
+          bismillahSound.setOnPlaybackStatusUpdate((status) => {
             if (status.didJustFinish) resolve();
-        });
+          });
         });
         await bismillahSound.unloadAsync();
         soundRef.current = null;
+      } catch (e) {
+        console.log('Bismillah playback error:', e.message);
+        // Network/audio failure — stop gracefully instead of crashing
+        setIsPlayingSurah(false);
+        setPlayingKey(null);
+        surahPlayingRef.current = false;
+        Alert.alert('Connection Issue', 'Could not load audio. Please check your internet connection and try again.');
+        return;
+      }
     }
 
     for (let i = 0; i < verses.length; i++) {
         if (!surahPlayingRef.current) break;
         const verseKey = verses[i].verse_key;
         setPlayingKey(verseKey);
-        const url = await fetchVerseAudioUrl(verseKey);
-        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
-        soundRef.current = sound;
-        await new Promise((resolve) => {
-        sound.setOnPlaybackStatusUpdate((status) => {
-            if (status.didJustFinish) resolve();
-        });
-        });
-        await sound.unloadAsync();
-        soundRef.current = null;
+        try {
+          const url = await fetchVerseAudioUrl(verseKey);
+          const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+          soundRef.current = sound;
+          await new Promise((resolve) => {
+            sound.setOnPlaybackStatusUpdate((status) => {
+              if (status.didJustFinish) resolve();
+            });
+          });
+          await sound.unloadAsync();
+          soundRef.current = null;
+        } catch (e) {
+          console.log('Verse playback error:', verseKey, e.message);
+          // Network/audio failure mid-surah — stop gracefully instead of crashing
+          setIsPlayingSurah(false);
+          setPlayingKey(null);
+          surahPlayingRef.current = false;
+          Alert.alert('Connection Issue', 'Could not load audio. Please check your internet connection and try again.');
+          return;
+        }
     }
     setIsPlayingSurah(false);
     setPlayingKey(null);
