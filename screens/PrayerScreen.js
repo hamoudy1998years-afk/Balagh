@@ -1510,6 +1510,19 @@ export default function PrayerScreen() {
               <TouchableOpacity style={styles.playBtn} onPress={playAdhan}>
                 <Text style={styles.playBtnText}>{playingAdhan ? '⏹ Stop' : '▶️ Preview'}</Text>
               </TouchableOpacity>
+              {__DEV__ && (
+                <TouchableOpacity
+                  style={[styles.playBtn, { marginTop: 6, borderColor: '#dc2626' }]}
+                  onPress={() => {
+                    if (prayerData?.timings) {
+                      schedulePrayerNotifications(prayerData.timings, adhanEnabled);
+                    }
+                    playAdhan();
+                  }}
+                >
+                  <Text style={[styles.playBtnText, { color: '#dc2626' }]}>🧪 Test Adhan (dev)</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}

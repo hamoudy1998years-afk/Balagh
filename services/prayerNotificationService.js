@@ -1,4 +1,4 @@
-import * as Notifications from 'expo-notifications';
+﻿import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -384,7 +384,12 @@ export async function initPrayerNotifications(withSound = true) {
       await showPersistentNotification(data.timings);
       await schedulePersistentRefreshes(data.timings);
     }
-    await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
+    // Android: native AdhanModule owns adhan playback, this task is a no-op there —
+    // skip registering on Android entirely to avoid expo-task-manager's onPause
+    // isRunningInHeadlessMode() lifecycle check, which was the confirmed ANR cause
+    if (Platform.OS !== 'android') {
+      await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
+    }
 
     Notifications.addNotificationReceivedListener((notification) => {
       if (Platform.OS === 'android') return; // Android: native module owns adhan playback
