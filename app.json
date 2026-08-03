@@ -3,7 +3,7 @@
     "name": "Bushrann",
     "slug": "Balagh",
     "scheme": "bushrann",
-    "version": "1.7.22",
+    "version": "1.7.23",
     "privacyPolicyUrl": "https://sites.google.com/view/bushrann/privacy-policy ",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -27,7 +27,7 @@
       }
     },
     "android": {
-      "versionCode": 44,
+      "versionCode": 45,
       "minSdkVersion": 24,
       "largeHeap": true,
       "navigationBar": {

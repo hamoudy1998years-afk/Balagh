@@ -895,6 +895,17 @@ export default function PrayerScreen() {
     } catch (e) { setPlayingAdhan(false); }
   }
 
+  async function testRealAdhan() {
+    if (Platform.OS !== 'android') return;
+    try {
+      const { NativeModules } = require('react-native');
+      const AdhanModule = NativeModules.AdhanModule;
+      if (AdhanModule?.startAdhan) {
+        await AdhanModule.startAdhan('Fajr', adhanStyle);
+      }
+    } catch (e) {}
+  }
+
   async function selectAdhan(index) {
     setAdhanStyle(index);
     await AsyncStorage.setItem('adhanStyle', String(index));
@@ -1510,6 +1521,11 @@ export default function PrayerScreen() {
               <TouchableOpacity style={styles.playBtn} onPress={playAdhan}>
                 <Text style={styles.playBtnText}>{playingAdhan ? '⏹ Stop' : '▶️ Preview'}</Text>
               </TouchableOpacity>
+              {__DEV__ && Platform.OS === 'android' && (
+                <TouchableOpacity style={[styles.playBtn, { marginTop: 6, borderColor: '#dc2626' }]} onPress={testRealAdhan}>
+                  <Text style={[styles.playBtnText, { color: '#dc2626' }]}>🧪 Test Real Adhan (5s)</Text>
+                </TouchableOpacity>
+              )}
               {__DEV__ && (
                 <TouchableOpacity
                   style={[styles.playBtn, { marginTop: 6, borderColor: '#dc2626' }]}

@@ -13,7 +13,7 @@ import java.util.Locale
 
 object AdhanPersistentNotification {
 
-    const val CHANNEL_ID = "prayer-persistent-v2"
+    const val CHANNEL_ID = "prayer-persistent-v3"
     const val NOTIFICATION_ID = 1002
     private const val REQUEST_CODE_OFFSET = 50000
     private val PRAYERS = arrayOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
@@ -24,7 +24,7 @@ object AdhanPersistentNotification {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Prayer Times (Persistent)",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Always-on prayer times notification"
                 setShowBadge(false)
