@@ -1,7 +1,7 @@
 {
-  "latestVersion": "1.7.23",
-  "latestVersionCode": 45,
-  "minRequiredVersion": "1.7.23",
+  "latestVersion": "1.7.24",
+  "latestVersionCode": 46,
+  "minRequiredVersion": "1.7.24",
   "updateUrl": "https://play.google.com/store/apps/details?id=com.bushrann.app",
-  "changelog": "Improved the persistent prayer times notification so it stays visible near the top of your notification tray."
+  "changelog": "Fixed a rare crash related to the Qibla compass, and fixed the persistent prayer notification getting overwritten by the Adhan alert."
 }

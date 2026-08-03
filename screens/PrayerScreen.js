@@ -825,7 +825,7 @@ export default function PrayerScreen() {
 
       // Throttle React state update — ~7x/sec instead of 60x/sec
       const now = Date.now();
-      if (now - lastHeadingUpdate > 150) {
+      if (now - lastHeadingUpdate > 400) {
         setCompassHeading(rawAngle);
         lastHeadingUpdate = now;
       }
@@ -1017,7 +1017,7 @@ export default function PrayerScreen() {
   const hijriDate     = prayerData?.date?.hijri;
   const gregorianDate = prayerData?.date?.readable;
 
-  const CompactCompass = () => (
+  const CompactCompass = memo(() => (
     <View pointerEvents="none" style={{ alignItems: 'center', marginTop: 6 }}>
       <View style={styles.triangleSmall} />
       <View pointerEvents="none" style={[
@@ -1076,9 +1076,9 @@ export default function PrayerScreen() {
         <View pointerEvents="none" style={styles.compassCenterDot} />
       </View>
     </View>
-  );
+  ));
 
-  const FullCompass = () => (
+  const FullCompass = memo(() => (
     <View pointerEvents="none" style={{ alignItems: 'center', marginTop: 10 }}>
       <View style={styles.triangleLarge} />
       <View pointerEvents="none" style={[
@@ -1151,7 +1151,7 @@ export default function PrayerScreen() {
         <Text style={styles.headingLabel}>{getCardinalDirection(compassHeading)}</Text>
       </View>
     </View>
-  );
+  ));
 
   return (
     <View style={{ flex: 1, backgroundColor: '#f0f2f5' }}>

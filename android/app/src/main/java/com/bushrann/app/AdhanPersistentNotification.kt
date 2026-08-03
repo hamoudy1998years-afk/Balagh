@@ -24,7 +24,7 @@ object AdhanPersistentNotification {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Prayer Times (Persistent)",
-                NotificationManager.IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_MAX  // Only for persistent
             ).apply {
                 description = "Always-on prayer times notification"
                 setShowBadge(false)
@@ -114,6 +114,9 @@ object AdhanPersistentNotification {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setLocalOnly(true)
+            .setShowWhen(false)
+            .setGroupSummary(true)
             .build()
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
