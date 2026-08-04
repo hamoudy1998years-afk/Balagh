@@ -69,5 +69,4 @@ export function isUserBanned(userId, bannedList = []) {
   return bannedList.includes(userId);
 }
 
-// Auto-load on import (call this in App.js on startup)
-loadBannedWords();
+// loadBannedWords() is called manually in App.js on startup

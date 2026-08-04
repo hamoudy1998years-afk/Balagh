@@ -1,7 +1,7 @@
 {
-  "latestVersion": "1.7.26",
-  "latestVersionCode": 48,
-  "minRequiredVersion": "1.7.26",
+  "latestVersion": "1.7.27",
+  "latestVersionCode": 49,
+  "minRequiredVersion": "1.7.24",
   "updateUrl": "https://play.google.com/store/apps/details?id=com.bushrann.app",
   "changelog": "Bug fixes and performance improvements, especially for low-end devices."
 }
