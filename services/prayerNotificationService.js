@@ -141,22 +141,22 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
         // Cancel all stale native alarms before rescheduling (handles disabled prayers + time changes)
         AdhanModule.cancelAllAdhans();
 
-        for (let day = 0; day < 30; day++) {
+        // Read once instead of up to 150 times inside the loop
+        const savedAdhanStyle = await AsyncStorage.getItem('adhanStyle');
+        const styleIndex = savedAdhanStyle ? parseInt(savedAdhanStyle) : 0;
+
+        // Save prayer data to native SharedPreferences for boot/update recovery (once, not per-prayer)
+        const timingsJson = JSON.stringify(timings);
+        const prefsJson = JSON.stringify(prefs);
+        AdhanModule.savePrayerData(timingsJson, prefsJson, styleIndex, true);
+
+        for (let day = 0; day < 14; day++) {
           for (const prayer of PRAYERS) {
             if (prefs[prayer] === false) continue;
             const time = timings[prayer];
             if (!time) continue;
             const [hours, minutes] = time.split(':').map(Number);
-            const savedAdhanStyle = await AsyncStorage.getItem('adhanStyle');
-            const styleIndex = savedAdhanStyle ? parseInt(savedAdhanStyle) : 0;
             AdhanModule.scheduleAdhan(prayer, hours, minutes, day, styleIndex);
-            
-            // Save prayer data to native SharedPreferences for boot/update recovery
-            if (day === 0) {
-              const timingsJson = JSON.stringify(timings);
-              const prefsJson = JSON.stringify(prefs);
-              AdhanModule.savePrayerData(timingsJson, prefsJson, styleIndex, true);
-            }
           }
         }
         return;

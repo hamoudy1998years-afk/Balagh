@@ -41,7 +41,20 @@ class AdhanAlarmReceiver : BroadcastReceiver() {
             }
         }
 
-        // Prayer time reached — refresh the persistent notification content
+                // Prayer time reached — refresh the persistent notification content
         AdhanPersistentNotification.post(context)
+        
+        // Safety check: if alarms are stale (>21 days since last reschedule), 
+        // reschedule next 30 days. This prevents Android 12+ from dropping 
+        // alarms after 30 days if persistent notification refresh missed.
+        val prefs = context.getSharedPreferences("adhan_refresh_prefs", Context.MODE_PRIVATE)
+        val lastReschedule = prefs.getLong("last_reschedule_ms", 0)
+        val now = System.currentTimeMillis()
+        val threeWeeks = 21L * 24 * 60 * 60 * 1000
+        
+        if (now - lastReschedule > threeWeeks) {
+            AdhanPersistentNotification.scheduleRefreshAlarms(context)
+            prefs.edit().putLong("last_reschedule_ms", now).apply()
+        }
     }
 }

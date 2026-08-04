@@ -11,7 +11,7 @@ import { COLORS } from '../constants/theme';
 import { submitVideoFeedback, submitBugReport } from '../services/feedbackApi';
 import * as StoreReview from 'expo-store-review';
 
-const CURRENT_VERSION_CODE = 47; // CHANGE THIS when you bump versionCode
+const CURRENT_VERSION_CODE = 48; // CHANGE THIS when you bump versionCode
 const VERSION_CHECK_URL = 'https://raw.githubusercontent.com/hamoudy1998years-afk/Balagh/main/version.json';
 const UPDATE_CHECK_KEY = 'lastUpdateCheck';
 

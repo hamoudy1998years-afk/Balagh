@@ -140,20 +140,6 @@ function MainTabs({ session }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
 
-  const handleHomePress = () => {
-    const state = navigation.getState();
-    const mainRoute = state?.routes?.find(r => r.name === 'Main');
-    const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
-
-    if (activeTab === 'Home') {
-      if (homeRefreshRef.current) {
-        homeRefreshRef.current();
-      }
-    } else {
-      navigation.navigate(ROUTES.MAIN, { screen: 'Home' });
-    }
-  };
-
   return (
     <Tab.Navigator
       screenOptions={{
@@ -228,7 +214,6 @@ function MainTabs({ session }) {
             <Text style={{ fontSize: focused ? 26 : 22 }}>🕌</Text>
           ),
           lazy: true,
-          unmountOnBlur: true,
         }}
       />
       <Tab.Screen
@@ -375,16 +360,6 @@ function App() {
         }
       });
     }
-  }, []);
-
-  useEffect(() => {
-    const linkingSub = Linking.addEventListener('url', ({ url }) => {
-      if (__DEV__) console.log('[DEEP LINK] URL received:', url);
-    });
-    Linking.getInitialURL().then(url => {
-      if (url && __DEV__) console.log('[DEEP LINK] Initial URL:', url);
-    });
-    return () => linkingSub.remove();
   }, []);
 
   useEffect(() => {
