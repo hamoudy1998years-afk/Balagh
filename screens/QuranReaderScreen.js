@@ -27,6 +27,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { fetchVerses, fetchVerseAudioUrl } from '../services/quranApi';
 import { COLORS } from '../constants/theme';
+import { isLowEndDevice } from '../utils/deviceInfo';
 
 const GOLD = COLORS.gold ?? '#c9a84c';
 const STORAGE_KEY = (surahId) => `quran_memorized_${surahId}`;
@@ -228,7 +229,7 @@ export default function QuranReaderScreen({ navigation, route }) {
   const totalVerses = surah.verses_count;
   const progressPct = totalVerses > 0 ? (memorizedCount / totalVerses) * 100 : 0;
 
-  const renderVerse = ({ item, index }) => {
+  const renderVerse = useCallback(({ item, index }) => {
     const verseKey = item.verse_key;
     const isMemorized = memorizedKeys.has(verseKey);
     const isRevealed = revealedKeys.has(verseKey);
@@ -309,9 +310,9 @@ export default function QuranReaderScreen({ navigation, route }) {
         <Text style={styles.translationText}>{cleanTranslation}</Text>
       </View>
     );
-  };
+  }, [memorizedKeys, revealedKeys, playingKey, memorizeMode]);
 
-  const ListHeader = () => (
+  const ListHeader = useCallback(() => (
     <View>
       {/* Surah title card */}
       <View style={styles.surahHeader}>
@@ -345,7 +346,7 @@ export default function QuranReaderScreen({ navigation, route }) {
         <Text style={styles.bismillah}>بِسۡمِ ٱللَّهِ ٱلرَّحۡمَـٰنِ ٱلرَّحِیمِ</Text>
       )}
     </View>
-  );
+  ), [surah, memorizeMode, progressPct, memorizedCount, totalVerses]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -406,6 +407,9 @@ export default function QuranReaderScreen({ navigation, route }) {
           ListHeaderComponent={ListHeader}
           contentContainerStyle={{ paddingBottom: insets.bottom + 80, paddingHorizontal: 16 }}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={isLowEndDevice ? 5 : 10}
+          maxToRenderPerBatch={isLowEndDevice ? 5 : 10}
+          windowSize={isLowEndDevice ? 5 : 21}
         />
       )}
     </View>

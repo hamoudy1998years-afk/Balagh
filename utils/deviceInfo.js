@@ -1,4 +1,5 @@
 import { Platform, StatusBar, Dimensions } from 'react-native';
+import * as Device from 'expo-device';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -39,3 +40,6 @@ export const androidRippleColor = 'rgba(245, 166, 35, 0.2)';
 
 // Font scaling guard — prevents system font size from breaking layouts
 export const maxFontSizeMultiplier = 1.2;
+
+// Low-end device detection (for throttling/memoizing heavy UI)
+export const isLowEndDevice = isAndroid && (Device.totalMemory ?? 0) > 0 && Device.totalMemory < 3 * 1024 * 1024 * 1024; // under 3GB RAM

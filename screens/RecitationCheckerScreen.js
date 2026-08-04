@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { COLORS } from '../constants/theme';
+import { isLowEndDevice } from '../utils/deviceInfo';
 
 const GOLD = COLORS.gold ?? '#c9a84c';
 const OPENAI_KEY = process.env.EXPO_PUBLIC_OPENAI_KEY;
@@ -85,7 +86,7 @@ export default function RecitationCheckerScreen({ navigation, route }) {
 
   const recordingRef = useRef(null);
   const durationInterval = useRef(null);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pulseAnim = useRef(isLowEndDevice ? null : new Animated.Value(1)).current;
 
   useEffect(() => {
     return () => {
@@ -99,7 +100,7 @@ export default function RecitationCheckerScreen({ navigation, route }) {
 
   // Pulsing animation for recording
   useEffect(() => {
-    if (phase === 'recording') {
+    if (phase === 'recording' && !isLowEndDevice) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, { toValue: 1.2, duration: 700, useNativeDriver: true }),
@@ -107,8 +108,10 @@ export default function RecitationCheckerScreen({ navigation, route }) {
         ])
       ).start();
     } else {
-      pulseAnim.stopAnimation();
-      pulseAnim.setValue(1);
+      if (pulseAnim) {
+        pulseAnim.stopAnimation();
+        pulseAnim.setValue(1);
+      }
     }
   }, [phase]);
 
@@ -249,7 +252,7 @@ export default function RecitationCheckerScreen({ navigation, route }) {
 
   const renderRecording = () => (
     <View style={styles.center}>
-      <Animated.View style={[styles.recordingOrb, { transform: [{ scale: pulseAnim }] }]}>
+      <Animated.View style={[styles.recordingOrb, isLowEndDevice ? null : { transform: [{ scale: pulseAnim }] }]}>
         <Ionicons name="mic" size={40} color="#fff" />
       </Animated.View>
       <Text style={styles.recordingLabel}>Recording... {recordingDuration}s</Text>

@@ -24,6 +24,7 @@ import { fetchSurahs, fetchVerses, fetchVerseAudioUrl } from '../services/quranA
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
+import { isLowEndDevice } from '../utils/deviceInfo';
 import PlaybackModeDialog from '../components/PlaybackModeDialog';
 
 const REVELATION_COLORS = {
@@ -289,7 +290,7 @@ export default function QuranScreen({ navigation }) {
     [surahs]
   );
 
-  const renderSurah = ({ item }) => (
+  const renderSurah = useCallback(({ item }) => (
     <TouchableOpacity
       style={styles.surahRow}
       onPress={() => navigation.navigate('QuranReader', { surah: item })}
@@ -311,7 +312,7 @@ export default function QuranScreen({ navigation }) {
         </Text>
       </View>
     </TouchableOpacity>
-  );
+  ), []);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -400,6 +401,9 @@ export default function QuranScreen({ navigation }) {
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          initialNumToRender={isLowEndDevice ? 8 : 15}
+          maxToRenderPerBatch={isLowEndDevice ? 8 : 15}
+          windowSize={isLowEndDevice ? 5 : 21}
         />
       )}
 

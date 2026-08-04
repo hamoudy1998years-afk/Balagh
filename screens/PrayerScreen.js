@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { COLORS } from '../constants/theme';
+import { isLowEndDevice } from '../utils/deviceInfo';
 import {
   getCoordinates, getPrayerTimes, getMonthlyTimetable,
   getNextPrayer, formatTime, getPrayerEmoji,
@@ -339,10 +340,12 @@ export default function PrayerScreen() {
   useEffect(() => {
     if (facingMakkah) {
       glowOpacity.value = withTiming(1, { duration: 300 });
-      pulseScale.value  = withRepeat(
-        withSequence(withTiming(1.08, { duration: 700 }), withTiming(1.0, { duration: 700 })),
-        -1, false
-      );
+      if (!isLowEndDevice) {
+        pulseScale.value  = withRepeat(
+          withSequence(withTiming(1.08, { duration: 700 }), withTiming(1.0, { duration: 700 })),
+          -1, false
+        );
+      }
     } else {
       glowOpacity.value = withTiming(0, { duration: 400 });
       pulseScale.value  = withTiming(1, { duration: 300 });
@@ -798,7 +801,7 @@ export default function PrayerScreen() {
   }
 
   function startMagnetometer() {
-    Magnetometer.setUpdateInterval(16);
+    Magnetometer.setUpdateInterval(isLowEndDevice ? 32 : 16);
 
     let targetAngle    = 0;
     let visualAngle    = rotation.value;
@@ -823,9 +826,10 @@ export default function PrayerScreen() {
 
       let rawAngle = (Math.atan2(filteredY, filteredX) * (180 / Math.PI) - 90 + 360) % 360;
 
-      // Throttle React state update — ~7x/sec instead of 60x/sec
+      // Throttle React state update — slower on low-end devices to reduce memory pressure
       const now = Date.now();
-      if (now - lastHeadingUpdate > 400) {
+      const throttleMs = isLowEndDevice ? 700 : 400;
+      if (now - lastHeadingUpdate > throttleMs) {
         setCompassHeading(rawAngle);
         lastHeadingUpdate = now;
       }
