@@ -140,55 +140,94 @@ object AdhanPersistentNotification {
         }
     }
 
-    fun scheduleRefreshAlarms(context: Context) {
-        val prefs = AdhanPreferences(context)
-        if (!prefs.areNotificationsEnabled()) return
-        val timings = prefs.getTimings() ?: return
-        val prayerPrefs = prefs.getPrayerPrefs()
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-
-        for (dayOffset in 0..29) {
-            for (prayer in PRAYERS) {
-                if (prayerPrefs?.get(prayer) == false) continue
-                val time = timings[prayer] ?: continue
-                val parts = time.split(":")
-                if (parts.size != 2) continue
-                val hours = parts[0].toIntOrNull() ?: continue
-                val minutes = parts[1].toIntOrNull() ?: continue
-
-                val intent = Intent(context, AdhanPersistentRefreshReceiver::class.java)
-                val requestCode = prayer.hashCode() + dayOffset + REQUEST_CODE_OFFSET
-                val pendingIntent = PendingIntent.getBroadcast(
-                    context, requestCode, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-                // 30 minutes BEFORE the prayer
-                val calendar = Calendar.getInstance().apply {
-                    add(Calendar.DAY_OF_YEAR, dayOffset)
-                    set(Calendar.HOUR_OF_DAY, hours)
-                    set(Calendar.MINUTE, minutes)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                    add(Calendar.MINUTE, -30)
-                }
-
-                if (calendar.timeInMillis <= System.currentTimeMillis()) continue
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        calendar.timeInMillis,
-                        pendingIntent
+    // Cancels any refresh alarms we may have scheduled before, across a wide
+    // day range, so stale alarms from old app versions (different day-range /
+    // offset formulas) don't pile up forever and hit Android's 500-alarm cap.
+    private fun cancelRefreshAlarms(context: Context) {
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            for (dayOffset in 0..60) {
+                for (prayer in PRAYERS) {
+                    val intent = Intent(context, AdhanPersistentRefreshReceiver::class.java)
+                    val requestCode = prayer.hashCode() + dayOffset + REQUEST_CODE_OFFSET
+                    val pendingIntent = PendingIntent.getBroadcast(
+                        context, requestCode, intent,
+                        PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
                     )
-                } else {
-                    alarmManager.setExact(
-                        AlarmManager.RTC_WAKEUP,
-                        calendar.timeInMillis,
-                        pendingIntent
-                    )
+                    if (pendingIntent != null) {
+                        alarmManager.cancel(pendingIntent)
+                        pendingIntent.cancel()
+                    }
                 }
             }
+        } catch (e: Exception) {
+            // non-fatal, just means cleanup was incomplete
+        }
+    }
+
+    fun scheduleRefreshAlarms(context: Context) {
+        try {
+            val prefs = AdhanPreferences(context)
+            if (!prefs.areNotificationsEnabled()) return
+            val timings = prefs.getTimings() ?: return
+            val prayerPrefs = prefs.getPrayerPrefs()
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+            cancelRefreshAlarms(context)
+
+            // 7 days is enough — the weekly reschedule and 21-day fallback keep this topped up
+            for (dayOffset in 0..6) {
+                for (prayer in PRAYERS) {
+                    if (prayerPrefs?.get(prayer) == false) continue
+                    val time = timings[prayer] ?: continue
+                    val parts = time.split(":")
+                    if (parts.size != 2) continue
+                    val hours = parts[0].toIntOrNull() ?: continue
+                    val minutes = parts[1].toIntOrNull() ?: continue
+
+                    val intent = Intent(context, AdhanPersistentRefreshReceiver::class.java)
+                    val requestCode = prayer.hashCode() + dayOffset + REQUEST_CODE_OFFSET
+                    val pendingIntent = PendingIntent.getBroadcast(
+                        context, requestCode, intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+
+                    // 30 minutes BEFORE the prayer
+                    val calendar = Calendar.getInstance().apply {
+                        add(Calendar.DAY_OF_YEAR, dayOffset)
+                        set(Calendar.HOUR_OF_DAY, hours)
+                        set(Calendar.MINUTE, minutes)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                        add(Calendar.MINUTE, -30)
+                    }
+
+                    if (calendar.timeInMillis <= System.currentTimeMillis()) continue
+
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            alarmManager.setExactAndAllowWhileIdle(
+                                AlarmManager.RTC_WAKEUP,
+                                calendar.timeInMillis,
+                                pendingIntent
+                            )
+                        } else {
+                            alarmManager.setExact(
+                                AlarmManager.RTC_WAKEUP,
+                                calendar.timeInMillis,
+                                pendingIntent
+                            )
+                        }
+                    } catch (e: SecurityException) {
+                        // permission revoked, skip
+                    } catch (e: IllegalStateException) {
+                        // hit Android's alarm cap — stop trying to schedule more this pass
+                        return
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // never let this crash the calling receiver/module
         }
     }
 
