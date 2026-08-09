@@ -1,12 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Dimensions,
+  useWindowDimensions,
   Animated,
+  BackHandler,
 } from 'react-native';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,8 +15,6 @@ import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
 
-
-const { width, height } = Dimensions.get('window');
 
 const slides = [
   {
@@ -43,6 +42,7 @@ const slides = [
 
 export default function OnboardingScreen({ onComplete }) {
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef(null);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -58,6 +58,20 @@ export default function OnboardingScreen({ onComplete }) {
     }
   }).current;
 
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (currentIndex > 0) {
+        flatListRef.current?.scrollToIndex({
+          index: currentIndex - 1,
+          animated: true,
+        });
+        return true;
+      }
+      return true; // block exit on first slide
+    });
+    return () => backHandler.remove();
+  }, [currentIndex]);
+
   const scrollToNext = () => {
     if (currentIndex < slides.length - 1) {
       flatListRef.current?.scrollToIndex({
@@ -70,18 +84,32 @@ export default function OnboardingScreen({ onComplete }) {
   };
 
   const handleComplete = async () => {
-    await AsyncStorage.setItem('onboardingCompleted', 'true');
+    try {
+      await AsyncStorage.setItem('onboardingCompleted', 'true');
+    } catch (e) {
+      __DEV__ && console.warn('[Onboarding] AsyncStorage error:', e);
+    }
     onComplete();
   };
 
+  const emojiSize = Math.min(Math.max(Math.round(width * 0.32), 100), 160);
+  const slidePadding = Math.min(Math.max(Math.round(width * 0.1), 24), 40);
+
   const renderItem = ({ item }) => (
-    <View style={styles.slide}>
-      <View style={styles.emojiContainer}>
-        <Text style={styles.emoji}>{item.emoji}</Text>
+    <View style={[styles.slide, { width, height, paddingHorizontal: slidePadding }]}>
+      <View
+        style={[
+          styles.emojiContainer,
+          { width: emojiSize, height: emojiSize, borderRadius: emojiSize / 2 },
+        ]}
+      >
+        <Text style={styles.emoji} allowFontScaling={false}>{item.emoji}</Text>
       </View>
       <Text style={styles.title}>{item.title}</Text>
       <Text style={styles.subtitle}>{item.subtitle}</Text>
-      <Text style={styles.description}>{item.description}</Text>
+      <Text style={[styles.description, { maxWidth: Math.min(width * 0.8, 400) }]}>
+        {item.description}
+      </Text>
     </View>
   );
 
@@ -130,6 +158,7 @@ export default function OnboardingScreen({ onComplete }) {
       <SystemBars style="light" />
 
       <FlatList
+        key={width}
         ref={flatListRef}
         data={slides}
         renderItem={renderItem}
@@ -142,6 +171,7 @@ export default function OnboardingScreen({ onComplete }) {
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={{ viewAreaCoveragePercentThreshold: 50 }}
         scrollEventThrottle={16}
+        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
       />
 
       {renderDots()}
@@ -151,6 +181,8 @@ export default function OnboardingScreen({ onComplete }) {
           style={styles.button}
           onPress={scrollToNext}
           activeOpacity={0.8}
+          accessibilityLabel={currentIndex === slides.length - 1 ? 'Get Started button' : 'Next slide button'}
+          accessibilityRole="button"
         >
           <Text style={styles.buttonText}>
             {currentIndex === slides.length - 1 ? 'Get Started' : 'Next'}
@@ -161,6 +193,8 @@ export default function OnboardingScreen({ onComplete }) {
           <TouchableOpacity
             style={styles.skipButton}
             onPress={handleComplete}
+            accessibilityLabel="Skip onboarding button"
+            accessibilityRole="button"
           >
             <Text style={styles.skipText}>Skip</Text>
           </TouchableOpacity>
@@ -176,16 +210,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   slide: {
-    width,
-    height,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
   },
   emojiContainer: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
     backgroundColor: '#0d1b2a',
     alignItems: 'center',
     justifyContent: 'center',
@@ -221,7 +249,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.55)',
     textAlign: 'center',
     lineHeight: 24,
-    maxWidth: 300,
   },
   dotsContainer: {
     flexDirection: 'row',

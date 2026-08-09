@@ -26,6 +26,7 @@ import { userCache } from '../utils/userCache';
 import { useUser } from '../context/UserContext';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import { COLORS } from '../constants/theme';
 import { ROUTES } from '../constants/routes';
 import { getCredentialKey } from '../constants/storage';
@@ -59,6 +60,7 @@ export default function LoginScreen({ navigation }) {
   // FIX: track focused field so we can highlight border
   const [focusedField, setFocusedField] = useState(null);
 
+  const [pinLoading, setPinLoading] = useState(false);
   const [dialog, setDialog] = useState({
     visible: false,
     title: '',
@@ -68,6 +70,8 @@ export default function LoginScreen({ navigation }) {
   });
 
   const eyeOpacity = useRef(new Animated.Value(0)).current;
+  const eyeAnimRef = useRef(null);
+  const passwordInputRef = useRef(null);
 
   const { refreshUser, setUser } = useUser();
   const suppressDropdown = useRef(false);
@@ -94,21 +98,45 @@ export default function LoginScreen({ navigation }) {
   } = useBiometricAuth();
 
   useEffect(() => {
-    (async () => {
-      const available = await isBiometricAvailable();
-      if (available) {
-        const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-        setBiometricType(types.includes(2) ? 'face' : 'fingerprint');
+    let mounted = true;
+
+    const initializeLogin = async () => {
+      try {
+        const available = await isBiometricAvailable();
+
+        if (available && mounted) {
+          const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+          setBiometricType(
+            types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
+              ? 'face'
+              : 'fingerprint'
+          );
+        }
+
+        const accounts = await getSavedAccounts();
+        if (mounted) {
+          setSavedAccounts(Array.isArray(accounts) ? accounts : []);
+        }
+      } catch (e) {
+        __DEV__ && console.error('[LoginScreen] Initialization failed:', e);
+        if (mounted) {
+          setSavedAccounts([]);
+          setBiometricType(null);
+        }
       }
-      const accounts = await getSavedAccounts();
-      setSavedAccounts(accounts);
-    })();
+    };
+
+    initializeLogin();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const refreshAccountsList = async () => {
     try {
       const accounts = await getSavedAccounts();
-      setSavedAccounts(accounts);
+      setSavedAccounts(Array.isArray(accounts) ? accounts : []);
     } catch (e) {
       __DEV__ && console.error('[LoginScreen] refreshAccountsList error:', e);
     }
@@ -120,12 +148,17 @@ export default function LoginScreen({ navigation }) {
   };
 
   const togglePassword = () => {
-    setShowPassword(!showPassword);
-    Animated.timing(eyeOpacity, {
-      toValue: showPassword ? 0 : 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
+    eyeAnimRef.current?.stop();
+    setShowPassword(prev => {
+      const next = !prev;
+      eyeAnimRef.current = Animated.timing(eyeOpacity, {
+        toValue: next ? 1 : 0,
+        duration: 200,
+        useNativeDriver: true,
+      });
+      eyeAnimRef.current.start();
+      return next;
+    });
   };
 
   const handleAccountSelect = async (account) => {
@@ -193,6 +226,13 @@ export default function LoginScreen({ navigation }) {
             if (!savedRaw) {
               __DEV__ && console.log('[LOGIN] No saved credentials found');
               setLoading(false);
+              setDialog({
+                visible: true,
+                title: 'Account Not Found',
+                message: 'Saved login info is missing for this account. Please sign in with Google again.',
+                type: 'error',
+                buttons: [{ text: 'OK' }],
+              });
               return;
             }
 
@@ -261,7 +301,26 @@ export default function LoginScreen({ navigation }) {
     setVisibleConfirmPin('');
   }, []);
 
-  const resolveEmail = async (raw) => {
+  const getFriendlyErrorMessage = (message) => {
+  const msg = (message || '').toLowerCase();
+
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('timeout')) {
+    return 'No internet connection. Please check your data or wifi and try again.';
+  }
+  if (msg.includes('invalid login credentials') || msg.includes('invalid email or password')) {
+    return 'Wrong email/username or password. Please try again.';
+  }
+  if (msg.includes('no account found')) {
+    return message; // already clear
+  }
+  if (msg.includes('email not confirmed')) {
+    return 'Please verify your email first before logging in.';
+  }
+
+  return message || 'Something went wrong. Please try again.';
+};
+
+const resolveEmail = async (raw) => {
     let email = raw.trim();
     if (!email.includes('@')) {
       const isPhone = /^\+?[\d\s\-]{7,}$/.test(email);
@@ -308,21 +367,36 @@ export default function LoginScreen({ navigation }) {
       setDialog({
         visible: true,
         title: 'Login Failed',
-        message: e.message,
+        message: getFriendlyErrorMessage(e.message),
         type: 'error',
         buttons: [{ text: 'OK' }],
       });
       return;
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    let data, error;
+    try {
+      const result = await supabase.auth.signInWithPassword({ email, password });
+      data = result.data;
+      error = result.error;
+    } catch (e) {
+      setLoading(false);
+      setDialog({
+        visible: true,
+        title: 'Connection Error',
+        message: 'No internet connection. Please check your data or wifi and try again.',
+        type: 'error',
+        buttons: [{ text: 'OK' }],
+      });
+      return;
+    }
     setLoading(false);
 
     if (error) {
       setDialog({
         visible: true,
         title: 'Login Failed',
-        message: error.message,
+        message: getFriendlyErrorMessage(error.message),
         type: 'error',
         buttons: [{ text: 'OK' }],
       });
@@ -457,7 +531,8 @@ export default function LoginScreen({ navigation }) {
             const existingCred = existingCredRaw ? JSON.parse(existingCredRaw) : null;
 
             if (!existingCred?.appPassword) {
-              const appPassword = Array(32).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');
+              const randomBytes = await Crypto.getRandomBytesAsync(32);
+              const appPassword = Array.from(randomBytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
 
               await SecureStore.setItemAsync(credKey, JSON.stringify({
                 type: 'google',
@@ -558,12 +633,7 @@ export default function LoginScreen({ navigation }) {
       suppressDropdown.current = false;
       return;
     }
-    const text = identifier.toLowerCase();
-    const hasMatches = savedAccounts.some(a =>
-      (a.email || '').toLowerCase().includes(text) ||
-      (a.identifier || '').toLowerCase().includes(text)
-    );
-    if (hasMatches) setShowDropdown(true);
+    if (savedAccounts.length > 0) setShowDropdown(true);
   };
 
   const handleIdentifierBlur = () => {
@@ -572,13 +642,15 @@ export default function LoginScreen({ navigation }) {
 
   const handleIdentifierChange = (text) => {
     setIdentifier(text);
-    const lower = text.toLowerCase();
-    const hasMatches = savedAccounts.some(a =>
-      (a.email || '').toLowerCase().includes(lower) ||
-      (a.identifier || '').toLowerCase().includes(lower)
-    );
-    setShowDropdown(hasMatches);
+    setShowDropdown(savedAccounts.length > 0);
   };
+
+  const filteredAccounts = savedAccounts.filter(account => {
+    const searchText = identifier.toLowerCase();
+    const email = (account.email || '').toLowerCase();
+    const username = (account.identifier || '').toLowerCase();
+    return email.includes(searchText) || username.includes(searchText);
+  });
 
   const biometricIcon = biometricType === 'face' ? 'face-recognition' : 'fingerprint';
 
@@ -616,6 +688,7 @@ export default function LoginScreen({ navigation }) {
             setTimeout(() => { setVisibleConfirmPin(''); }, 500);
           }
         } else if (key === 'enter') {
+          if (pinLoading) return;
           if (confirmPin.length !== 4) { setPinError('Enter 4 digits'); return; }
           if (newPin !== confirmPin) {
             setPinError('PINs do not match');
@@ -623,6 +696,7 @@ export default function LoginScreen({ navigation }) {
             setVisibleConfirmPin('');
             return;
           }
+          setPinLoading(true);
           try {
             const saved = await saveQuickPin(selectedAccount.email, newPin);
             if (saved) {
@@ -644,6 +718,8 @@ export default function LoginScreen({ navigation }) {
           } catch (e) {
             __DEV__ && console.error('[LoginScreen] Save PIN error:', e);
             setPinError('Failed to save PIN. Please try again.');
+          } finally {
+            setPinLoading(false);
           }
         } else {
           if (confirmPin.length < 4) {
@@ -659,7 +735,9 @@ export default function LoginScreen({ navigation }) {
         setEnteredPin(enteredPin.slice(0, -1));
         setPinError('');
       } else if (key === 'enter') {
+        if (pinLoading) return;
         if (enteredPin.length !== 4) { setPinError('Enter 4 digits'); return; }
+        setPinLoading(true);
         try {
           __DEV__ && console.log('[PIN] Validating PIN...');
           await validateQuickPin(selectedAccount.email, enteredPin);
@@ -708,6 +786,8 @@ export default function LoginScreen({ navigation }) {
           } else {
             setPinError('Error validating PIN');
           }
+        } finally {
+          setPinLoading(false);
         }
       } else {
         if (enteredPin.length < 4) {
@@ -722,7 +802,7 @@ export default function LoginScreen({ navigation }) {
     setDialog({
       visible: true,
       title: 'Reset Password',
-      message: 'Enter your email to receive a reset link.',
+      message: 'Enter your email, username or phone to receive a reset link.',
       type: 'info',
       buttons: [
         { text: 'Cancel', style: 'cancel' },
@@ -733,18 +813,33 @@ export default function LoginScreen({ navigation }) {
               setDialog({
                 visible: true,
                 title: 'Error',
-                message: 'Enter your email first',
+                message: 'Enter your email, username or phone first',
                 type: 'warning',
                 buttons: [{ text: 'OK' }],
               });
               return;
             }
-            const { error } = await supabase.auth.resetPasswordForEmail(identifier.trim());
+
+            let resolvedEmail;
+            try {
+              resolvedEmail = await resolveEmail(identifier);
+            } catch (e) {
+              setDialog({
+                visible: true,
+                title: 'Error',
+                message: getFriendlyErrorMessage(e.message),
+                type: 'error',
+                buttons: [{ text: 'OK' }],
+              });
+              return;
+            }
+
+            const { error } = await supabase.auth.resetPasswordForEmail(resolvedEmail);
             if (error) {
               setDialog({
                 visible: true,
                 title: 'Error',
-                message: error.message,
+                message: getFriendlyErrorMessage(error.message),
                 type: 'error',
                 buttons: [{ text: 'OK' }],
               });
@@ -768,7 +863,8 @@ export default function LoginScreen({ navigation }) {
       <TouchableWithoutFeedback onPress={closeDropdown}>
         <KeyboardAvoidingView
           style={{ flex: 1, backgroundColor: COLORS.bgDark }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'android' ? 0 : 0}
         >
           <ScrollView
             style={{ flex: 1, backgroundColor: COLORS.bgDark }}
@@ -776,6 +872,8 @@ export default function LoginScreen({ navigation }) {
             keyboardShouldPersistTaps="handled"
             scrollEnabled={!showDropdown}
             nestedScrollEnabled={true}
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+            showsVerticalScrollIndicator={false}
           >
             <Text style={styles.arabic}>بَلِّغُوا عَنِّي</Text>
             <Text style={styles.title}>Bushrann</Text>
@@ -796,12 +894,17 @@ export default function LoginScreen({ navigation }) {
                 onFocus={handleIdentifierFocus}
                 onBlur={handleIdentifierBlur}
                 onPressIn={handleIdentifierFocus}
-                autoCapitalize="sentences"
+                autoCapitalize="none"
                 autoComplete="off"
                 autoCorrect={false}
                 importantForAutofill="no"
                 textContentType="none"
                 keyboardType="default"
+                returnKeyType="next"
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
+                blurOnSubmit={false}
+                accessibilityLabel="Email, username or phone input field"
+                accessibilityHint="Enter your email, username or phone number"
               />
 
               {showDropdown && savedAccounts.length > 0 && (
@@ -812,40 +915,31 @@ export default function LoginScreen({ navigation }) {
                   keyboardShouldPersistTaps="handled"
                   onStartShouldSetResponder={() => true}
                 >
-                  {savedAccounts
-                    .filter(account => {
-                      const searchText = identifier.toLowerCase();
-                      const email = (account.email || '').toLowerCase();
-                      const username = (account.identifier || '').toLowerCase();
-                      return email.includes(searchText) || username.includes(searchText);
-                    })
-                    .map((account, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[styles.dropdownItem, idx < savedAccounts.length - 1 && styles.dropdownItemBorder]}
-                        onPress={() => { closeDropdown(); handleAccountSelect(account); }}
-                        activeOpacity={0.7}
-                      >
-                        <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
-                          <Text style={styles.dropdownAvatarText}>
-                            {account.provider === 'google' ? 'G' : (account.identifier || account.email)[0].toUpperCase()}
-                          </Text>
-                        </View>
-                        <View style={styles.dropdownInfo}>
-                          <Text style={styles.dropdownIdentifier}>{account.identifier || account.email}</Text>
-                          {account.identifier && account.identifier !== account.email && (
-                            <Text style={styles.dropdownEmail}>{account.email}</Text>
-                          )}
-                        </View>
-                        <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
-                      </TouchableOpacity>
-                    ))}
-                  {savedAccounts.filter(account => {
-                    const searchText = identifier.toLowerCase();
-                    const email = (account.email || '').toLowerCase();
-                    const username = (account.identifier || '').toLowerCase();
-                    return email.includes(searchText) || username.includes(searchText);
-                  }).length === 0 && identifier.length > 0 && (
+                  {filteredAccounts.map((account, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.dropdownItem, idx < filteredAccounts.length - 1 && styles.dropdownItemBorder]}
+                      onPress={() => { closeDropdown(); handleAccountSelect(account); }}
+                      activeOpacity={0.7}
+                      accessibilityLabel={`Account ${account.identifier || account.email}`}
+                      accessibilityRole="button"
+                      accessibilityHint="Double tap to log in with this account"
+                    >
+                      <View style={[styles.dropdownAvatar, account.provider === 'google' && styles.dropdownAvatarGoogle]}>
+                        <Text style={styles.dropdownAvatarText}>
+                          {account.provider === 'google' ? 'G' : (account.identifier || account.email)[0].toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={styles.dropdownInfo}>
+                        <Text style={styles.dropdownIdentifier}>{account.identifier || account.email}</Text>
+                        {account.identifier && account.identifier !== account.email && (
+                          <Text style={styles.dropdownEmail}>{account.email}</Text>
+                        )}
+                      </View>
+                      <MaterialCommunityIcons name={biometricIcon} size={22} color="#a78bfa" />
+                    </TouchableOpacity>
+                  ))}
+                  {filteredAccounts.length === 0 && identifier.length > 0 && (
                     <View style={styles.noMatchesContainer}>
                       <Text style={styles.noMatchesText}>No matching accounts</Text>
                     </View>
@@ -858,6 +952,7 @@ export default function LoginScreen({ navigation }) {
             <TouchableWithoutFeedback onPress={closeDropdown}>
               <View style={[styles.passwordContainer, focusedField === 'password' && styles.passwordContainerFocused]}>
                 <TextInput
+                  ref={passwordInputRef}
                   style={styles.passwordInput}
                   placeholder="Password"
                   placeholderTextColor="#8B92A8"
@@ -866,15 +961,21 @@ export default function LoginScreen({ navigation }) {
                   onFocus={() => { closeDropdown(); setFocusedField('password'); }}
                   onBlur={() => setFocusedField(null)}
                   secureTextEntry={!showPassword}
-                  autoComplete="off"
+                  autoComplete="password"
                   autoCorrect={false}
                   autoCapitalize="none"
-                  textContentType="none"
+                  textContentType="password"
+                  returnKeyType="done"
+                  onSubmitEditing={handleLogin}
+                  accessibilityLabel="Password input field"
+                  accessibilityHint="Enter your password"
                 />
                 <TouchableOpacity
                   style={styles.eyeButton}
                   onPress={togglePassword}
                   activeOpacity={0.7}
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                  accessibilityRole="button"
                 >
                   <Animated.View style={{ opacity: eyeOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }}>
                     <MaterialCommunityIcons
@@ -887,7 +988,14 @@ export default function LoginScreen({ navigation }) {
               </View>
             </TouchableWithoutFeedback>
 
-            <AnimatedButton style={styles.button} onPress={handleLogin} disabled={loading}>
+            <AnimatedButton
+              style={styles.button}
+              onPress={handleLogin}
+              disabled={loading}
+              accessibilityLabel="Login button"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loading }}
+            >
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Login</Text>}
             </AnimatedButton>
 
@@ -897,7 +1005,14 @@ export default function LoginScreen({ navigation }) {
               <View style={styles.dividerLine} />
             </View>
 
-            <AnimatedButton style={styles.googleButton} onPress={handleGoogleLogin} disabled={googleLoading}>
+            <AnimatedButton
+              style={styles.googleButton}
+              onPress={handleGoogleLogin}
+              disabled={googleLoading}
+              accessibilityLabel="Continue with Google button"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: googleLoading }}
+            >
               {googleLoading ? <ActivityIndicator color="#4285F4" /> : (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <View style={styles.googleIconContainer}>
@@ -993,7 +1108,8 @@ export default function LoginScreen({ navigation }) {
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'back', 0, 'enter'].map((key) => (
                       <TouchableOpacity
                         key={key}
-                        style={styles.keypadButton}
+                        style={[styles.keypadButton, pinLoading && { opacity: 0.5 }]}
+                        disabled={pinLoading}
                         onPress={() => handlePinKeyPress(key)}
                       >
                         {key === 'back' ? (
@@ -1289,9 +1405,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   keypadButton: {
-    width: s(72),
-    height: s(72),
-    borderRadius: s(36),
+    width: Math.max(s(72), 44),
+    height: Math.max(s(72), 44),
+    borderRadius: Math.max(s(72), 44) / 2,
     backgroundColor: 'rgba(255,255,255,0.05)',
     justifyContent: 'center',
     alignItems: 'center',

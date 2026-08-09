@@ -1,4 +1,4 @@
-﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Pressable, Text, Linking, Alert, Platform } from 'react-native';
+﻿import { View, ActivityIndicator, TouchableOpacity, StyleSheet, Image, Text, Linking, Platform } from 'react-native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -15,6 +15,8 @@ import ProfileScreen from './screens/ProfileScreen';
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import ProfileVideosScreen from './screens/ProfileVideosScreen';
+import LiveStreamScreen from './screens/LiveStreamScreenLiveKit';
+import WatchLiveScreen from './screens/WatchLiveScreen';
 import { homeRefreshRef } from './utils/refs';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -32,8 +34,7 @@ import { COLORS } from './constants/theme';
 import { ROUTES } from './constants/routes';
 import { Ionicons } from '@expo/vector-icons';
 import { usePushNotifications } from './hooks/usePushNotifications';
-import { AppEventsLogger, Settings } from 'react-native-fbsdk-next';
-import ComingSoonScreen from './screens/ComingSoonScreen';
+import { Settings } from 'react-native-fbsdk-next';
 import QuranScreen from './screens/QuranScreen';
 import PrayerScreen from './screens/PrayerScreen';
 import QuranReaderScreen from './screens/QuranReaderScreen';
@@ -55,25 +56,12 @@ import AdminScreen from './screens/AdminScreen';
 // Prevent splash screen from hiding automatically
 SplashScreen.preventAutoHideAsync();
 
-const CURRENT_DATA_VERSION = '1.7.11';
+const CURRENT_DATA_VERSION = '1.7.28';
 
 async function migrateOldDataIfNeeded() {
   try {
     const storedVersion = await AsyncStorage.getItem('appDataVersion');
     if (!storedVersion || storedVersion !== CURRENT_DATA_VERSION) {
-      const keys = await AsyncStorage.getAllKeys();
-      const keysToRemove = keys.filter(k =>
-        k.startsWith('video_') ||
-        k.startsWith('feed_') ||
-        k.startsWith('social_') ||
-        k.startsWith('auth_') ||
-        k === 'ageVerified' ||
-        k === 'onboardingCompleted' ||
-        k === 'videoFeedbackGiven'
-      );
-      if (keysToRemove.length > 0) {
-        await AsyncStorage.multiRemove(keysToRemove);
-      }
       await AsyncStorage.setItem('appDataVersion', CURRENT_DATA_VERSION);
     }
   } catch (e) {
@@ -136,9 +124,22 @@ function ProfileTabIcon({ color, size, focused }) {
 }
 
 function MainTabs({ session }) {
-  const [homeKey, setHomeKey] = useState(0);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+
+  const handleHomePress = () => {
+    const state = navigation.getState();
+    const mainRoute = state?.routes?.find(r => r.name === 'Main');
+    const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
+
+    if (activeTab === 'Home') {
+      if (homeRefreshRef.current) {
+        homeRefreshRef.current();
+      }
+    } else {
+      navigation.navigate(ROUTES.MAIN, { screen: 'Home' });
+    }
+  };
 
   return (
     <Tab.Navigator
@@ -149,7 +150,7 @@ function MainTabs({ session }) {
           borderTopColor: 'rgba(255,255,255,0.06)',
           borderTopWidth: 1,
           marginHorizontal: 0,
-          marginBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : -1, android: insets.bottom > 0 ? insets.bottom : -1 }),
+          marginBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : -1, android: -1 }),
           borderRadius: 20,
           height: Platform.select({ ios: 55 + (insets.bottom > 0 ? 8 : 0), android: 55 }),
           paddingBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : 8, android: 8 }),
@@ -171,27 +172,29 @@ function MainTabs({ session }) {
         }}
         listeners={{
           tabPress: (e) => {
-            const state = navigation.getState();
-            const mainRoute = state?.routes?.find(r => r.name === 'Main');
-            const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
-
-            if (activeTab === 'Home') {
-              e.preventDefault();
-              if (homeRefreshRef.current) {
-                homeRefreshRef.current();
-              }
-            }
-            // else: let default tab switch happen instantly
+            e.preventDefault();
+            handleHomePress();
           },
         }}
-        initialParams={{ refreshKey: homeKey }}
-      />
+        />
       <Tab.Screen
         name="Upload"
-        component={ComingSoonScreen}
+        component={UploadScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'add-circle' : 'add-circle-outline'} size={size} color={color} />
+          ),
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate(ROUTES.LOGIN);
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
           ),
         }}
       />
@@ -214,22 +217,47 @@ function MainTabs({ session }) {
             <Text style={{ fontSize: focused ? 26 : 22 }}>🕌</Text>
           ),
           lazy: true,
+          unmountOnBlur: true,
         }}
       />
       <Tab.Screen
         name="Notifications"
-        component={ComingSoonScreen}
+        component={NotificationsScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={size} color={color} />
+          ),
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate(ROUTES.LOGIN);
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
           ),
         }}
       />
       <Tab.Screen
         name="Profile"
-        component={ComingSoonScreen}
+        component={ProfileScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => <ProfileTabIcon color={color} size={size} focused={focused} />,
+          tabBarButton: (props) => (
+            <TouchableOpacity
+              {...props}
+              onPress={() => {
+                if (!session) {
+                  navigation.navigate(ROUTES.LOGIN);
+                } else {
+                  props.onPress?.();
+                }
+              }}
+            />
+          ),
         }}
       />
     </Tab.Navigator>
@@ -243,33 +271,32 @@ const linking = {
       ResetPassword: 'auth/callback',
       VideoDetail: 'video/:id',
       UserProfile: 'user/:id',
+      WatchLive: 'live/:streamId',
+      LiveStream: 'go-live',
     },
   },
 };
 
 function App() {
   const [session, setSession] = useState(undefined);
-  // TEMP-DISABLED: Age gate removed for production (Quran/Prayer focus). Re-enable when UGC/streaming features launch.
-  const [ageVerified, setAgeVerified] = useState(true);
+  const [ageVerified, setAgeVerified] = useState(null);
   const [onboardingCompleted, setOnboardingCompleted] = useState(null);
   const [jsSplashVisible, setJsSplashVisible] = useState(true);
   const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
   usePushNotifications();
   const navigationRef = useRef(null);
+  const pendingResetRef = useRef(false);
 
-  // Auto-clean old incompatible data on startup
   useEffect(() => {
     migrateOldDataIfNeeded();
   }, []);
 
-  // Meta SDK: log app open for install tracking
   useEffect(() => {
     const setupFacebook = async () => {
       try {
         Settings.setAdvertiserIDCollectionEnabled(false);
         Settings.setAutoLogAppEventsEnabled(true);
         await Settings.initializeSDK();
-        console.log('[FB SDK] Initialized');
       } catch (error) {
         console.error('[FB SDK] Init failed:', error);
       }
@@ -277,20 +304,10 @@ function App() {
     setupFacebook();
   }, []);
 
-  // Splash screen prepare effect
   useEffect(() => {
-    async function prepare() {
-      try {
-      } catch (e) {
-        console.warn(e);
-      } finally {
-        setJsSplashVisible(false);
-      }
-    }
-    prepare();
+    setJsSplashVisible(false);
   }, []);
 
-  // ✅ FIX: Hide native splash only when ALL conditions are ready
   useEffect(() => {
     if (!jsSplashVisible && ageVerified !== null && onboardingCompleted !== null) {
       requestAnimationFrame(() => {
@@ -305,11 +322,9 @@ function App() {
     async function checkAge() {
       try {
         const verified = await AsyncStorage.getItem('ageVerified');
-        // TEMP-DISABLED: age gate bypassed
-        // setAgeVerified(verified === 'true');
+        setAgeVerified(verified === 'true');
       } catch (e) {
-        // TEMP-DISABLED: age gate bypassed
-        // setAgeVerified(false);
+        setAgeVerified(false);
       }
     }
     checkAge();
@@ -334,6 +349,8 @@ function App() {
       const data = response.notification.request.content.data;
       if (data?.type === 'video' && data?.videoId) {
         navigationRef.current?.navigate('VideoDetail', { id: data.videoId });
+      } else if (data?.type === 'live' && data?.streamId) {
+        navigationRef.current?.navigate('WatchLive', { stream: { id: data.streamId } });
       } else if (data?.type === 'follow' && data?.userId) {
         navigationRef.current?.navigate('UserProfile', { profileUserId: data.userId });
       } else if (data?.type === 'message') {
@@ -348,7 +365,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // Show persistent prayer notification on app launch (only if user has prayer data)
     if (Platform.OS === 'android') {
       AsyncStorage.getItem('prayerNotifications').then(saved => {
         if (saved) {
@@ -382,7 +398,11 @@ function App() {
       });
 
       if (_event === 'PASSWORD_RECOVERY') {
-        navigationRef.current?.navigate('ResetPassword');
+        if (navigationRef.current?.isReady()) {
+          navigationRef.current.navigate('ResetPassword');
+        } else {
+          pendingResetRef.current = true;
+        }
       }
 
       if (_event === 'TOKEN_REFRESHED' && session?.user?.email && session?.refresh_token) {
@@ -417,7 +437,6 @@ function App() {
           full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
           avatar_url: user.user_metadata?.avatar_url ?? null,
         });
-        __DEV__ && console.log('[App] Profile auto-created for:', user.email);
       }
     } catch (e) {
       __DEV__ && console.warn('[App] ensureProfileExists error:', e.message);
@@ -425,24 +444,18 @@ function App() {
   }
 
   async function handleDeepLink(url) {
-    if (__DEV__) console.log('[DEEP LINK] handleDeepLink called with:', url);
-    if (!url || !url.startsWith('bushrann://')) return;
+    const isBushrannScheme = url?.startsWith('bushrann://');
+    const isBushrannHttps = url?.startsWith('https://bushrann.app/');
+    if (!url || (!isBushrannScheme && !isBushrannHttps)) return;
+    if (url.includes('expo-development-client')) return;
 
-    // Ignore Expo development client URLs (development only)
-    if (url.includes('expo-development-client')) {
-      return;
-    }
-
-    // Validate deep link route
     const validRoutes = ['auth/callback', 'video', 'user', 'live', 'go-live'];
-    const path = url.replace('bushrann://', '').split('?')[0];
-    if (!validRoutes.some(route => path.startsWith(route))) {
-      if (__DEV__) console.log('[DeepLink] Unhandled route:', url);
-      return;
-    }
+    const path = isBushrannScheme
+      ? url.replace('bushrann://', '').split('?')[0]
+      : url.replace('https://bushrann.app/', '').split('?')[0];
+    if (!validRoutes.some(route => path.startsWith(route))) return;
 
     if (url.includes('type=recovery')) {
-      __DEV__ && console.log('✅ Recovery link detected!');
       const hashIndex = url.indexOf('#');
       const queryIndex = url.indexOf('?');
       const paramStart = hashIndex !== -1 ? hashIndex + 1 : (queryIndex !== -1 ? queryIndex + 1 : null);
@@ -452,18 +465,13 @@ function App() {
         const access_token = params.get('access_token');
         const refresh_token = params.get('refresh_token');
 
-        __DEV__ && console.log('Access token found:', !!access_token);
-
         if (access_token) {
           const { data, error } = await supabase.auth.setSession({
             access_token,
             refresh_token: refresh_token || '',
           });
 
-          if (error) {
-            __DEV__ && console.log('❌ Session error:', error.message);
-          } else {
-            __DEV__ && console.log('✅ Session set!');
+          if (!error) {
             setTimeout(() => {
               navigationRef.current?.navigate('ResetPassword');
             }, 500);
@@ -473,7 +481,6 @@ function App() {
     }
   }
 
-  // Show JS splash while any condition is still loading
   if (jsSplashVisible || ageVerified === null || onboardingCompleted === null) {
     return (
       <View style={{ flex: 1, backgroundColor: '#1a2e44' }}>
@@ -524,7 +531,16 @@ function App() {
             <DownloadProvider>
               <GestureHandlerRootView style={{ flex: 1 }}>
                 <BottomSheetModalProvider>
-                  <NavigationContainer ref={navigationRef} linking={linking}>
+                  <NavigationContainer
+                    ref={navigationRef}
+                    linking={linking}
+                    onReady={() => {
+                      if (pendingResetRef.current) {
+                        pendingResetRef.current = false;
+                        navigationRef.current?.navigate('ResetPassword');
+                      }
+                    }}
+                  >
                     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
                       <Stack.Screen name="Main">
                         {() => <MainTabs session={session} />}
@@ -536,6 +552,8 @@ function App() {
                       <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
                       <Stack.Screen name="Search" component={SearchScreen} />
                       <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
+                      <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
+                      <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
                       <Stack.Screen name="FollowList" component={FollowListScreen} />
                       <Stack.Screen name="Settings" component={SettingsScreen} />
                       <Stack.Screen name="UserProfile" component={ProfileScreen} />

@@ -19,7 +19,7 @@ import { SystemBars } from 'react-native-edge-to-edge';
 
 export default function SignupScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { user: authUser, setUser } = useUser();
+  const { setUser } = useUser();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -38,24 +38,55 @@ export default function SignupScreen({ navigation }) {
   });
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
-  const passwordEyeOpacity = useRef(new Animated.Value(0)).current;
-  const confirmEyeOpacity = useRef(new Animated.Value(0)).current;
+  const emailInputRef = useRef(null);
+  const phoneInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
+  const confirmPasswordInputRef = useRef(null);
 
   const { saveAccount } = useBiometricAuth();
 
+  const getFriendlyErrorMessage = (message) => {
+    const msg = (message || '').toLowerCase();
+    if (msg.includes('network') || msg.includes('fetch') || msg.includes('timeout')) {
+      return 'No internet connection. Please check your data or wifi and try again.';
+    }
+    if (msg.includes('invalid login credentials') || msg.includes('invalid email or password')) {
+      return 'Wrong email or password. Please try again.';
+    }
+    if (msg.includes('email not confirmed')) {
+      return 'Please verify your email first before logging in.';
+    }
+    return message || 'Something went wrong. Please try again.';
+  };
+
   async function handleAutoLogin(loginEmail, loginPassword) {
     setLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: loginEmail,
-      password: loginPassword,
-    });
+    let data, error;
+    try {
+      const result = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: loginPassword,
+      });
+      data = result.data;
+      error = result.error;
+    } catch (e) {
+      setLoading(false);
+      setDialog({
+        visible: true,
+        title: 'Connection Error',
+        message: 'No internet connection. Please check your data or wifi and try again.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => navigation.navigate(ROUTES.LOGIN) }]
+      });
+      return;
+    }
     setLoading(false);
-    
+
     if (error) {
       setDialog({
         visible: true,
         title: 'Login Failed',
-        message: error.message || 'Please try logging in manually.',
+        message: getFriendlyErrorMessage(error.message),
         type: 'error',
         buttons: [{ text: 'OK', onPress: () => navigation.navigate(ROUTES.LOGIN) }]
       });
@@ -68,20 +99,10 @@ export default function SignupScreen({ navigation }) {
 
   const togglePassword = () => {
     setShowPassword(prev => !prev);
-    Animated.timing(passwordEyeOpacity, {
-      toValue: showPassword ? 0 : 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
   };
 
   const toggleConfirmPassword = () => {
     setShowConfirmPassword(prev => !prev);
-    Animated.timing(confirmEyeOpacity, {
-      toValue: showConfirmPassword ? 0 : 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
   };
 
   async function handleSignup() {
@@ -95,7 +116,7 @@ export default function SignupScreen({ navigation }) {
       }); 
       return; 
     }
-    if (!email.trim() || !email.includes('@')) { 
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { 
       setDialog({ 
         visible: true, 
         title: 'Email Required', 
@@ -115,7 +136,7 @@ export default function SignupScreen({ navigation }) {
       }); 
       return; 
     }
-    if (password.trim().length < 8) { 
+    if (password.length < 8) { 
       setDialog({ 
         visible: true, 
         title: 'Weak Password', 
@@ -125,7 +146,7 @@ export default function SignupScreen({ navigation }) {
       }); 
       return; 
     }
-    if (password.trim() !== confirmPassword.trim()) { 
+    if (password !== confirmPassword) { 
       setDialog({ 
         visible: true, 
         title: 'Password Mismatch', 
@@ -150,11 +171,26 @@ export default function SignupScreen({ navigation }) {
     setLoading(true);
     const authEmail = email.trim();
 
-    const { data, error } = await supabase.auth.signUp({
-      email: authEmail,
-      password,
-      options: { data: { username: username.trim() } },
-    });
+    let data, error;
+    try {
+      const result = await supabase.auth.signUp({
+        email: authEmail,
+        password,
+        options: { data: { username: username.trim() } },
+      });
+      data = result.data;
+      error = result.error;
+    } catch (e) {
+      setLoading(false);
+      setDialog({
+        visible: true,
+        title: 'Connection Error',
+        message: 'No internet connection. Please check your data or wifi and try again.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }]
+      });
+      return;
+    }
 
     if (error) {
       setLoading(false);
@@ -170,7 +206,7 @@ export default function SignupScreen({ navigation }) {
         setDialog({ 
           visible: true, 
           title: 'Signup Failed', 
-          message: error.message || 'Please try again later.', 
+          message: getFriendlyErrorMessage(error.message), 
           type: 'error', 
           buttons: [{ text: 'OK', onPress: () => setDialog({ ...dialog, visible: false }) }] 
         });
@@ -178,20 +214,26 @@ export default function SignupScreen({ navigation }) {
       return;
     }
 
-    if (data?.user) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const profileUpdate = { username: username.trim() };
-      if (hasPhone) profileUpdate.phone = phone.trim();
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update(profileUpdate)
-        .eq('id', data.user.id);
-      if (profileError) {
-        __DEV__ && console.warn('Profile save failed:', profileError.message);
+    try {
+      if (data?.user) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const profileUpdate = { username: username.trim() };
+        if (hasPhone) profileUpdate.phone = phone.trim();
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .update(profileUpdate)
+          .eq('id', data.user.id);
+        if (profileError) {
+          __DEV__ && console.warn('Profile save failed:', profileError.message);
+        }
       }
+
+      await saveAccount(username.trim(), authEmail, 'email');
+    } catch (e) {
+      __DEV__ && console.warn('Post-signup steps failed:', e.message);
+      // Account was already created successfully - don't block the success dialog
     }
 
-    await saveAccount(username.trim(), authEmail, 'email');
     setLoading(false);
 
     setDialog({
@@ -240,7 +282,7 @@ export default function SignupScreen({ navigation }) {
       >
         {/* Back Button */}
         <AnimatedButton
-          onPress={navigation.goBack}
+          onPress={() => navigation.goBack()}
           style={{ alignSelf: 'flex-start', marginBottom: 24 }}
         >
           <View style={styles.backButton}>
@@ -273,9 +315,12 @@ export default function SignupScreen({ navigation }) {
                 onChangeText={setUsername}
                 onFocus={() => setFocusedField('username')}
                 onBlur={() => setFocusedField(null)}
-                autoCapitalize="sentences"
+                autoCapitalize="none"
                 autoComplete="off"
                 autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => emailInputRef.current?.focus()}
+                blurOnSubmit={false}
                 accessibilityLabel="Username input field"
                 accessibilityHint="Enter your username"
               />
@@ -288,6 +333,7 @@ export default function SignupScreen({ navigation }) {
             <View style={[styles.inputContainer, focusedField === 'email' && styles.inputContainerFocused]}>
               <MaterialCommunityIcons name="email-outline" size={18} color={focusedField === 'email' ? COLORS.gold : '#8B92A8'} style={styles.inputIcon} />
               <TextInput
+                ref={emailInputRef}
                 style={styles.input}
                 placeholder="Enter your email"
                 placeholderTextColor="#8B92A8"
@@ -295,10 +341,13 @@ export default function SignupScreen({ navigation }) {
                 onChangeText={setEmail}
                 onFocus={() => setFocusedField('email')}
                 onBlur={() => setFocusedField(null)}
-                autoCapitalize="sentences"
+                autoCapitalize="none"
                 keyboardType="email-address"
                 autoComplete="off"
                 autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => phoneInputRef.current?.focus()}
+                blurOnSubmit={false}
                 accessibilityLabel="Email input field"
                 accessibilityHint="Enter your email address"
               />
@@ -311,6 +360,7 @@ export default function SignupScreen({ navigation }) {
             <View style={[styles.inputContainer, focusedField === 'phone' && styles.inputContainerFocused]}>
               <MaterialCommunityIcons name="phone-outline" size={18} color={focusedField === 'phone' ? COLORS.gold : '#8B92A8'} style={styles.inputIcon} />
               <TextInput
+                ref={phoneInputRef}
                 style={styles.input}
                 placeholder="Enter your phone number"
                 placeholderTextColor="#8B92A8"
@@ -318,9 +368,12 @@ export default function SignupScreen({ navigation }) {
                 onChangeText={setPhone}
                 onFocus={() => setFocusedField('phone')}
                 onBlur={() => setFocusedField(null)}
-                autoCapitalize="sentences"
+                autoCapitalize="none"
                 keyboardType="phone-pad"
                 autoComplete="off"
+                returnKeyType="next"
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
+                blurOnSubmit={false}
                 accessibilityLabel="Phone number input field"
                 accessibilityHint="Enter your phone number"
               />
@@ -333,6 +386,7 @@ export default function SignupScreen({ navigation }) {
             <View style={[styles.inputContainer, focusedField === 'password' && styles.inputContainerFocused]}>
               <MaterialCommunityIcons name="lock-outline" size={18} color={focusedField === 'password' ? COLORS.gold : '#8B92A8'} style={styles.inputIcon} />
               <TextInput
+                ref={passwordInputRef}
                 style={styles.input}
                 placeholder="Min. 8 characters"
                 placeholderTextColor="#8B92A8"
@@ -341,10 +395,13 @@ export default function SignupScreen({ navigation }) {
                 onFocus={() => setFocusedField('password')}
                 onBlur={() => setFocusedField(null)}
                 secureTextEntry={!showPassword}
-                autoComplete="off"
+                autoComplete="new-password"
                 autoCorrect={false}
                 autoCapitalize="none"
-                textContentType="none"
+                textContentType="newPassword"
+                returnKeyType="next"
+                onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
+                blurOnSubmit={false}
                 accessibilityLabel="Password input field"
                 accessibilityHint="Enter your password"
               />
@@ -368,6 +425,7 @@ export default function SignupScreen({ navigation }) {
             <View style={[styles.inputContainer, focusedField === 'confirm' && styles.inputContainerFocused]}>
               <MaterialCommunityIcons name="lock-check-outline" size={18} color={focusedField === 'confirm' ? COLORS.gold : '#8B92A8'} style={styles.inputIcon} />
               <TextInput
+                ref={confirmPasswordInputRef}
                 style={styles.input}
                 placeholder="Re-enter your password"
                 placeholderTextColor="#8B92A8"
@@ -380,6 +438,8 @@ export default function SignupScreen({ navigation }) {
                 autoCorrect={false}
                 autoCapitalize="none"
                 textContentType="none"
+                returnKeyType="done"
+                onSubmitEditing={handleSignup}
                 accessibilityLabel="Confirm password input field"
                 accessibilityHint="Re-enter your password"
               />
@@ -403,31 +463,48 @@ export default function SignupScreen({ navigation }) {
           </Text>
 
           {/* Terms Checkbox */}
-          <TouchableOpacity 
-            style={styles.termsRow}
-            onPress={() => setAcceptedTerms(!acceptedTerms)}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
+          <View style={styles.termsRow}>
+            <TouchableOpacity
+              style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}
+              onPress={() => setAcceptedTerms(prev => !prev)}
+              activeOpacity={0.8}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: acceptedTerms }}
+              accessibilityLabel="Agree to Terms of Service and Content Policy"
+            >
               {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
-            </View>
+            </TouchableOpacity>
             <Text style={styles.termsText}>
               I agree to the{' '}
               <Text 
                 style={styles.termsLink}
-                onPress={() => Linking.openURL(CONFIG.TERMS_URL)}
+                onPress={async () => {
+                  try {
+                    const supported = await Linking.canOpenURL(CONFIG.TERMS_URL);
+                    if (supported) await Linking.openURL(CONFIG.TERMS_URL);
+                  } catch (e) {
+                    __DEV__ && console.warn('[SignupScreen] Terms link error:', e);
+                  }
+                }}
               >
                 Terms of Service
               </Text>
               {' '}and{' '}
               <Text 
                 style={styles.termsLink}
-                onPress={() => Linking.openURL(CONFIG.CONTENT_POLICY_URL)}
+                onPress={async () => {
+                  try {
+                    const supported = await Linking.canOpenURL(CONFIG.CONTENT_POLICY_URL);
+                    if (supported) await Linking.openURL(CONFIG.CONTENT_POLICY_URL);
+                  } catch (e) {
+                    __DEV__ && console.warn('[SignupScreen] Content Policy link error:', e);
+                  }
+                }}
               >
                 Content Policy
               </Text>
             </Text>
-          </TouchableOpacity>
+          </View>
 
           {/* Signup Button */}
           <AnimatedButton

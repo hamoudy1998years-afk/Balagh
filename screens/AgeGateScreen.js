@@ -5,30 +5,27 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Dimensions,
-  StatusBar,
-  Platform,
+  useWindowDimensions,
+  BackHandler,
 } from 'react-native';
 import ModernDialog from './ModernDialog';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SystemBars } from 'react-native-edge-to-edge';
 
-const { height } = Dimensions.get('window');
-const ITEM_HEIGHT = 80;
 const MIN_AGE = 13;
-const VISIBLE_ITEMS = 5;
 
 export default function AgeGateScreen({ onVerified }) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const ITEM_HEIGHT = Math.min(Math.max(Math.round(height * 0.09), 56), 120);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
   
   useEffect(() => {
-    StatusBar.setBarStyle('light-content', true);
-    if (Platform.OS === 'android') {
-      StatusBar.setTranslucent(true);
-      StatusBar.setBackgroundColor('transparent');
-    }
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      return true; // block back button on Age Gate
+    });
+    return () => backHandler.remove();
   }, []);
   
   const [selectedAge, setSelectedAge] = useState(18);
@@ -42,7 +39,7 @@ export default function AgeGateScreen({ onVerified }) {
     if (ages[index]) {
       setSelectedAge(ages[index]);
     }
-  }, []);
+  }, [ITEM_HEIGHT]);
 
   const scrollToAge = (age) => {
     const index = ages.indexOf(age);
@@ -64,12 +61,25 @@ export default function AgeGateScreen({ onVerified }) {
       return;
     }
 
-    await AsyncStorage.setItem('ageVerified', 'true');
-    await AsyncStorage.setItem('userAge', selectedAge.toString());
-    onVerified();
+    try {
+      await AsyncStorage.multiSet([
+        ['ageVerified', 'true'],
+        ['userAge', selectedAge.toString()],
+      ]);
+      onVerified();
+    } catch (e) {
+      __DEV__ && console.warn('[AgeGate] Failed to save age verification:', e);
+      setDialog({
+        visible: true,
+        title: 'Something Went Wrong',
+        message: 'We could not save your age verification. Please try again.',
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
+    }
   };
 
-  const renderItem = useCallback(({ item, index }) => {
+  const renderItem = useCallback(({ item }) => {
     const distance = Math.abs(item - selectedAge);
     const isSelected = item === selectedAge;
 
@@ -107,24 +117,25 @@ export default function AgeGateScreen({ onVerified }) {
 
     return (
       <TouchableOpacity
-        style={styles.ageItem}
+        style={[styles.ageItem, { height: ITEM_HEIGHT }]}
         onPress={() => scrollToAge(item)}
         activeOpacity={0.7}
       >
-        <Text
-          style={[
-            styles.ageText,
-            {
-              fontSize,
-              color,
-              opacity,
-              fontWeight,
-              transform: [{ scale }],
-            },
-          ]}
-        >
-          {item}
-        </Text>
+        <View style={{ transform: [{ scale }] }}>
+          <Text
+            style={[
+              styles.ageText,
+              {
+                fontSize,
+                color,
+                opacity,
+                fontWeight,
+              },
+            ]}
+          >
+            {item}
+          </Text>
+        </View>
         {isSelected && <View style={styles.indicator} />}
       </TouchableOpacity>
     );
@@ -134,7 +145,7 @@ export default function AgeGateScreen({ onVerified }) {
     length: ITEM_HEIGHT,
     offset: ITEM_HEIGHT * index,
     index,
-  }), []);
+  }), [ITEM_HEIGHT]);
 
   const initialScrollIndex = ages.indexOf(18);
 
@@ -149,7 +160,7 @@ export default function AgeGateScreen({ onVerified }) {
         </Text>
       </View>
 
-      <View style={styles.pickerContainer}>
+      <View style={[styles.pickerContainer, { height: height * 0.45 }]}>
         {/* Top fade gradient */}
         <View style={styles.fadeTop} />
         
@@ -158,6 +169,7 @@ export default function AgeGateScreen({ onVerified }) {
         <View style={styles.centerLineBottom} />
         
         <FlatList
+          key={height}
           ref={flatListRef}
           data={ages}
           renderItem={renderItem}
@@ -238,7 +250,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pickerContainer: {
-    height: height * 0.45,
     position: 'relative',
   },
   fadeTop: {
@@ -282,7 +293,6 @@ const styles = StyleSheet.create({
     borderRadius: 1,
   },
   ageItem: {
-    height: 80,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
@@ -290,19 +300,6 @@ const styles = StyleSheet.create({
   ageText: {
     textAlign: 'center',
     letterSpacing: -0.5,
-  },
-  ageTextSelected: {
-    fontSize: 38,
-    fontWeight: '800',
-    color: '#ffffff',
-  },
-  ageTextNear: {
-    fontSize: 26,
-    color: '#aaaaaa',
-  },
-  ageTextFar: {
-    fontSize: 14,
-    color: '#333333',
   },
   indicator: {
     position: 'absolute',

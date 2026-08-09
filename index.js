@@ -1,7 +1,13 @@
-import { registerRootComponent } from 'expo';
-import App from './App';
+if (typeof DOMException === 'undefined') {
+  global.DOMException = class DOMException extends Error {
+    constructor(message, name) {
+      super(message);
+      this.name = name || 'Error';
+    }
+  };
+}
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
+const { registerRootComponent } = require('expo');
+const App = require('./App').default;
+
 registerRootComponent(App);

@@ -18,6 +18,9 @@ import { EDGE_FUNCTIONS, CONFIG } from '../constants/api';
 import { ERROR_TITLES, ERROR_MESSAGES } from '../constants/errors';
 import { clearFeedCache } from './HomeScreen';
 import { useUser } from '../context/UserContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { submitBugReport } from '../services/feedbackApi';
+import * as StoreReview from 'expo-store-review';
 
 const ACCENT     = COLORS.gold;
 const ACCENT_DIM = `${COLORS.gold}18`;
@@ -202,6 +205,10 @@ export default function SettingsScreen({ navigation }) {
 
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [switchModalVisible, setSwitchModalVisible] = useState(false);
+  const [showBugDialog, setShowBugDialog] = useState(false);
+  const [bugText, setBugText] = useState('');
+  const [bugPhone, setBugPhone] = useState('');
+  const [bugSubmitted, setBugSubmitted] = useState(false);
 
   useEffect(() => { init(); }, [currentUser?.id]);
 
@@ -316,6 +323,29 @@ export default function SettingsScreen({ navigation }) {
   }, [userToUnblock, currentUser?.id]);
 
   async function handleLogout() { setShowLogoutModal(true); }
+
+  async function handleBugReport() {
+    if (!bugText.trim()) return;
+    setBugSubmitted(true);
+    submitBugReport(bugText.trim(), bugPhone.trim());
+    setTimeout(() => {
+      setShowBugDialog(false);
+      setBugText('');
+      setBugPhone('');
+      setBugSubmitted(false);
+    }, 1500);
+  }
+
+  async function handleRateUs() {
+    try {
+      const available = await StoreReview.isAvailableAsync();
+      if (available) {
+        await StoreReview.requestReview();
+      } else {
+        await Linking.openURL('market://details?id=com.bushrann.app');
+      }
+    } catch (e) {}
+  }
 
   async function confirmLogout() {
     setShowLogoutModal(false);
@@ -818,7 +848,9 @@ export default function SettingsScreen({ navigation }) {
       <GroupLabel text="SUPPORT" />
       <Card>
         <Row icon="❓" label="FAQ" sublabel="Frequently asked questions" onPress={handleNavigateFaq} />
-        <Row icon="📩" label="Contact Admin" sublabel="Report a problem or send feedback" onPress={() => navigation.navigate(ROUTES.CONTACT_ADMIN)} last />
+        <Row icon="📩" label="Contact Admin" sublabel="Report a problem or send feedback" onPress={() => navigation.navigate(ROUTES.CONTACT_ADMIN)} />
+        <Row icon="🐛" label="Report a Problem" sublabel="Found a bug? Tell us here" onPress={() => setShowBugDialog(true)} />
+        <Row icon="⭐" label="Rate Us" sublabel="Enjoying Bushrann? Leave a review" onPress={handleRateUs} last />
       </Card>
       <GroupLabel text="LEGAL" />
       <Card>
@@ -1029,6 +1061,50 @@ export default function SettingsScreen({ navigation }) {
         </TouchableOpacity>
       </ScrollView>
 
+      {showBugDialog && (
+        <KeyboardAvoidingView style={styles.bugDialogOverlay} behavior="padding">
+          <View style={styles.bugDialog}>
+            {!bugSubmitted ? (
+              <>
+                <Text style={styles.bugDialogTitle}>🐛 Report a Problem</Text>
+                <Text style={styles.bugDialogSub}>Describe what went wrong:</Text>
+                <TextInput
+                  style={styles.bugInput}
+                  multiline
+                  numberOfLines={4}
+                  placeholder="e.g. Prayer times not loading..."
+                  placeholderTextColor="#aaa"
+                  value={bugText}
+                  onChangeText={setBugText}
+                  autoFocus
+                />
+                <TextInput
+                  style={styles.bugPhoneInput}
+                  placeholder="Your phone number (so we can reply and fix it)"
+                  placeholderTextColor="#aaa"
+                  value={bugPhone}
+                  onChangeText={setBugPhone}
+                  keyboardType="phone-pad"
+                />
+                <View style={styles.bugDialogButtons}>
+                  <TouchableOpacity style={styles.bugDialogCancel} onPress={() => { setShowBugDialog(false); setBugText(''); setBugPhone(''); }}>
+                    <Text style={styles.bugDialogCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.bugDialogSend} onPress={handleBugReport}>
+                    <Text style={styles.bugDialogSendText}>Send</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <View style={{ alignItems: 'center', padding: 20 }}>
+                <Text style={{ fontSize: 40, marginBottom: 12 }}>✅</Text>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: '#1a2e44' }}>Thank you!</Text>
+                <Text style={{ fontSize: 13, color: '#888', marginTop: 6, textAlign: 'center' }}>The developer has seen your report and is now working on it. 🙏</Text>
+              </View>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      )}
     </View>
   );
 }
@@ -1306,4 +1382,36 @@ const styles = StyleSheet.create({
   emailSentNote:     { fontSize: 13, color: SUBTEXT, textAlign: 'center', lineHeight: 20, marginBottom: 32 },
   emailResendBtn:    { paddingVertical: 12, paddingHorizontal: 24, borderRadius: 20, borderWidth: 1.5, borderColor: ACCENT },
   emailResendText:   { color: ACCENT, fontWeight: '600', fontSize: 14 },
+  bugDialogOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999,
+    alignItems: 'center', justifyContent: 'flex-end', padding: 24,
+  },
+  bugDialog: {
+    backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%',
+    borderWidth: 1, borderColor: 'rgba(201,168,76,0.3)',
+  },
+  bugDialogTitle: { fontSize: 18, fontWeight: '700', color: '#1a2e44', marginBottom: 8 },
+  bugDialogSub: { fontSize: 13, color: '#888', marginBottom: 16 },
+  bugInput: {
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 12,
+    padding: 14, fontSize: 14, color: '#1a2e44', minHeight: 100,
+    textAlignVertical: 'top', marginBottom: 12, backgroundColor: '#f9f9f9',
+  },
+  bugPhoneInput: {
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 12,
+    padding: 14, fontSize: 14, color: '#1a2e44',
+    marginBottom: 16, backgroundColor: '#f9f9f9',
+  },
+  bugDialogButtons: { flexDirection: 'row', gap: 10 },
+  bugDialogCancel: {
+    flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', backgroundColor: 'rgba(0,0,0,0.03)',
+  },
+  bugDialogCancelText: { color: '#555', fontWeight: '600', fontSize: 14 },
+  bugDialogSend: {
+    flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center',
+    backgroundColor: ACCENT,
+  },
+  bugDialogSendText: { color: '#1a2e44', fontWeight: '700', fontSize: 14 },
 });

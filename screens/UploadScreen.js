@@ -38,6 +38,10 @@ export default function UploadScreen({ navigation }) {
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
 
+  const [showLiveSetup, setShowLiveSetup] = useState(false);
+  const [liveTitle, setLiveTitle] = useState('');
+  const [maxQuestions, setMaxQuestions] = useState('5');
+
   const [dialog, setDialog] = useState({ 
     visible: false, 
     title: '', 
@@ -394,11 +398,91 @@ if (result.assets[0].fileSize > 150 * 1024 * 1024) {
     }
   }, [video, caption, category, thumbnailUri]);
 
+  const handleGoLive = useCallback(() => { setShowLiveSetup(true); }, []);
+
+  const startLiveStream = useCallback(() => {
+    if (!liveTitle.trim()) {
+      setDialog({
+        visible: true,
+        title: 'Title required',
+        message: 'Please enter a title for your live stream.',
+        type: 'warning',
+        buttons: [{ text: 'OK' }]
+      });
+      return;
+    }
+    const max = parseInt(maxQuestions) || 5;
+    setShowLiveSetup(false);
+    setLiveTitle('');
+    setMaxQuestions('5');
+    navigation.navigate(ROUTES.LIVE_STREAM, { title: liveTitle.trim(), maxQuestions: max });
+  }, [liveTitle, maxQuestions, navigation]);
+
+  if (showLiveSetup) {
+    return (
+      <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 70 }]}>
+        <Text style={styles.title}>🔴 Go Live</Text>
+        <Text style={styles.subtitle}>Set up your live stream</Text>
+
+        <Text style={styles.label}>Stream Title *</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Friday Tafsir Lesson"
+          placeholderTextColor="#aaaaaa"
+          value={liveTitle}
+          onChangeText={setLiveTitle}
+          maxLength={60}
+        />
+
+        <Text style={styles.label}>Max Questions to Answer</Text>
+        <Text style={styles.hint}>Viewers can submit questions. How many will you answer?</Text>
+        <View style={styles.maxQuestionsRow}>
+          {['3', '5', '10', '15', '20'].map(n => (
+            <AnimatedButton
+              key={n}
+              style={[styles.qChip, maxQuestions === n && styles.qChipActive]}
+              onPress={() => setMaxQuestions(n)}
+            >
+              <Text style={[styles.qChipText, maxQuestions === n && styles.qChipTextActive]}>{n}</Text>
+            </AnimatedButton>
+          ))}
+        </View>
+
+        <AnimatedButton style={styles.goLiveConfirmBtn} onPress={startLiveStream}>
+          <Text style={styles.goLiveConfirmBtnText}>🔴 Start Live Stream</Text>
+        </AnimatedButton>
+
+        <AnimatedButton style={styles.cancelBtn} onPress={() => setShowLiveSetup(false)}>
+          <Text style={styles.cancelBtnText}>Cancel</Text>
+        </AnimatedButton>
+
+        <ModernDialog
+          visible={dialog.visible}
+          title={dialog.title}
+          message={dialog.message}
+          type={dialog.type}
+          buttons={dialog.buttons}
+          onDismiss={() => setDialog({ ...dialog, visible: false })}
+        />
+      </ScrollView>
+    );
+  }
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={[styles.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 70 }]} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Upload Video</Text>
         <Text style={styles.subtitle}>Share your dawah with the ummah ☪️</Text>
+
+        {isScholar === true && (
+          <AnimatedButton style={styles.liveBtn} onPress={handleGoLive}>
+            <Text style={styles.liveDot}>🔴</Text>
+            <Text style={styles.liveBtnText}>Go Live</Text>
+            <View style={styles.scholarBadge}>
+              <Text style={styles.scholarBadgeText}>Scholar</Text>
+            </View>
+          </AnimatedButton>
+        )}
 
         <AnimatedButton style={styles.videoPicker} onPress={pickVideo} disabled={uploading || generatingThumb || compressing}>
           {compressing ? (
