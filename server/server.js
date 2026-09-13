@@ -11,6 +11,7 @@ app.set('trust proxy', true);
 // Import routes
 const recordingRoutes = require('./routes/recording');
 const livekitRoutes = require('./routes/livekit');
+const videoProcessingRoutes = require('./routes/videoProcessing');
 
 // Force HTTPS in production
 if (process.env.NODE_ENV === 'production') {
@@ -51,6 +52,9 @@ app.use('/api/recording', recordingRoutes);
 // Current LiveKit livestream backend
 app.use('/api/livekit', livekitRoutes);
 
+// Uploaded-video processing backend
+app.use('/api/video-processing', videoProcessingRoutes);
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -67,6 +71,7 @@ app.listen(PORT, () => {
     console.log('========================================');
     console.log('🚀 Server running on port', PORT);
     console.log('🎥 LiveKit API: /api/livekit');
+    console.log('🎞️ Video processing API: /api/video-processing');
     console.log('▶️ Replay playback: /api/recording/livestreams/:id/play');
     console.log('========================================');
   }
