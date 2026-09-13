@@ -6,6 +6,7 @@ const { createClient } = require('@supabase/supabase-js');
 const {
   EgressClient,
   RoomServiceClient,
+  EncodedFileType,
 } = require('livekit-server-sdk');
 
 const supabase = createClient(
@@ -897,6 +898,111 @@ async function scheduleUnreferencedRecordingCleanup(filename) {
     );
   });
 }
+
+// ─── START EGRESS RECORDING ──────────────────────────────────────
+router.post('/egress/start', requireAuth, async (req, res) => {
+  try {
+    const { roomName } = req.body;
+
+    if (!roomName || typeof roomName !== 'string') {
+      return res.status(400).json({ error: 'Missing roomName' });
+    }
+
+    // Verify this room belongs to the authenticated host.
+    const streamRow = await findStreamByRoom(roomName);
+
+    if (!streamRow) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+
+    if (streamRow.user_id !== req.authUserId) {
+      return res
+        .status(403)
+        .json({ error: 'Not authorized to record this stream' });
+    }
+
+    const requiredStorageEnv = [
+      'SUPABASE_S3_KEY_ID',
+      'SUPABASE_S3_SECRET',
+      'SUPABASE_S3_ENDPOINT',
+    ];
+
+    const missingEnv = requiredStorageEnv.filter(
+      key => !process.env[key]
+    );
+
+    if (missingEnv.length > 0) {
+      console.error(
+        '[EGRESS] Missing Supabase S3 configuration:',
+        missingEnv.join(', ')
+      );
+
+      return res
+        .status(500)
+        .json({ error: 'Recording storage is not configured' });
+    }
+
+    const egressClient = getEgressClient();
+
+    const filename =
+      `recordings/${streamRow.id}_${Date.now()}.mp4`;
+
+    const fileOutput = {
+      fileType: EncodedFileType.MP4,
+      filepath: filename,
+
+      s3: {
+        accessKey: process.env.SUPABASE_S3_KEY_ID,
+        secret: process.env.SUPABASE_S3_SECRET,
+        region: process.env.SUPABASE_S3_REGION || 'us-east-1',
+        endpoint: process.env.SUPABASE_S3_ENDPOINT,
+        bucket: 'livestreams',
+        forcePathStyle: true,
+      },
+    };
+
+    const info =
+      await egressClient.startRoomCompositeEgress(
+        roomName,
+        {
+          file: fileOutput,
+        }
+      );
+
+    if (!info?.egressId) {
+      console.error(
+        '[EGRESS] LiveKit returned no egressId:',
+        info
+      );
+
+      return res
+        .status(500)
+        .json({ error: 'Recording did not start' });
+    }
+
+    console.log(
+      '[EGRESS] Recording started:',
+      info.egressId,
+      filename
+    );
+
+    return res.json({
+      egressId: info.egressId,
+      filename,
+    });
+  } catch (error) {
+    console.error(
+      '[EGRESS] Start error:',
+      error?.response?.data ||
+        error?.message ||
+        error
+    );
+
+    return res
+      .status(500)
+      .json({ error: 'Failed to start recording' });
+  }
+});
 
 // ─── STOP EGRESS AND SAVE REPLAY ─────────────────────────────────
 router.post('/egress/stop', requireAuth, async (req, res) => {
