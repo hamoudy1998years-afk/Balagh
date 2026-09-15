@@ -1208,13 +1208,18 @@ async function processRecording(
       `/storage/v1/object/public/livestreams/${filename}`;
 
     // Poll Supabase Storage until file appears.
-    // 30 attempts × 10 seconds = maximum five-minute wait.
+    // 60 attempts × 30 seconds = maximum ~30-minute wait. The first
+    // check runs immediately so short uploads are detected without an
+    // initial 30-second delay; long streams produce large MP4s whose
+    // egress finalization/upload can far exceed the old 5-minute cap.
     let fileReady = false;
 
-    for (let i = 0; i < 30; i++) {
-      await new Promise(resolve =>
-        setTimeout(resolve, 10000)
-      );
+    for (let i = 0; i < 60; i++) {
+      if (i > 0) {
+        await new Promise(resolve =>
+          setTimeout(resolve, 30000)
+        );
+      }
 
       try {
         const response = await fetch(publicUrl, {
@@ -1225,7 +1230,7 @@ async function processRecording(
           fileReady = true;
 
           console.log(
-            `[PROCESS] File ready after ${(i + 1) * 10}s`
+            `[PROCESS] File ready after ${i * 30}s`
           );
 
           break;
@@ -1241,49 +1246,54 @@ async function processRecording(
 
     if (!fileReady) {
       console.error(
-        '[PROCESS] File never appeared in Supabase Storage'
+        '[PROCESS] File never appeared in Supabase Storage within the processing window'
       );
 
       // The replay row was created with video_url = "processing".
-      // Do not leave a permanently broken replay in the database.
+      // Never delete it: mark it 'failed' instead so the user sees a
+      // terminal failure state instead of a silently vanished replay.
+      // The conditional update guarantees a replay that became ready
+      // concurrently is never overwritten as failed.
       const {
-      data: deletedReplay,
-      error: cleanupRecordError,
-    } = await supabase
-      .from('livestreams')
-      .delete()
-      .eq('id', recordId)
-      .eq('video_url', 'processing')
-      .select('id')
-      .maybeSingle();
+        data: failedReplay,
+        error: failRecordError,
+      } = await supabase
+        .from('livestreams')
+        .update({ video_url: 'failed' })
+        .eq('id', recordId)
+        .eq('video_url', 'processing')
+        .select('id')
+        .maybeSingle();
 
-    if (cleanupRecordError) {
-      console.error(
-        '[PROCESS] Failed to remove stuck replay record:',
-        cleanupRecordError.message
-      );
+      if (failRecordError) {
+        console.error(
+          '[PROCESS] Failed to mark replay as failed:',
+          failRecordError.message
+        );
+
+        return;
+      }
+
+      if (failedReplay) {
+        console.log(
+          '[PROCESS] Marked replay as failed:',
+          recordId
+        );
+
+        // The MP4 may still arrive late; the cleanup queue removes it
+        // once it appears. The DB row is deliberately kept.
+        await scheduleUnreferencedRecordingCleanup(
+          filename
+        );
+      } else {
+        console.warn(
+          '[PROCESS] Processing replay row was no longer present; recording cleanup not scheduled:',
+          recordId
+        );
+      }
 
       return;
     }
-
-    if (deletedReplay) {
-      console.log(
-        '[PROCESS] Removed stuck replay record:',
-        recordId
-      );
-
-      await scheduleUnreferencedRecordingCleanup(
-        filename
-      );
-    } else {
-      console.warn(
-        '[PROCESS] Processing replay row was no longer present; recording cleanup not scheduled:',
-        recordId
-      );
-    }
-
-    return;
-  }
 
   // Generate thumbnail from video.
   let thumbnailUrl = null;
