@@ -719,6 +719,13 @@ function startLivestreamSweeper() {
         error.message
       );
     });
+
+    sweepReplayRecovery().catch(error => {
+      console.error(
+        '[RECOVERY] Initial replay recovery sweep failed:',
+        error.message
+      );
+    });
   }, 15 * 1000);
 
   // These timers must not be the only thing keeping Node alive.
@@ -735,6 +742,13 @@ function startLivestreamSweeper() {
     sweepRecordingCleanupQueue().catch(error => {
       console.error(
         '[EGRESS CLEANUP] Scheduled cleanup sweep failed:',
+        error.message
+      );
+    });
+
+    sweepReplayRecovery().catch(error => {
+      console.error(
+        '[RECOVERY] Scheduled replay recovery sweep failed:',
         error.message
       );
     });
@@ -897,6 +911,160 @@ async function scheduleUnreferencedRecordingCleanup(filename) {
       error.message
     );
   });
+}
+
+// ─── DURABLE REPLAY RECOVERY SWEEPER ─────────────────────────────
+//
+// The livestreams table itself is the durable recovery source: a replay
+// row with video_url='processing' and a persisted recording_filename is
+// an unfinished replay, regardless of whether its in-memory
+// processRecording job is still running, timed out, or died with a
+// Railway restart. This sweeper resumes finalization automatically.
+//
+// A recording is only declared terminally failed after the bounded
+// recovery window (24h, same constant as orphan-cleanup expiry) AND a
+// confirmed-missing storage check. Transient storage/network errors
+// never fail a replay.
+
+const REPLAY_RECOVERY_MAX_AGE_MS =
+  RECORDING_CLEANUP_MISSING_EXPIRY_MS;
+
+let replayRecoverySweepInProgress = false;
+
+async function sweepReplayRecovery() {
+  if (replayRecoverySweepInProgress) {
+    return;
+  }
+
+  replayRecoverySweepInProgress = true;
+
+  try {
+    const { data: candidates, error } =
+      await supabase
+        .from('livestreams')
+        .select(
+          'id, recording_filename, created_at'
+        )
+        .eq('video_url', 'processing')
+        .not('recording_filename', 'is', null)
+        .order('created_at', { ascending: true })
+        .limit(50);
+
+    if (error) {
+      console.error(
+        '[RECOVERY] Failed to load pending replay rows:',
+        error.message
+      );
+
+      return;
+    }
+
+    for (const candidate of candidates || []) {
+      const filename = candidate?.recording_filename;
+
+      if (!filename || typeof filename !== 'string') {
+        continue;
+      }
+
+      const publicUrl =
+        `${process.env.SUPABASE_URL}` +
+        `/storage/v1/object/public/livestreams/${filename}`;
+
+      let fileExists = false;
+
+      try {
+        const response = await fetch(publicUrl, {
+          method: 'HEAD',
+        });
+
+        fileExists = response.ok;
+      } catch (headError) {
+        // Transient network/storage error: never fail, never finalize;
+        // retry on a later sweep.
+        console.warn(
+          '[RECOVERY] Storage check failed; keeping replay pending:',
+          candidate.id,
+          headError.message
+        );
+
+        continue;
+      }
+
+      if (fileExists) {
+        console.log(
+          '[RECOVERY] Late recording found; finalizing replay:',
+          candidate.id,
+          filename
+        );
+
+        // Shared finalization is idempotent: the atomic conditional
+        // publish guarantees a single winner even if processRecording
+        // is concurrently finalizing the same replay.
+        await finalizeReplay(
+          candidate.id,
+          filename,
+          `recovery-${candidate.id}`
+        );
+
+        continue;
+      }
+
+      // Confirmed missing. Only inside the bounded recovery window the
+      // row simply stays pending; past it, declare terminal failure.
+      const createdAtMs = Date.parse(
+        candidate?.created_at
+      );
+
+      const isExpired =
+        Number.isFinite(createdAtMs) &&
+        Date.now() - createdAtMs >
+          REPLAY_RECOVERY_MAX_AGE_MS;
+
+      if (!isExpired) {
+        continue;
+      }
+
+      // Final confirmed-missing check happened above (fileExists is
+      // false and the HEAD succeeded). Atomically transition
+      // processing → failed so a concurrent finalizer that already
+      // published can never be overwritten.
+      const {
+        data: failedReplay,
+        error: failError,
+      } = await supabase
+        .from('livestreams')
+        .update({ video_url: 'failed' })
+        .eq('id', candidate.id)
+        .eq('video_url', 'processing')
+        .select('id')
+        .maybeSingle();
+
+      if (failError) {
+        console.error(
+          '[RECOVERY] Failed to mark replay as failed:',
+          candidate.id,
+          failError.message
+        );
+
+        continue;
+      }
+
+      if (failedReplay) {
+        console.warn(
+          '[RECOVERY] Recording missing after recovery window; replay marked failed (recording retained for manual recovery):',
+          candidate.id,
+          filename
+        );
+
+        // Deliberately NOT queued for orphan cleanup: the MP4 may still
+        // materialize, and the replay row keeps recording_filename so the
+        // recording can be recovered manually. Only genuinely unreferenced
+        // recordings (no replay row) enter the cleanup queue.
+      }
+    }
+  } finally {
+    replayRecoverySweepInProgress = false;
+  }
 }
 
 // ─── START EGRESS RECORDING ──────────────────────────────────────
@@ -1112,6 +1280,7 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       .insert({
         user_id: streamRow.user_id,
         video_url: 'processing',
+        recording_filename: trustedFilename || null,
         thumbnail_url:
           streamRow.thumbnail_url || null,
         title:
@@ -1246,54 +1415,45 @@ async function processRecording(
 
     if (!fileReady) {
       console.error(
-        '[PROCESS] File never appeared in Supabase Storage within the processing window'
+        '[PROCESS] File not ready within the normal processing window:',
+        recordId,
+        filename
       );
 
-      // The replay row was created with video_url = "processing".
-      // Never delete it: mark it 'failed' instead so the user sees a
-      // terminal failure state instead of a silently vanished replay.
-      // The conditional update guarantees a replay that became ready
-      // concurrently is never overwritten as failed.
-      const {
-        data: failedReplay,
-        error: failRecordError,
-      } = await supabase
-        .from('livestreams')
-        .update({ video_url: 'failed' })
-        .eq('id', recordId)
-        .eq('video_url', 'processing')
-        .select('id')
-        .maybeSingle();
-
-      if (failRecordError) {
-        console.error(
-          '[PROCESS] Failed to mark replay as failed:',
-          failRecordError.message
-        );
-
-        return;
-      }
-
-      if (failedReplay) {
-        console.log(
-          '[PROCESS] Marked replay as failed:',
-          recordId
-        );
-
-        // The MP4 may still arrive late; the cleanup queue removes it
-        // once it appears. The DB row is deliberately kept.
-        await scheduleUnreferencedRecordingCleanup(
-          filename
-        );
-      } else {
-        console.warn(
-          '[PROCESS] Processing replay row was no longer present; recording cleanup not scheduled:',
-          recordId
-        );
-      }
-
+      // Never mark failed, never delete, never queue for orphan cleanup
+      // here. The replay row stays video_url='processing' with its
+      // persisted recording_filename, and the durable recovery sweeper
+      // (sweepReplayRecovery) continues the watch across restarts and
+      // late-arriving MP4s. Normal processing simply yields.
       return;
     }
+
+    await finalizeReplay(recordId, filename, egressId);
+  } catch (error) {
+    console.error(
+      '[PROCESS] Error:',
+      error.message
+    );
+  }
+}
+
+// ─── SHARED REPLAY FINALIZATION ──────────────────────────────────
+//
+// Downloads the recorded MP4, generates a best-effort thumbnail
+// (failure never blocks publication), publishes the replay with an
+// atomic single-winner conditional update, and adds it to the main
+// feed. Safe to run from both processRecording and the recovery
+// sweeper; concurrent runners cannot double-publish.
+
+async function finalizeReplay(
+  recordId,
+  filename,
+  workerId
+) {
+  try {
+    const publicUrl =
+      `${process.env.SUPABASE_URL}` +
+      `/storage/v1/object/public/livestreams/${filename}`;
 
   // Generate thumbnail from video.
   let thumbnailUrl = null;
@@ -1308,10 +1468,10 @@ async function processRecording(
       const fs = require('fs');
 
       const tempVideoPath =
-        `/tmp/${egressId}.mp4`;
+        `/tmp/${workerId}.mp4`;
 
       const tempThumbPath =
-        `/tmp/${egressId}.jpg`;
+        `/tmp/${workerId}.jpg`;
 
       try {
         // Download video.
@@ -1338,7 +1498,7 @@ async function processRecording(
           ffmpeg(tempVideoPath)
             .screenshots({
               timestamps: ['1'],
-              filename: `${egressId}.jpg`,
+              filename: `${workerId}.jpg`,
               folder: '/tmp',
               size: '720x?',
             })
@@ -1354,7 +1514,7 @@ async function processRecording(
           await supabase.storage
             .from('thumbnails')
             .upload(
-              `${egressId}_thumb.jpg`,
+              `${workerId}_thumb.jpg`,
               thumbBuffer,
               {
                 contentType: 'image/jpeg',
@@ -1373,7 +1533,7 @@ async function processRecording(
           } = supabase.storage
             .from('thumbnails')
             .getPublicUrl(
-              `${egressId}_thumb.jpg`
+              `${workerId}_thumb.jpg`
             );
 
           thumbnailUrl = thumbUrl;
@@ -1443,6 +1603,39 @@ async function processRecording(
       '[PROCESS] Replay ready! 🎉',
       publicUrl
     );
+
+    // Feed dedupe: only insert when no videos row already references
+    // this exact replay URL. The conditional publish above guarantees a
+    // single winner per replay, but a retried finalization after a
+    // partial failure (publish succeeded, feed insert failed) must not
+    // create a duplicate feed entry.
+    const {
+      data: existingFeedRows,
+      error: feedCheckError,
+    } = await supabase
+      .from('videos')
+      .select('id')
+      .eq('video_url', publicUrl)
+      .limit(1);
+
+    if (feedCheckError) {
+      console.error(
+        '[PROCESS] Feed dedupe check failed:',
+        feedCheckError.message
+      );
+      // Do not guess: skip the insert this run. The recovery sweeper
+      // retries later and the check runs again.
+      return;
+    }
+
+    if (existingFeedRows && existingFeedRows.length > 0) {
+      console.log(
+        '[PROCESS] Replay already present in main feed:',
+        publicUrl
+      );
+
+      return;
+    }
 
     // Also insert into videos table so the replay appears in the main feed.
     const { error: videoInsertError } = await supabase
