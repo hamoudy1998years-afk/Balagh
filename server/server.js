@@ -12,6 +12,9 @@ app.set('trust proxy', true);
 const recordingRoutes = require('./routes/recording');
 const livekitRoutes = require('./routes/livekit');
 const videoProcessingRoutes = require('./routes/videoProcessing');
+const videoRoutes = require('./routes/videos');
+// Importing starts the rejected-video cleanup sweeper (delayed first run).
+require('./lib/rejectedVideoCleanup');
 
 // Force HTTPS in production
 if (process.env.NODE_ENV === 'production') {
@@ -54,6 +57,9 @@ app.use('/api/livekit', livekitRoutes);
 
 // Uploaded-video processing backend
 app.use('/api/video-processing', videoProcessingRoutes);
+
+// Video deletion backend (owner + admin)
+app.use('/api/videos', videoRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
