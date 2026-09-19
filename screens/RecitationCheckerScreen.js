@@ -3,11 +3,12 @@
 //  Features:
 //    • Shows the verse to recite
 //    • Records user's voice via expo-av
-//    • Sends audio to OpenAI Whisper API
+//    • Sends audio to Bushrann backend transcription endpoint
 //    • Compares transcription with correct Arabic
 //    • Shows word-by-word feedback (correct / wrong / missing)
 //
-//  Requires: EXPO_PUBLIC_OPENAI_KEY in your .env
+//  NOTE: The OpenAI secret key lives ONLY on the Bushrann backend.
+//  This client sends audio to the server; the server calls Whisper.
 // ─────────────────────────────────────────────
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -24,11 +25,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import { supabase } from '../lib/supabase';
 import { COLORS } from '../constants/theme';
 import { isLowEndDevice } from '../utils/deviceInfo';
 
 const GOLD = COLORS.gold ?? '#c9a84c';
-const OPENAI_KEY = process.env.EXPO_PUBLIC_OPENAI_KEY;
+
+// ── Backend endpoint ───────────────────────────────────────────────────────
+// Reads the public API base from env. NO fake fallback — must be set.
+// The server holds the OpenAI key and calls Whisper server-side.
+// ──────────────────────────────────────────────────────────────────────────
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE;
+const TRANSCRIBE_ENDPOINT = API_BASE ? `${API_BASE}/api/transcribe-recitation` : null;
 
 // ── Scoring helpers ────────────────────────────────────────────────────────
 
@@ -86,15 +94,32 @@ export default function RecitationCheckerScreen({ navigation, route }) {
 
   const recordingRef = useRef(null);
   const durationInterval = useRef(null);
+  const countdownInterval = useRef(null);
+  const isMountedRef = useRef(true);
+  const isStoppingRef = useRef(false);
+  // Request ownership: each transcription attempt gets its own controller.
+  // We keep ownership until parsing/scoring is complete to prevent a stale
+  // request from overwriting a newer result.
+  const abortControllerRef = useRef(null);
   const pulseAnim = useRef(isLowEndDevice ? null : new Animated.Value(1)).current;
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       // Cleanup
       clearInterval(durationInterval.current);
+      clearInterval(countdownInterval.current);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(() => {});
+        recordingRef.current = null;
       }
+      // Restore audio mode safely
+      Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
     };
   }, []);
 
@@ -115,34 +140,49 @@ export default function RecitationCheckerScreen({ navigation, route }) {
     }
   }, [phase]);
 
-  async function startCountdown() {
-    if (!OPENAI_KEY) {
-      Alert.alert(
-        'API Key Missing',
-        'Add EXPO_PUBLIC_OPENAI_KEY to your .env file to use the recitation checker.',
-        [{ text: 'OK' }]
-      );
-      return;
+  async function getAuthToken() {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error || !data?.session) return null;
+      return data.session.access_token ?? null;
+    } catch (_) {
+      return null;
     }
+  }
+
+  async function startCountdown() {
+    // Clear any lingering countdown
+    clearInterval(countdownInterval.current);
+    if (!isMountedRef.current) return;
+
     setPhase('countdown');
     setCountdown(3);
     let count = 3;
-    const interval = setInterval(() => {
+    countdownInterval.current = setInterval(() => {
+      if (!isMountedRef.current) {
+        clearInterval(countdownInterval.current);
+        return;
+      }
       count -= 1;
       setCountdown(count);
       if (count === 0) {
-        clearInterval(interval);
-        startRecording();
+        clearInterval(countdownInterval.current);
+        if (isMountedRef.current) {
+          startRecording();
+        }
       }
     }, 1000);
   }
 
   async function startRecording() {
+    if (!isMountedRef.current) return;
     try {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Microphone access is required to check your recitation.');
-        setPhase('ready');
+        if (isMountedRef.current) {
+          Alert.alert('Permission needed', 'Microphone access is required to check your recitation.');
+          setPhase('ready');
+        }
         return;
       }
 
@@ -154,26 +194,48 @@ export default function RecitationCheckerScreen({ navigation, route }) {
       const recording = new Audio.Recording();
       await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       await recording.startAsync();
+
+      if (!isMountedRef.current) {
+        // Unmounted while creating — clean up the recording we just made
+        recording.stopAndUnloadAsync().catch(() => {});
+        Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
+        return;
+      }
+
       recordingRef.current = recording;
       setPhase('recording');
       setRecordingDuration(0);
 
       durationInterval.current = setInterval(() => {
+        if (!isMountedRef.current) {
+          clearInterval(durationInterval.current);
+          return;
+        }
         setRecordingDuration((d) => d + 1);
       }, 1000);
     } catch (e) {
-      Alert.alert('Error', 'Could not start recording. Please try again.');
-      setPhase('ready');
+      if (isMountedRef.current) {
+        Alert.alert('Error', 'Could not start recording. Please try again.');
+        setPhase('ready');
+      }
+      Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
     }
   }
 
   async function stopRecording() {
+    if (isStoppingRef.current) return;
+    isStoppingRef.current = true;
+
     clearInterval(durationInterval.current);
-    setPhase('processing');
+    if (isMountedRef.current) setPhase('processing');
 
     try {
       const recording = recordingRef.current;
-      if (!recording) return;
+      if (!recording) {
+        isStoppingRef.current = false;
+        if (isMountedRef.current) setPhase('ready');
+        return;
+      }
 
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
@@ -182,46 +244,101 @@ export default function RecitationCheckerScreen({ navigation, route }) {
       // Reset audio mode
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
-      await sendToWhisper(uri);
+      if (!isMountedRef.current) {
+        isStoppingRef.current = false;
+        return;
+      }
+
+      await sendToBackend(uri);
     } catch (e) {
-      Alert.alert('Error', 'Recording failed. Please try again.');
-      setPhase('ready');
+      if (isMountedRef.current) {
+        Alert.alert('Error', 'Recording failed. Please try again.');
+        setPhase('ready');
+      }
+      Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
+    } finally {
+      isStoppingRef.current = false;
     }
   }
 
-  async function sendToWhisper(audioUri) {
+  async function sendToBackend(audioUri) {
+    // Guard: API base must be configured
+    if (!TRANSCRIBE_ENDPOINT) {
+      if (isMountedRef.current) {
+        Alert.alert('Configuration Error', 'API base URL is not configured. Please check your app settings.');
+        setPhase('ready');
+      }
+      return;
+    }
+
+    // Abort any previous in-flight request and take ownership
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
+      const token = await getAuthToken();
+      if (!token) {
+        if (isMountedRef.current) {
+          Alert.alert('Authentication Error', 'You must be signed in to use the recitation checker.');
+          setPhase('ready');
+        }
+        return;
+      }
+
+      const headers = {
+        Authorization: `Bearer ${token}`,
+      };
+
       const formData = new FormData();
       formData.append('file', {
         uri: audioUri,
         type: 'audio/m4a',
         name: 'recitation.m4a',
       });
-      formData.append('model', 'whisper-1');
-      formData.append('language', 'ar'); // Force Arabic for accuracy
 
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      const response = await fetch(TRANSCRIBE_ENDPOINT, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${OPENAI_KEY}`,
-        },
+        headers,
         body: formData,
+        signal: controller.signal,
       });
 
+      if (!isMountedRef.current) return;
+
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error?.message ?? 'Whisper API error');
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message ?? err.message ?? 'Transcription server error');
       }
 
       const data = await response.json();
-      const transcribed = data.text ?? '';
+      const transcribed = data.transcription ?? data.text ?? '';
+
+      // Ownership check: only apply result if our controller is still the active one
+      if (abortControllerRef.current !== controller) return;
 
       const scored = scoreRecitation(arabicText, transcribed);
-      setResult({ ...scored, transcribed });
-      setPhase('result');
+      if (isMountedRef.current) {
+        setResult({ ...scored, transcribed });
+        setPhase('result');
+      }
     } catch (e) {
-      Alert.alert('AI Error', e.message || 'Could not analyze your recitation.');
-      setPhase('ready');
+      if (e.name === 'AbortError') return; // silently ignore aborts
+
+      // Ownership check: only show error if our controller is still the active one
+      if (abortControllerRef.current !== controller) return;
+
+      if (isMountedRef.current) {
+        Alert.alert('AI Error', e.message || 'Could not analyze your recitation.');
+        setPhase('ready');
+      }
+    } finally {
+      // Clear ownership only if we still own it
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
     }
   }
 
@@ -229,6 +346,7 @@ export default function RecitationCheckerScreen({ navigation, route }) {
     setResult(null);
     setPhase('ready');
     setRecordingDuration(0);
+    isStoppingRef.current = false;
   }
 
   // ── Render phases ──────────────────────────────────────────────────────

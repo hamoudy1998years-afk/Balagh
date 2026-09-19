@@ -61,6 +61,7 @@ const CURRENT_DATA_VERSION = '1.7.28';
 async function migrateOldDataIfNeeded() {
   try {
     const storedVersion = await AsyncStorage.getItem('appDataVersion');
+
     if (!storedVersion || storedVersion !== CURRENT_DATA_VERSION) {
       await AsyncStorage.setItem('appDataVersion', CURRENT_DATA_VERSION);
     }
@@ -87,20 +88,33 @@ function ProfileTabIcon({ color, size, focused }) {
   const [imageError, setImageError] = React.useState(false);
 
   async function fetchAvatar() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     if (!user) return;
+
     const { data } = await supabase
       .from('profiles')
       .select('avatar_url')
       .eq('id', user.id)
       .single();
-    if (data?.avatar_url) setAvatarUrl(data.avatar_url);
+
+    if (data?.avatar_url) {
+      setAvatarUrl(data.avatar_url);
+    }
   }
 
   React.useEffect(() => {
     fetchAvatar();
+
     const { DeviceEventEmitter } = require('react-native');
-    const subscription = DeviceEventEmitter.addListener('avatarUpdated', fetchAvatar);
+
+    const subscription = DeviceEventEmitter.addListener(
+      'avatarUpdated',
+      fetchAvatar
+    );
+
     return () => subscription.remove();
   }, []);
 
@@ -120,7 +134,7 @@ function ProfileTabIcon({ color, size, focused }) {
     );
   }
 
-  return <Text style={{ fontSize: size, color: color }}>👤</Text>;
+  return <Text style={{ fontSize: size, color }}>👤</Text>;
 }
 
 function MainTabs({ session }) {
@@ -129,15 +143,22 @@ function MainTabs({ session }) {
 
   const handleHomePress = () => {
     const state = navigation.getState();
-    const mainRoute = state?.routes?.find(r => r.name === 'Main');
-    const activeTab = mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
+
+    const mainRoute = state?.routes?.find(
+      route => route.name === 'Main'
+    );
+
+    const activeTab =
+      mainRoute?.state?.routes?.[mainRoute?.state?.index]?.name;
 
     if (activeTab === 'Home') {
       if (homeRefreshRef.current) {
         homeRefreshRef.current();
       }
     } else {
-      navigation.navigate(ROUTES.MAIN, { screen: 'Home' });
+      navigation.navigate(ROUTES.MAIN, {
+        screen: 'Home',
+      });
     }
   };
 
@@ -145,19 +166,36 @@ function MainTabs({ session }) {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+
         tabBarStyle: {
           backgroundColor: '#1a2e44',
           borderTopColor: 'rgba(255,255,255,0.06)',
           borderTopWidth: 1,
+
           marginHorizontal: 0,
-          marginBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : -1, android: -1 }),
+
+          marginBottom: Platform.select({
+            ios: insets.bottom > 0 ? insets.bottom : -1,
+            android: insets.bottom > 0 ? 0 : -1,
+          }),
+
           borderRadius: 20,
-          height: Platform.select({ ios: 55 + (insets.bottom > 0 ? 8 : 0), android: 55 }),
-          paddingBottom: Platform.select({ ios: insets.bottom > 0 ? insets.bottom : 8, android: 8 }),
+
+          height: Platform.select({
+            ios: 55 + (insets.bottom > 0 ? 8 : 0),
+            android: 55 + insets.bottom,
+          }),
+
+          paddingBottom: Platform.select({
+            ios: insets.bottom > 0 ? insets.bottom : 8,
+            android: insets.bottom > 0 ? insets.bottom : 8,
+          }),
+
           paddingTop: 0,
           position: 'absolute',
           elevation: 0,
         },
+
         tabBarActiveTintColor: COLORS.bottomNavActive,
         tabBarInactiveTintColor: COLORS.bottomNavInactive,
       }}
@@ -167,24 +205,34 @@ function MainTabs({ session }) {
         component={HomeScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={size} color={color} />
+            <Ionicons
+              name={focused ? 'home' : 'home-outline'}
+              size={size}
+              color={color}
+            />
           ),
         }}
         listeners={{
-          tabPress: (e) => {
+          tabPress: e => {
             e.preventDefault();
             handleHomePress();
           },
         }}
-        />
+      />
+
       <Tab.Screen
         name="Upload"
         component={UploadScreen}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'add-circle' : 'add-circle-outline'} size={size} color={color} />
+            <Ionicons
+              name={focused ? 'add-circle' : 'add-circle-outline'}
+              size={size}
+              color={color}
+            />
           ),
-          tabBarButton: (props) => (
+
+          tabBarButton: props => (
             <TouchableOpacity
               {...props}
               onPress={() => {
@@ -198,36 +246,71 @@ function MainTabs({ session }) {
           ),
         }}
       />
+
       <Tab.Screen
         name="Quran"
         component={QuranScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <View style={{ backgroundColor: focused ? '#c9a84c' : 'rgba(201,168,76,0.2)', borderRadius: 26, padding: 3 }}>
-              <Image source={require('./assets/quran.png')} style={{ width: 28, height: 28 }} />
+            <View
+              style={{
+                backgroundColor: focused
+                  ? '#c9a84c'
+                  : 'rgba(201,168,76,0.2)',
+                borderRadius: 26,
+                padding: 3,
+              }}
+            >
+              <Image
+                source={require('./assets/quran.png')}
+                style={{
+                  width: 28,
+                  height: 28,
+                }}
+              />
             </View>
           ),
         }}
       />
+
       <Tab.Screen
         name="Prayer"
         component={PrayerScreen}
         options={{
-          tabBarIcon: ({ color, size, focused }) => (
-            <Text style={{ fontSize: focused ? 26 : 22 }}>🕌</Text>
+          tabBarIcon: ({ focused }) => (
+            <Text
+              style={{
+                fontSize: focused ? 26 : 22,
+              }}
+            >
+              🕌
+            </Text>
           ),
+
           lazy: true,
           unmountOnBlur: true,
         }}
       />
+
       <Tab.Screen
         name="Notifications"
         component={NotificationsScreen}
         options={{
+          tabBarLabel: 'Alerts',
+
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={size} color={color} />
+            <Ionicons
+              name={
+                focused
+                  ? 'notifications'
+                  : 'notifications-outline'
+              }
+              size={size}
+              color={color}
+            />
           ),
-          tabBarButton: (props) => (
+
+          tabBarButton: props => (
             <TouchableOpacity
               {...props}
               onPress={() => {
@@ -241,12 +324,20 @@ function MainTabs({ session }) {
           ),
         }}
       />
+
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
         options={{
-          tabBarIcon: ({ color, size, focused }) => <ProfileTabIcon color={color} size={size} focused={focused} />,
-          tabBarButton: (props) => (
+          tabBarIcon: ({ color, size, focused }) => (
+            <ProfileTabIcon
+              color={color}
+              size={size}
+              focused={focused}
+            />
+          ),
+
+          tabBarButton: props => (
             <TouchableOpacity
               {...props}
               onPress={() => {
@@ -264,28 +355,297 @@ function MainTabs({ session }) {
   );
 }
 
+function WatchLiveRoute({ navigation, route }) {
+  const routeStream = route.params?.stream ?? null;
+
+  const streamId =
+    route.params?.streamId ??
+    routeStream?.id ??
+    null;
+
+  const hasCompleteStream =
+    !!routeStream?.id &&
+    !!routeStream?.channel_name &&
+    !!routeStream?.user_id;
+
+  const [resolvedStream, setResolvedStream] = useState(
+    hasCompleteStream
+      ? routeStream
+      : null
+  );
+
+  const [loading, setLoading] = useState(
+    !hasCompleteStream
+  );
+
+  const [failed, setFailed] = useState(false);
+
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    if (hasCompleteStream) {
+      setResolvedStream(routeStream);
+      setLoading(false);
+      setFailed(false);
+      return;
+    }
+
+    if (!streamId) {
+      setResolvedStream(null);
+      setLoading(false);
+      setFailed(true);
+      return;
+    }
+
+    let active = true;
+
+    async function loadStream() {
+      setLoading(true);
+      setFailed(false);
+
+      try {
+        const { data, error } = await supabase
+          .from('live_streams')
+          .select('*')
+          .eq('id', streamId)
+          .eq('is_live', true)
+          .maybeSingle();
+
+        if (!active) return;
+
+        if (
+          error ||
+          !data ||
+          !data.channel_name ||
+          !data.user_id
+        ) {
+          setResolvedStream(null);
+          setFailed(true);
+          return;
+        }
+
+        setResolvedStream(data);
+      } catch (e) {
+        if (!active) return;
+
+        __DEV__ &&
+          console.warn(
+            '[WatchLiveRoute] Failed to resolve stream:',
+            e
+          );
+
+        setResolvedStream(null);
+        setFailed(true);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadStream();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    streamId,
+    hasCompleteStream,
+    routeStream,
+    retryKey,
+  ]);
+
+  if (loading) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#000',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <SystemBars style="light" />
+
+        <ActivityIndicator
+          color={COLORS.gold}
+          size="large"
+        />
+
+        <Text
+          style={{
+            color: '#fff',
+            marginTop: 14,
+            fontSize: 15,
+            fontWeight: '600',
+          }}
+        >
+          Joining livestream...
+        </Text>
+      </View>
+    );
+  }
+
+  if (failed || !resolvedStream) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: '#000',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 32,
+        }}
+      >
+        <SystemBars style="light" />
+
+        <Text
+          style={{
+            fontSize: 48,
+          }}
+        >
+          🎙️
+        </Text>
+
+        <Text
+          style={{
+            color: '#fff',
+            fontSize: 20,
+            fontWeight: '700',
+            marginTop: 16,
+            textAlign: 'center',
+          }}
+        >
+          Livestream unavailable
+        </Text>
+
+        <Text
+          style={{
+            color: '#94a3b8',
+            fontSize: 14,
+            marginTop: 8,
+            textAlign: 'center',
+            lineHeight: 20,
+          }}
+        >
+          This livestream may have ended or could not be loaded.
+        </Text>
+
+        {streamId && (
+          <TouchableOpacity
+            onPress={() =>
+              setRetryKey(prev => prev + 1)
+            }
+            style={{
+              marginTop: 24,
+              backgroundColor: COLORS.gold,
+              paddingHorizontal: 28,
+              paddingVertical: 13,
+              borderRadius: 12,
+            }}
+          >
+            <Text
+              style={{
+                color: '#fff',
+                fontWeight: '700',
+                fontSize: 15,
+              }}
+            >
+              Try Again
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        <TouchableOpacity
+          onPress={() =>
+            navigation.navigate(
+              ROUTES.MAIN,
+              {
+                screen: 'Home',
+              }
+            )
+          }
+          style={{
+            marginTop: 12,
+            paddingHorizontal: 28,
+            paddingVertical: 13,
+          }}
+        >
+          <Text
+            style={{
+              color: '#fff',
+              fontWeight: '600',
+              fontSize: 15,
+            }}
+          >
+            Go Home
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <WatchLiveScreen
+      navigation={navigation}
+      route={{
+        ...route,
+
+        params: {
+          ...route.params,
+          stream: resolvedStream,
+        },
+      }}
+    />
+  );
+}
+
 const linking = {
-  prefixes: ['bushrann://', 'https://bushrann.app'],
+  prefixes: [
+    'bushrann://',
+    'https://bushrann.app',
+  ],
+
   config: {
     screens: {
       ResetPassword: 'auth/callback',
       VideoDetail: 'video/:id',
       UserProfile: 'user/:id',
       WatchLive: 'live/:streamId',
-      LiveStream: 'go-live',
     },
   },
 };
 
 function App() {
   const [session, setSession] = useState(undefined);
-  const [ageVerified, setAgeVerified] = useState(null);
-  const [onboardingCompleted, setOnboardingCompleted] = useState(null);
-  const [jsSplashVisible, setJsSplashVisible] = useState(true);
-  const { runMigrationIfNeeded, updateStoredGoogleToken } = useBiometricAuth();
+
+  const [ageVerified, setAgeVerified] =
+    useState(null);
+
+  const [
+    onboardingCompleted,
+    setOnboardingCompleted,
+  ] = useState(null);
+
+  const [
+    jsSplashVisible,
+    setJsSplashVisible,
+  ] = useState(true);
+
+  const {
+    runMigrationIfNeeded,
+    updateStoredGoogleToken,
+  } = useBiometricAuth();
+
   usePushNotifications();
+
   const navigationRef = useRef(null);
+
   const pendingResetRef = useRef(false);
+
+  const pendingSignOutRef = useRef(false);
+
+  const pendingNotificationRef = useRef(null);
 
   useEffect(() => {
     migrateOldDataIfNeeded();
@@ -294,13 +654,21 @@ function App() {
   useEffect(() => {
     const setupFacebook = async () => {
       try {
-        Settings.setAdvertiserIDCollectionEnabled(false);
+        Settings.setAdvertiserIDCollectionEnabled(
+          false
+        );
+
         Settings.setAutoLogAppEventsEnabled(true);
+
         await Settings.initializeSDK();
       } catch (error) {
-        console.error('[FB SDK] Init failed:', error);
+        console.error(
+          '[FB SDK] Init failed:',
+          error
+        );
       }
     };
+
     setupFacebook();
   }, []);
 
@@ -309,55 +677,126 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!jsSplashVisible && ageVerified !== null && onboardingCompleted !== null) {
+    if (
+      !jsSplashVisible &&
+      ageVerified !== null &&
+      onboardingCompleted !== null
+    ) {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           SplashScreen.hideAsync();
         });
       });
     }
-  }, [jsSplashVisible, ageVerified, onboardingCompleted]);
+  }, [
+    jsSplashVisible,
+    ageVerified,
+    onboardingCompleted,
+  ]);
 
   useEffect(() => {
     async function checkAge() {
       try {
-        const verified = await AsyncStorage.getItem('ageVerified');
-        setAgeVerified(verified === 'true');
+        const verified =
+          await AsyncStorage.getItem(
+            'ageVerified'
+          );
+
+        setAgeVerified(
+          verified === 'true'
+        );
       } catch (e) {
         setAgeVerified(false);
       }
     }
+
     checkAge();
   }, []);
 
   useEffect(() => {
     async function checkOnboarding() {
       try {
-        const completed = await AsyncStorage.getItem('onboardingCompleted');
-        setOnboardingCompleted(completed === 'true');
+        const completed =
+          await AsyncStorage.getItem(
+            'onboardingCompleted'
+          );
+
+        setOnboardingCompleted(
+          completed === 'true'
+        );
       } catch (e) {
         setOnboardingCompleted(false);
       }
     }
+
     if (ageVerified !== null) {
       checkOnboarding();
     }
   }, [ageVerified]);
 
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      if (data?.type === 'video' && data?.videoId) {
-        navigationRef.current?.navigate('VideoDetail', { id: data.videoId });
-      } else if (data?.type === 'live' && data?.streamId) {
-        navigationRef.current?.navigate('WatchLive', { stream: { id: data.streamId } });
-      } else if (data?.type === 'follow' && data?.userId) {
-        navigationRef.current?.navigate('UserProfile', { profileUserId: data.userId });
-      } else if (data?.type === 'message') {
-        navigationRef.current?.navigate('Notifications');
-      }
-    });
-    return () => subscription.remove();
+    const subscription =
+      Notifications.addNotificationResponseReceivedListener(
+        response => {
+          const data =
+            response.notification.request.content.data;
+
+          let action = null;
+
+          if (
+            data?.type === 'video' &&
+            data?.videoId
+          ) {
+            action = [
+              'VideoDetail',
+              {
+                id: data.videoId,
+              },
+            ];
+          } else if (
+            data?.type === 'live' &&
+            data?.streamId
+          ) {
+            action = [
+              'WatchLive',
+              {
+                streamId: data.streamId,
+              },
+            ];
+          } else if (
+            data?.type === 'follow' &&
+            data?.userId
+          ) {
+            action = [
+              'UserProfile',
+              {
+                profileUserId:
+                  data.userId,
+              },
+            ];
+          } else if (
+            data?.type === 'message'
+          ) {
+            action = ['Notifications'];
+          }
+
+          if (!action) return;
+
+          if (
+            navigationRef.current?.isReady()
+          ) {
+            navigationRef.current.navigate(
+              ...action
+            );
+          } else {
+            pendingNotificationRef.current =
+              action;
+          }
+        }
+      );
+
+    return () =>
+      subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -366,11 +805,21 @@ function App() {
 
   useEffect(() => {
     if (Platform.OS === 'android') {
-      AsyncStorage.getItem('prayerNotifications').then(saved => {
+      AsyncStorage.getItem(
+        'prayerNotifications'
+      ).then(saved => {
         if (saved) {
-          const { NativeModules } = require('react-native');
-          const { AdhanModule } = NativeModules;
-          if (AdhanModule?.showPersistent) {
+          const {
+            NativeModules,
+          } = require('react-native');
+
+          const {
+            AdhanModule,
+          } = NativeModules;
+
+          if (
+            AdhanModule?.showPersistent
+          ) {
             AdhanModule.showPersistent();
           }
         }
@@ -381,38 +830,103 @@ function App() {
   useEffect(() => {
     runMigrationIfNeeded();
 
-    Linking.getInitialURL().then((url) => {
-      if (url) handleDeepLink(url);
+    Linking.getInitialURL().then(url => {
+      if (url) {
+        handleDeepLink(url);
+      }
     });
 
-    const linkingSub = Linking.addEventListener('url', ({ url }) => {
-      if (url) handleDeepLink(url);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(prev => {
-        if (prev === undefined || prev?.access_token !== session?.access_token) {
-          return session;
+    const linkingSub =
+      Linking.addEventListener(
+        'url',
+        ({ url }) => {
+          if (url) {
+            handleDeepLink(url);
+          }
         }
-        return prev;
-      });
+      );
 
-      if (_event === 'PASSWORD_RECOVERY') {
-        if (navigationRef.current?.isReady()) {
-          navigationRef.current.navigate('ResetPassword');
-        } else {
-          pendingResetRef.current = true;
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(prev => {
+          if (
+            prev === undefined ||
+            prev?.access_token !==
+              session?.access_token
+          ) {
+            return session;
+          }
+
+          return prev;
+        });
+
+        if (
+          _event ===
+          'PASSWORD_RECOVERY'
+        ) {
+          if (
+            navigationRef.current?.isReady()
+          ) {
+            navigationRef.current.navigate(
+              'ResetPassword'
+            );
+          } else {
+            pendingResetRef.current = true;
+          }
+        }
+
+        if (_event === 'SIGNED_OUT') {
+          const {
+            DeviceEventEmitter,
+          } = require('react-native');
+
+          DeviceEventEmitter.emit(
+            'pauseAllVideos'
+          );
+
+          if (
+            navigationRef.current?.isReady()
+          ) {
+            navigationRef.current.reset({
+              index: 0,
+
+              routes: [
+                {
+                  name: ROUTES.LOGIN,
+                },
+              ],
+            });
+          } else {
+            pendingSignOutRef.current = true;
+          }
+        }
+
+        if (
+          _event ===
+            'TOKEN_REFRESHED' &&
+          session?.user?.email &&
+          session?.refresh_token
+        ) {
+          updateStoredGoogleToken(
+            session.user.email,
+            session.refresh_token
+          );
+        }
+
+        if (
+          (_event === 'SIGNED_IN' ||
+            _event ===
+              'INITIAL_SESSION') &&
+          session?.user
+        ) {
+          ensureProfileExists(
+            session.user
+          );
         }
       }
-
-      if (_event === 'TOKEN_REFRESHED' && session?.user?.email && session?.refresh_token) {
-        updateStoredGoogleToken(session.user.email, session.refresh_token);
-      }
-
-      if ((_event === 'SIGNED_IN' || _event === 'INITIAL_SESSION') && session?.user) {
-        ensureProfileExists(session.user);
-      }
-    });
+    );
 
     return () => {
       subscription.unsubscribe();
@@ -420,60 +934,176 @@ function App() {
     };
   }, []);
 
-  async function ensureProfileExists(user) {
+  async function ensureProfileExists(
+    user
+  ) {
     try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle();
+      const { data: profile } =
+        await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle();
 
       if (!profile) {
-        const rawUsername = user.email?.split('@')[0] ?? `user_${user.id.slice(0, 8)}`;
-        const username = rawUsername.replace(/[^a-zA-Z0-9._]/g, '').slice(0, 30) || `user_${user.id.slice(0, 8)}`;
-        await supabase.from('profiles').insert({
-          id: user.id,
-          username,
-          full_name: user.user_metadata?.full_name ?? user.user_metadata?.name ?? null,
-          avatar_url: user.user_metadata?.avatar_url ?? null,
-        });
+        const rawUsername =
+          user.email?.split('@')[0] ??
+          `user_${user.id.slice(
+            0,
+            8
+          )}`;
+
+        const username =
+          rawUsername
+            .replace(
+              /[^a-zA-Z0-9._]/g,
+              ''
+            )
+            .slice(0, 30) ||
+          `user_${user.id.slice(
+            0,
+            8
+          )}`;
+
+        await supabase
+          .from('profiles')
+          .insert({
+            id: user.id,
+
+            username,
+
+            full_name:
+              user.user_metadata
+                ?.full_name ??
+              user.user_metadata
+                ?.name ??
+              null,
+
+            avatar_url:
+              user.user_metadata
+                ?.avatar_url ??
+              null,
+          });
       }
     } catch (e) {
-      __DEV__ && console.warn('[App] ensureProfileExists error:', e.message);
+      __DEV__ &&
+        console.warn(
+          '[App] ensureProfileExists error:',
+          e.message
+        );
     }
   }
 
   async function handleDeepLink(url) {
-    const isBushrannScheme = url?.startsWith('bushrann://');
-    const isBushrannHttps = url?.startsWith('https://bushrann.app/');
-    if (!url || (!isBushrannScheme && !isBushrannHttps)) return;
-    if (url.includes('expo-development-client')) return;
+    const isBushrannScheme =
+      url?.startsWith(
+        'bushrann://'
+      );
 
-    const validRoutes = ['auth/callback', 'video', 'user', 'live', 'go-live'];
-    const path = isBushrannScheme
-      ? url.replace('bushrann://', '').split('?')[0]
-      : url.replace('https://bushrann.app/', '').split('?')[0];
-    if (!validRoutes.some(route => path.startsWith(route))) return;
+    const isBushrannHttps =
+      url?.startsWith(
+        'https://bushrann.app/'
+      );
 
-    if (url.includes('type=recovery')) {
-      const hashIndex = url.indexOf('#');
-      const queryIndex = url.indexOf('?');
-      const paramStart = hashIndex !== -1 ? hashIndex + 1 : (queryIndex !== -1 ? queryIndex + 1 : null);
+    if (
+      !url ||
+      (!isBushrannScheme &&
+        !isBushrannHttps)
+    ) {
+      return;
+    }
+
+    if (
+      url.includes(
+        'expo-development-client'
+      )
+    ) {
+      return;
+    }
+
+    const validRoutes = [
+      'auth/callback',
+      'video',
+      'user',
+      'live',
+    ];
+
+    const path =
+      isBushrannScheme
+        ? url
+            .replace(
+              'bushrann://',
+              ''
+            )
+            .split('?')[0]
+        : url
+            .replace(
+              'https://bushrann.app/',
+              ''
+            )
+            .split('?')[0];
+
+    if (
+      !validRoutes.some(route =>
+        path.startsWith(route)
+      )
+    ) {
+      return;
+    }
+
+    if (
+      url.includes(
+        'type=recovery'
+      )
+    ) {
+      const hashIndex =
+        url.indexOf('#');
+
+      const queryIndex =
+        url.indexOf('?');
+
+      const paramStart =
+        hashIndex !== -1
+          ? hashIndex + 1
+          : queryIndex !== -1
+            ? queryIndex + 1
+            : null;
 
       if (paramStart) {
-        const params = new URLSearchParams(url.substring(paramStart));
-        const access_token = params.get('access_token');
-        const refresh_token = params.get('refresh_token');
+        const params =
+          new URLSearchParams(
+            url.substring(paramStart)
+          );
+
+        const access_token =
+          params.get(
+            'access_token'
+          );
+
+        const refresh_token =
+          params.get(
+            'refresh_token'
+          );
 
         if (access_token) {
-          const { data, error } = await supabase.auth.setSession({
-            access_token,
-            refresh_token: refresh_token || '',
-          });
+          const {
+            error,
+          } =
+            await supabase.auth.setSession(
+              {
+                access_token,
+
+                refresh_token:
+                  refresh_token ||
+                  '',
+              }
+            );
 
           if (!error) {
             setTimeout(() => {
-              navigationRef.current?.navigate('ResetPassword');
+              navigationRef.current?.navigate(
+                'ResetPassword'
+              );
             }, 500);
           }
         }
@@ -481,13 +1111,30 @@ function App() {
     }
   }
 
-  if (jsSplashVisible || ageVerified === null || onboardingCompleted === null) {
+  if (
+    jsSplashVisible ||
+    ageVerified === null ||
+    onboardingCompleted === null
+  ) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#1a2e44' }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor:
+            '#1a2e44',
+        }}
+      >
         <SystemBars style="light" />
+
         <Image
-          source={require('./assets/splash-icon.png')}
-          style={{ flex: 1, width: '100%', height: '100%' }}
+          source={require(
+            './assets/splash-icon.png'
+          )}
+          style={{
+            flex: 1,
+            width: '100%',
+            height: '100%',
+          }}
           resizeMode="cover"
           fadeDuration={0}
         />
@@ -495,11 +1142,20 @@ function App() {
     );
   }
 
-  if (onboardingCompleted === false) {
+  if (
+    onboardingCompleted === false
+  ) {
     return (
       <SafeAreaProvider>
         <SystemBars style="light" />
-        <OnboardingScreen onComplete={() => setOnboardingCompleted(true)} />
+
+        <OnboardingScreen
+          onComplete={() =>
+            setOnboardingCompleted(
+              true
+            )
+          }
+        />
       </SafeAreaProvider>
     );
   }
@@ -508,16 +1164,34 @@ function App() {
     return (
       <SafeAreaProvider>
         <SystemBars style="light" />
-        <AgeGateScreen onVerified={() => setAgeVerified(true)} />
+
+        <AgeGateScreen
+          onVerified={() =>
+            setAgeVerified(true)
+          }
+        />
       </SafeAreaProvider>
     );
   }
 
   if (session === undefined) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor:
+            '#000000',
+          alignItems: 'center',
+          justifyContent:
+            'center',
+        }}
+      >
         <SystemBars style="light" />
-        <ActivityIndicator color={COLORS.gold} size="large" />
+
+        <ActivityIndicator
+          color={COLORS.gold}
+          size="large"
+        />
       </View>
     );
   }
@@ -525,47 +1199,227 @@ function App() {
   return (
     <>
       <SystemBars style="light" />
+
       <SafeAreaProvider>
         <ErrorBoundary>
           <UserProvider>
             <DownloadProvider>
-              <GestureHandlerRootView style={{ flex: 1 }}>
+              <GestureHandlerRootView
+                style={{
+                  flex: 1,
+                }}
+              >
                 <BottomSheetModalProvider>
                   <NavigationContainer
                     ref={navigationRef}
                     linking={linking}
                     onReady={() => {
-                      if (pendingResetRef.current) {
-                        pendingResetRef.current = false;
-                        navigationRef.current?.navigate('ResetPassword');
+                      if (
+                        pendingResetRef.current
+                      ) {
+                        pendingResetRef.current =
+                          false;
+
+                        navigationRef.current?.navigate(
+                          'ResetPassword'
+                        );
+                      } else if (
+                        pendingSignOutRef.current
+                      ) {
+                        pendingSignOutRef.current =
+                          false;
+
+                        navigationRef.current?.reset(
+                          {
+                            index: 0,
+
+                            routes: [
+                              {
+                                name: ROUTES.LOGIN,
+                              },
+                            ],
+                          }
+                        );
+                      } else if (
+                        pendingNotificationRef.current
+                      ) {
+                        const action =
+                          pendingNotificationRef.current;
+
+                        pendingNotificationRef.current =
+                          null;
+
+                        navigationRef.current?.navigate(
+                          ...action
+                        );
                       }
                     }}
                   >
-                    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
-                      <Stack.Screen name="Main">
-                        {() => <MainTabs session={session} />}
+                    <Stack.Navigator
+                      screenOptions={{
+                        headerShown:
+                          false,
+                        animation:
+                          'none',
+                      }}
+                    >
+                      <Stack.Screen
+                        name="Main"
+                      >
+                        {() => (
+                          <MainTabs
+                            session={
+                              session
+                            }
+                          />
+                        )}
                       </Stack.Screen>
-                      <Stack.Screen name="Login" component={LoginScreen} />
-                      <Stack.Screen name="Signup" component={SignupScreen} />
-                      <Stack.Screen name="CommentsModal" component={CommentsModal} options={{ presentation: 'modal' }} />
-                      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-                      <Stack.Screen name="ApplyScholar" component={ApplyScholarScreen} />
-                      <Stack.Screen name="Search" component={SearchScreen} />
-                      <Stack.Screen name="ProfileVideos" component={ProfileVideosScreen} />
-                      <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
-                      <Stack.Screen name="WatchLive" component={WatchLiveScreen} />
-                      <Stack.Screen name="FollowList" component={FollowListScreen} />
-                      <Stack.Screen name="Settings" component={SettingsScreen} />
-                      <Stack.Screen name="UserProfile" component={ProfileScreen} />
-                      <Stack.Screen name="VideoDetail" component={VideoDetailScreen} />
-                      <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
-                      <Stack.Screen name="Admin" component={AdminScreen} />
-                      <Stack.Screen name="MyUploads" component={MyUploadsScreen} />
-                      <Stack.Screen name="ContactAdmin" component={ContactAdminScreen} />
-                      <Stack.Screen name="Quran" component={QuranScreen} />
-                      <Stack.Screen name="QuranReader" component={QuranReaderScreen} />
-                      <Stack.Screen name="RecitationChecker" component={RecitationCheckerScreen} />
+
+                      <Stack.Screen
+                        name="Login"
+                        component={
+                          LoginScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="Signup"
+                        component={
+                          SignupScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="CommentsModal"
+                        component={
+                          CommentsModal
+                        }
+                        options={{
+                          presentation:
+                            'modal',
+                        }}
+                      />
+
+                      <Stack.Screen
+                        name="EditProfile"
+                        component={
+                          EditProfileScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="ApplyScholar"
+                        component={
+                          ApplyScholarScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="Search"
+                        component={
+                          SearchScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="ProfileVideos"
+                        component={
+                          ProfileVideosScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="LiveStream"
+                        component={
+                          LiveStreamScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="WatchLive"
+                        component={
+                          WatchLiveRoute
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="FollowList"
+                        component={
+                          FollowListScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="Settings"
+                        component={
+                          SettingsScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="UserProfile"
+                        component={
+                          ProfileScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="VideoDetail"
+                        component={
+                          VideoDetailScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="ResetPassword"
+                        component={
+                          ResetPasswordScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="Admin"
+                        component={
+                          AdminScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="MyUploads"
+                        component={
+                          MyUploadsScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="ContactAdmin"
+                        component={
+                          ContactAdminScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="Quran"
+                        component={
+                          QuranScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="QuranReader"
+                        component={
+                          QuranReaderScreen
+                        }
+                      />
+
+                      <Stack.Screen
+                        name="RecitationChecker"
+                        component={
+                          RecitationCheckerScreen
+                        }
+                      />
                     </Stack.Navigator>
+
                     <GlobalVideoOptionsSheet />
                   </NavigationContainer>
                 </BottomSheetModalProvider>

@@ -1,8 +1,9 @@
-import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image, ScrollView, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, ActivityIndicator, Image, ScrollView, useWindowDimensions, Alert, TouchableOpacity } from 'react-native';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
@@ -68,6 +69,17 @@ export default function SearchScreen({ navigation }) {
   const [followingIds, setFollowingIds] = useState(new Set());
   const scrollRef = useRef(null);
   const searchTimeout = useRef(null);
+  const requestIdRef = useRef(0);
+  const followPendingRef = useRef(new Set());
+
+  useEffect(() => {
+    return () => {
+      if (searchTimeout.current) {
+        clearTimeout(searchTimeout.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     setProfileResults(prev => {
       // Filter out blocked users and current user
@@ -101,44 +113,76 @@ export default function SearchScreen({ navigation }) {
 
   const handleSearch = useCallback((text, categoryOverride = null) => {
     setQuery(text);
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+
     if (text.trim().length < 1) {
+      // Invalidate any in-flight request immediately
+      requestIdRef.current += 1;
       setProfileResults([]);
       setVideoResults([]);
+      setLoading(false);
       return;
     }
-    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+
+    // Claim this request's ID now, before the debounce delay, so any
+    // older in-flight request is invalidated immediately rather than
+    // whenever the debounce timer happens to fire.
+    const requestId = ++requestIdRef.current;
+
     searchTimeout.current = setTimeout(async () => {
       setLoading(true);
       const sanitized = text.replace(/[%_\\]/g, '\\$&').trim();
       const activeCategory = categoryOverride || selectedCategory;
 
-        let captionQuery = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
-        if (activeCategory !== 'All' && activeCategory !== 'Users') captionQuery = captionQuery.eq('category', activeCategory);
-
-      // Get blocked users list
+      // Get blocked users list (moved up so caption/profile-video queries can exclude them too)
       const { data: blockedUsers } = await supabase
         .from('blocks')
         .select('blocked_id')
         .eq('blocker_id', currentUserId);
       const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
 
-      let profileQuery = supabase
+        let captionQuery = supabase.from('videos').select('*').ilike('caption', `%${sanitized}%`);
+        if (activeCategory !== 'All' && activeCategory !== 'Users') captionQuery = captionQuery.eq('category', activeCategory);
+        if (blockedIds.length > 0) captionQuery = captionQuery.not('user_id', 'in', `(${blockedIds.join(',')})`);
+
+      let usernameQuery = supabase
         .from('profiles')
         .select('id, username, avatar_url, full_name')
-        .or(`username.ilike.${sanitized}%,full_name.ilike.${sanitized}%`);
-      
+        .ilike('username', `${sanitized}%`);
+      let fullNameQuery = supabase
+        .from('profiles')
+        .select('id, username, avatar_url, full_name')
+        .ilike('full_name', `${sanitized}%`);
+
       // Exclude blocked users
       if (blockedIds.length > 0) {
-        profileQuery = profileQuery.not('id', 'in', `(${blockedIds.join(',')})`);
+        usernameQuery = usernameQuery.not('id', 'in', `(${blockedIds.join(',')})`);
+        fullNameQuery = fullNameQuery.not('id', 'in', `(${blockedIds.join(',')})`);
       }
 
       const [
         { data: captionVideos, error: captionError },
-        { data: matchedProfiles, error: profileError },
+        { data: usernameProfiles, error: usernameError },
+        { data: fullNameProfiles, error: fullNameError },
       ] = await Promise.all([
         captionQuery.limit(30),
-        profileQuery.limit(10),
+        usernameQuery.limit(10),
+        fullNameQuery.limit(10),
       ]);
+
+      // Merge username/full-name matches, deduplicate by id, keep top 10
+      const profileError = usernameError || fullNameError;
+      const seenProfileIds = new Set();
+      const matchedProfiles = [];
+      for (const p of [...(usernameProfiles ?? []), ...(fullNameProfiles ?? [])]) {
+        if (!seenProfileIds.has(p.id)) {
+          seenProfileIds.add(p.id);
+          matchedProfiles.push(p);
+        }
+      }
+      matchedProfiles.length = Math.min(matchedProfiles.length, 10);
+
+      if (requestIdRef.current !== requestId) return;
 
       if (captionError) {
         __DEV__ && console.warn('Search error:', captionError.message);
@@ -156,6 +200,7 @@ export default function SearchScreen({ navigation }) {
 
         let profileVideoQuery = supabase.from('videos').select('*').in('user_id', profileIds);
         if (activeCategory !== 'All' && activeCategory !== 'Users') profileVideoQuery = profileVideoQuery.eq('category', activeCategory);
+        if (blockedIds.length > 0) profileVideoQuery = profileVideoQuery.not('user_id', 'in', `(${blockedIds.join(',')})`);
 
         const parallelQueries = [
           supabase.from('follows').select('following_id').in('following_id', profileIds),
@@ -170,6 +215,9 @@ export default function SearchScreen({ navigation }) {
         }
 
         const queryResults = await Promise.all(parallelQueries);
+
+        if (requestIdRef.current !== requestId) return;
+
         const { data: followerRows } = queryResults[0];
         const { data: profileVideos } = queryResults[1];
         const followData = currentUserId ? (queryResults[2]?.data ?? []) : [];
@@ -198,6 +246,8 @@ export default function SearchScreen({ navigation }) {
         }
       }
 
+      if (requestIdRef.current !== requestId) return;
+
       setProfileResults(profiles);
       // Only show videos if not in Users category
       if (activeCategory !== 'Users') {
@@ -215,6 +265,13 @@ export default function SearchScreen({ navigation }) {
       navigation.navigate(ROUTES.LOGIN);
       return;
     }
+    if (followPendingRef.current.has(profile.id)) return;
+    followPendingRef.current.add(profile.id);
+
+    // Snapshot which search/category request "owns" the result set this
+    // toggle is acting on, so a failure rollback can't stomp on a newer
+    // result set that has since replaced it.
+    const ownRequestId = requestIdRef.current;
     const isFollowing = followingIds.has(profile.id);
 
     // Optimistic update
@@ -229,15 +286,44 @@ export default function SearchScreen({ navigation }) {
         : p
     ));
 
-    if (isFollowing) {
-      await supabase.from('follows').delete()
-        .eq('follower_id', currentUserId)
-        .eq('following_id', profile.id);
-    } else {
-      await supabase.from('follows').insert({
-        follower_id: currentUserId,
-        following_id: profile.id,
-      });
+    try {
+      if (isFollowing) {
+        const { error } = await supabase.from('follows').delete()
+          .eq('follower_id', currentUserId)
+          .eq('following_id', profile.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('follows').insert({
+          follower_id: currentUserId,
+          following_id: profile.id,
+        });
+        if (error) throw error;
+      }
+    } catch (err) {
+      __DEV__ && console.warn('Follow toggle error:', err.message);
+      // Only roll back if no newer search/category request has superseded
+      // this one — otherwise followingIds/profileResults now belong to a
+      // different result set and rolling back here would corrupt it.
+      if (requestIdRef.current === ownRequestId) {
+        setFollowingIds(prev => {
+          const next = new Set(prev);
+          if (isFollowing) next.add(profile.id); else next.delete(profile.id);
+          return next;
+        });
+        setProfileResults(prev => prev.map(p =>
+          p.id === profile.id
+            ? { ...p, followerCount: isFollowing ? p.followerCount + 1 : Math.max(0, p.followerCount - 1) }
+            : p
+        ));
+      }
+      Alert.alert(
+        'Error',
+        isFollowing
+          ? 'Could not unfollow. Please try again.'
+          : 'Could not follow. Please try again.'
+      );
+    } finally {
+      followPendingRef.current.delete(profile.id);
     }
   }, [currentUserId, followingIds]);
 
@@ -246,6 +332,12 @@ export default function SearchScreen({ navigation }) {
       
       // If search query exists, let handleSearch handle everything (no flicker)
       if (query.trim().length >= 1) {
+        if (searchTimeout.current) {
+          clearTimeout(searchTimeout.current);
+          searchTimeout.current = null;
+        }
+
+        requestIdRef.current += 1;
         setLoading(true);
         // Clear old results immediately, handleSearch will populate
         setProfileResults([]);
@@ -254,21 +346,36 @@ export default function SearchScreen({ navigation }) {
         return;
       }
       
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       
       if (cat === 'Users') {
+        setProfileResults([]);
+        setVideoResults([]);
         setLoading(false);
         return;
       }
-      
+
+      const { data: blockedUsers } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', currentUserId);
+      const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
+
       // Only auto-load videos when no search query
       if (cat === 'All') {
-        const { data, error } = await supabase.from('videos').select('*').limit(30);
+        let allQuery = supabase.from('videos').select('*').limit(30);
+        if (blockedIds.length > 0) allQuery = allQuery.not('user_id', 'in', `(${blockedIds.join(',')})`);
+        const { data, error } = await allQuery;
+        if (requestIdRef.current !== requestId) return;
         if (error) { __DEV__ && console.warn('Category error:', error.message); setVideoResults([]); setLoading(false); return; }
         const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
         setVideoResults(filtered);
       } else {
-        const { data } = await supabase.from('videos').select('*').eq('category', cat).limit(30);
+        let catQuery = supabase.from('videos').select('*').eq('category', cat).limit(30);
+        if (blockedIds.length > 0) catQuery = catQuery.not('user_id', 'in', `(${blockedIds.join(',')})`);
+        const { data } = await catQuery;
+        if (requestIdRef.current !== requestId) return;
         const filtered = (data ?? []).filter(v => v.user_id !== currentUserId);
         setVideoResults(filtered);
       }
@@ -278,9 +385,16 @@ export default function SearchScreen({ navigation }) {
   const hasResults = profileResults.length > 0 || videoResults.length > 0;
 
   const handleClearSearch = useCallback(() => {
+    if (searchTimeout.current) {
+      clearTimeout(searchTimeout.current);
+      searchTimeout.current = null;
+    }
+
+    requestIdRef.current += 1;
     setQuery('');
     setProfileResults([]);
     setVideoResults([]);
+    setLoading(false);
   }, []);
 
     const handleCategoryPress = useCallback((item) => {
@@ -302,7 +416,12 @@ export default function SearchScreen({ navigation }) {
     <View style={styles.container}>
       {/* Fixed header — never affected by content below */}
       <View style={styles.header}>
-        <Text style={[styles.title, { paddingTop: insets.top + 16 }]}>Search</Text>
+        <View style={[styles.headerTop, { paddingTop: insets.top + 16 }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color="#1a2e44" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Search</Text>
+        </View>
 
         <View style={styles.searchBar}>
           <Text style={styles.searchIcon}>🔍</Text>
@@ -416,7 +535,9 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   content: { flex: 1 },
-  title: { fontSize: 28, fontWeight: '800', color: '#1a2e44', paddingHorizontal: 16, marginBottom: 14, letterSpacing: -0.5 },
+  headerTop: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
+  backBtn: { padding: 8, marginLeft: -8, marginRight: 8 },
+  title: { fontSize: 28, fontWeight: '800', color: '#1a2e44', marginBottom: 14, letterSpacing: -0.5 },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',

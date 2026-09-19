@@ -29,6 +29,8 @@ export const ROUTES = {
   // Video related
   VIDEO_DETAIL: 'VideoDetail',
   SEARCH: 'Search',
+  LIVE_STREAM: 'LiveStream',
+  WATCH_LIVE: 'WatchLive',
   
   // Other
   AVATAR_CROP: 'AvatarCrop',

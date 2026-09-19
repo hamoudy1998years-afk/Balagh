@@ -11,6 +11,7 @@ export function DownloadProvider({ children }) {
     onPin: null,
     onDelete: null,
     onDownload: null,
+    onBlock: null,
   });
 
   const showVideoOptionsSheet = useCallback((video, isOwner, hasDownloaded, callbacks, currentUserId, navigation) => {
@@ -33,7 +34,7 @@ export function DownloadProvider({ children }) {
   }, []);
 
   const showTikTokShare = useCallback((video, currentUserId) => {
-    console.log('🎯 showTikTokShare called, setting tiktokShareVisible: true');
+    // (removed for production)
     setSheetState({
       visible: false,
       video,

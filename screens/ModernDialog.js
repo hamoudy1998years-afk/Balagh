@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -21,9 +21,14 @@ export default function ModernDialog({
 }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const [shouldRender, setShouldRender] = useState(visible);
+  // Prevents double-execution of a button action during the fade-out
+  const buttonPressedRef = useRef(false);
 
   useEffect(() => {
     if (visible) {
+      buttonPressedRef.current = false;
+      setShouldRender(true);
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -49,7 +54,9 @@ export default function ModernDialog({
           duration: 150,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]).start(() => {
+        setShouldRender(false);
+      });
     }
   }, [visible]);
 
@@ -67,12 +74,12 @@ export default function ModernDialog({
     return '#1a2e44'; // Always dark navy text
   };
 
-  if (!visible) return null;
+  if (!shouldRender) return null;
 
   return (
     <Modal
       transparent
-      visible={visible}
+      visible={shouldRender}
       animationType="none"
       onRequestClose={onDismiss}
     >
@@ -96,7 +103,9 @@ export default function ModernDialog({
                       buttons.length === 2 && styles.halfButton,
                     ]}
                     onPress={() => {
-                      onDismiss();
+                      if (buttonPressedRef.current) return;
+                      buttonPressedRef.current = true;
+                      onDismiss?.();
                       button.onPress?.();
                     }}
                     activeOpacity={0.8}

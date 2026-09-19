@@ -1,6 +1,6 @@
 import { View, Text, TextInput, StyleSheet, ActivityIndicator, Animated, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import ModernDialog from './ModernDialog';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
@@ -24,6 +24,18 @@ export default function ResetPasswordScreen({ navigation }) {
   const passwordOpacity = useRef(new Animated.Value(0)).current;
   const confirmOpacity = useRef(new Animated.Value(0)).current;
 
+  // Lifecycle / duplicate-submission guards
+  const isMountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
+  const isSigningOutRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Toggle functions with animation
   const togglePassword = () => {
     setShowPassword(!showPassword);
@@ -42,6 +54,49 @@ export default function ResetPasswordScreen({ navigation }) {
       useNativeDriver: true,
     }).start();
   };
+
+  // Attempts to sign out after a successful password reset. Reusable so the
+  // "Retry Sign Out" dialog button can call the exact same logic without
+  // duplicating it. isSigningOutRef prevents overlapping attempts (e.g. a
+  // double tap on "Retry Sign Out").
+  async function attemptSignOut() {
+    if (isSigningOutRef.current) {
+      return;
+    }
+    isSigningOutRef.current = true;
+
+    let signOutError = null;
+    try {
+      const result = await supabase.auth.signOut();
+      signOutError = result?.error ?? null;
+    } catch (signOutErr) {
+      signOutError = signOutErr;
+    } finally {
+      isSigningOutRef.current = false;
+    }
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    if (signOutError) {
+      setDialog({
+        visible: true,
+        title: 'Password Reset, But…',
+        message: 'Your password was reset, but we couldn\'t fully sign you out yet. Your session may still be active. Please retry to make sure you\'re signed out before logging in again.',
+        type: 'error',
+        buttons: [{ text: 'Retry Sign Out', onPress: () => { setDialog(d => ({ ...d, visible: false })); attemptSignOut(); } }]
+      });
+    } else {
+      setDialog({
+        visible: true,
+        title: 'Success! ✅',
+        message: 'Your password has been reset.',
+        type: 'success',
+        buttons: [{ text: 'Login', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.navigate(ROUTES.LOGIN); } }]
+      });
+    }
+  }
 
   async function handleReset() {
     if (!password.trim() || !confirm.trim()) {
@@ -74,26 +129,50 @@ export default function ResetPasswordScreen({ navigation }) {
       });
       return;
     }
-    setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
-    setLoading(false);
-    if (error) {
-      setDialog({
-        visible: true,
-        title: 'Error',
-        message: error.message,
-        type: 'error',
-        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
-      });
+
+    if (isSubmittingRef.current) {
       return;
     }
-    setDialog({
-      visible: true,
-      title: 'Success! ✅',
-      message: 'Your password has been reset.',
-      type: 'success',
-      buttons: [{ text: 'Login', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.navigate(ROUTES.LOGIN); } }]
-    });
+    isSubmittingRef.current = true;
+    setLoading(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+
+      if (error) {
+        if (isMountedRef.current) {
+          setDialog({
+            visible: true,
+            title: 'Error',
+            message: error.message,
+            type: 'error',
+            buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+          });
+        }
+        return;
+      }
+
+      // Password updated successfully. Sign out explicitly so the temporary
+      // recovery session doesn't linger/conflict with the Login screen's
+      // expected signed-out state. The password reset itself already
+      // succeeded at this point regardless of sign-out outcome.
+      await attemptSignOut();
+    } catch (err) {
+      if (isMountedRef.current) {
+        setDialog({
+          visible: true,
+          title: 'Error',
+          message: err?.message || 'Something went wrong. Please try again.',
+          type: 'error',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
+      }
+    } finally {
+      isSubmittingRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+    }
   }
 
   return (

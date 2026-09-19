@@ -48,7 +48,17 @@ const SAVED_COORDS_KEY = 'savedCoordinates';
 export async function saveCoordinatesPermanently(coords) {
   try {
     await AsyncStorage.setItem(SAVED_COORDS_KEY, JSON.stringify(coords));
-  } catch (e) {}
+    // Verify the write landed — a silent failure here demotes the user to
+    // the first-launch GPS flow on next open.
+    const raw = await AsyncStorage.getItem(SAVED_COORDS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || parsed.latitude !== coords.latitude || parsed.longitude !== coords.longitude) {
+      throw new Error('SAVED_COORDS_WRITE_MISMATCH');
+    }
+  } catch (e) {
+    console.error('[PrayerApi] Failed to persist coordinates:', e.message);
+    throw new Error('Failed to save your location. Please try again.');
+  }
 }
 
 export async function loadSavedCoordinates() {

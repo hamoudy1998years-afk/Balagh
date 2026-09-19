@@ -7,6 +7,7 @@ import {
   FlatList,
   useWindowDimensions,
   BackHandler,
+  Linking,
 } from 'react-native';
 import ModernDialog from './ModernDialog';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -120,6 +121,9 @@ export default function AgeGateScreen({ onVerified }) {
         style={[styles.ageItem, { height: ITEM_HEIGHT }]}
         onPress={() => scrollToAge(item)}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${item} years old`}
+        accessibilityState={{ selected: isSelected }}
       >
         <View style={{ transform: [{ scale }] }}>
           <Text
@@ -153,7 +157,6 @@ export default function AgeGateScreen({ onVerified }) {
     <View style={styles.container}>
       <SystemBars style="light" />
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
-        <Text style={styles.emoji}></Text>
         <Text style={styles.title}>How old are you?</Text>
         <Text style={styles.subtitle}>
           Please select your age to continue
@@ -207,7 +210,22 @@ export default function AgeGateScreen({ onVerified }) {
         </TouchableOpacity>
 
         <Text style={styles.terms}>
-          By continuing, you agree to our Terms and Privacy Policy
+          By continuing, you agree to our{' '}
+          <Text
+            style={styles.termsLink}
+            onPress={() => Linking.openURL('https://bushrann.app/terms').catch(() => {})}
+            accessibilityRole="link"
+          >
+            Terms
+          </Text>{' '}
+          and{' '}
+          <Text
+            style={styles.termsLink}
+            onPress={() => Linking.openURL('https://bushrann.app/privacy').catch(() => {})}
+            accessibilityRole="link"
+          >
+            Privacy Policy
+          </Text>
         </Text>
       </View>
 
@@ -347,5 +365,9 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  termsLink: {
+    color: '#B76E79',
+    textDecorationLine: 'underline',
   },
 });

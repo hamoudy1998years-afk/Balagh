@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList,
   Keyboard, Platform, ActivityIndicator,
-  Animated, Dimensions, Modal, Pressable,
+  Animated, Dimensions, Modal, Pressable, Share,
 } from 'react-native';
 import ModernDialog from './ModernDialog';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,17 +12,39 @@ import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
 import { registerGlobals, VideoView } from '@livekit/react-native';
 import { supabase } from '../lib/supabase';
-import * as Notifications from 'expo-notifications';
+import { filterMessage } from '../utils/moderation';
+import { setSuppressNotifications } from '../lib/notificationPolicy';
 import AnimatedButton from './AnimatedButton';
 import { useViewerTracking } from '../hooks/useViewerTracking';
 import { useViewerCount } from '../hooks/useViewerCount';
 import { COLORS } from '../constants/theme';
 import { useUser } from '../context/UserContext';
+import { fetchWithTimeout } from '../utils/apiClient';
 
 const { width, height } = Dimensions.get('window');
 const TOKEN_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
 const REACTIONS = ['❤️', '🤲', '☪️', '🌟', '👍'];
 const HOST_TIMEOUT_MS = 30000;
+const REACTION_THROTTLE_MS = 2000;
+
+// Returns the current Supabase access token for authenticated Railway
+// requests, refreshing first if it is about to expire. Resolves to null
+// when there is no usable session (caller must not send the request).
+async function getAccessToken() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    let accessToken = session?.access_token ?? null;
+
+    if (session?.expires_at && session.expires_at * 1000 < Date.now() + 60 * 1000) {
+      const { data } = await supabase.auth.refreshSession();
+      accessToken = data?.session?.access_token ?? accessToken;
+    }
+
+    return accessToken || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 export default function WatchLiveScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
@@ -53,6 +75,10 @@ export default function WatchLiveScreen({ navigation, route }) {
   const [pinnedMessage, setPinnedMessage] = useState(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [floatingHearts, setFloatingHearts] = useState([]);
+  const [questionNotifs, setQuestionNotifs] = useState([]);
+  // This viewer's own moderation row for this stream: null | 'mute' | 'block'.
+  // RLS guarantees the app can only ever read the viewer's own row.
+  const [moderationAction, setModerationAction] = useState(null);
   const heartId = useRef(0);
 
   const roomRef = useRef(null);
@@ -64,35 +90,42 @@ export default function WatchLiveScreen({ navigation, route }) {
   const questionsChannelRef = useRef(null);
   const streamChannelRef = useRef(null);
 
-  useViewerTracking(stream.id, false, currentUser, retryCount);
+  // --- Race/lifecycle protection refs ---
+  const setupIdRef = useRef(0);          // generation guard for setup() attempts
+  const retryTimeoutRef = useRef(null);  // pending retry setTimeout
+  const hostIdentityRef = useRef(null);  // LiveKit identity of the participant providing host video
+  const selectedQuestionIdRef = useRef(null); // avoids stale closure in realtime callback
+  const submittingQuestionRef = useRef(false); // guards rapid duplicate question submits
+  const sendingMessageRef = useRef(false); // guards rapid duplicate chat sends
+  const lastReactionAtRef = useRef(0); // shared client throttle for emoji + heart reaction writes
+  // Own-question notification: tracks last seen flag states per question id so
+  // we only notify on a real false -> true transition of is_answered/is_dismissed.
+  const ownQuestionStatesRef = useRef({});
+  const questionNotifId = useRef(0);
+
+  useViewerTracking(stream.id, false, currentUser, retryCount, !streamEnded);
   const { viewerCount } = useViewerCount(stream.id);
+
+  // Keep the ref in sync so the realtime subscription (created once) never
+  // reads a stale `selectedQuestion` value from its closure.
+  useEffect(() => {
+    selectedQuestionIdRef.current = selectedQuestion?.id ?? null;
+  }, [selectedQuestion]);
 
   useEffect(() => {
     setup();
 
-    // Suppress push notifications while watching live
-    const originalHandler = Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: false,
-        shouldShowList: false,
-        shouldPlaySound: false,
-        shouldSetBadge: false,
-      }),
-    });
+    // Suppress push notifications while watching live. This goes through
+    // the centralized notification policy module instead of overwriting
+    // the global handler directly, so it can't clobber a handler installed
+    // by another part of the app.
+    setSuppressNotifications(true);
 
     return () => {
       if (!isCleaningUp.current) {
         cleanup();
       }
-      // Restore push notifications when leaving live screen
-      Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldShowBanner: true,
-          shouldShowList: true,
-          shouldPlaySound: false,
-          shouldSetBadge: false,
-        }),
-      });
+      setSuppressNotifications(false);
     };
   }, []);
 
@@ -122,7 +155,19 @@ export default function WatchLiveScreen({ navigation, route }) {
     }
   }, [joining, hostJoined, hostTimeoutReached, streamEnded]);
 
+  async function cleanupChannels() {
+    if (chatChannelRef.current) { await supabase.removeChannel(chatChannelRef.current); chatChannelRef.current = null; }
+    if (questionsChannelRef.current) { await supabase.removeChannel(questionsChannelRef.current); questionsChannelRef.current = null; }
+    if (streamChannelRef.current) { await supabase.removeChannel(streamChannelRef.current); streamChannelRef.current = null; }
+  }
+
   async function setup() {
+    // Every attempt (initial mount or retry) gets its own generation id.
+    // Any async continuation below must verify this id is still current
+    // before touching React state or installing resources.
+    const setupId = ++setupIdRef.current;
+    const isStale = () => setupIdRef.current !== setupId || isCleaningUp.current;
+
     if (!currentUser) {
       setDialog({
         visible: true,
@@ -140,26 +185,39 @@ export default function WatchLiveScreen({ navigation, route }) {
         .select('username')
         .eq('id', currentUser.id)
         .single();
+      if (isStale()) return;
       setUsername(profile?.username ?? 'viewer');
 
       // Register LiveKit WebRTC globals
       try { registerGlobals(); } catch (e) {}
 
-      // Get LiveKit token from server
-      const response = await fetch(`${TOKEN_SERVER_URL}/api/livekit/token`, {
+      // Get LiveKit token from the secured server endpoint. Requires a valid
+      // Supabase session — skip the request entirely when there is no usable
+      // token and fail through the existing setup error flow below. The
+      // server derives viewer identity from the verified JWT, so the body
+      // carries no client-authoritative userId.
+      const accessToken = await getAccessToken();
+      if (isStale()) return;
+      if (!accessToken) {
+        throw new Error('No auth session');
+      }
+      const response = await fetchWithTimeout(`${TOKEN_SERVER_URL}/api/livekit/token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           roomName: stream.channel_name,
-          userId: currentUser.id,
           isHost: false,
         }),
       });
 
       if (!response.ok) throw new Error(`Token server error: ${response.status}`);
       const { token, url } = await response.json();
+      if (isStale()) return;
 
-      // Create LiveKit room
+      // Create LiveKit room (kept local until we know this attempt is still current)
       const room = new Room({
         adaptiveStream: true,
         dynacast: true,
@@ -174,20 +232,31 @@ export default function WatchLiveScreen({ navigation, route }) {
           simulcast: false,
         },
       });
-      roomRef.current = room;
 
-      // Listen for host's video track
+      // Listen for host's video track.
+      // Only the participant whose video we first receive is treated as the
+      // host; any later ParticipantDisconnected is checked against this
+      // identity so a random viewer leaving doesn't end the stream.
       room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-        if (track.kind === Track.Kind.Video) {
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
+        if (
+          track.kind === Track.Kind.Video &&
+          String(participant.identity) === String(stream.user_id)
+        ) {
           __DEV__ && console.log('[LIVEKIT] Host video track received');
+          hostIdentityRef.current = participant.identity;
           setHostVideoTrack(track);
           setHostJoined(true);
           setHostTimeoutReached(false);
         }
       });
 
-      room.on(RoomEvent.TrackUnsubscribed, (track) => {
-        if (track.kind === Track.Kind.Video) {
+      room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
+        if (
+          track.kind === Track.Kind.Video &&
+          participant.identity === hostIdentityRef.current
+        ) {
           setHostVideoTrack(null);
           setHostJoined(false);
         }
@@ -198,24 +267,52 @@ export default function WatchLiveScreen({ navigation, route }) {
       });
 
       room.on(RoomEvent.ParticipantDisconnected, (participant) => {
-        __DEV__ && console.log('[LIVEKIT] Participant disconnected:', participant.identity);
-        setHostJoined(false);
-        setStreamEnded(true);
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
+        // The host dropping can be a transient network interruption — the
+        // host client may still reconnect (its own RoomEvent.Reconnecting/
+        // Reconnected cycle). Don't declare the stream ended here; just clear
+        // host presence and let the existing 30s no-host timeout decide. A
+        // returning host re-triggers TrackSubscribed and restores video.
+        // Authoritative end signals remain the live_streams DELETE / is_live
+        // = false realtime events (subscribeToStream).
+        if (hostIdentityRef.current && participant.identity === hostIdentityRef.current) {
+          hostIdentityRef.current = null;
+          setHostVideoTrack(null);
+          setHostJoined(false);
+        }
       });
 
       room.on(RoomEvent.Disconnected, () => {
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
+        // The VIEWER's own connection dropped after LiveKit's reconnect
+        // attempts were exhausted — the stream itself may still be live.
+        // Route to the existing timeout/retry UI instead of the final
+        // "Stream has ended" screen; Try Again runs handleRetryJoin with the
+        // existing setupId generation guards and room/channel cleanup.
         setHostJoined(false);
-        setStreamEnded(true);
+        setHostTimeoutReached(true);
       });
 
       // Connect to room
       await room.connect(url, token);
+
+      // If a newer setup/retry started, or the screen was torn down, while
+      // we were connecting, this room is stale — disconnect it and bail
+      // out rather than adopting it as the active room.
+      if (isStale()) {
+        try { await room.disconnect(); } catch (e) {}
+        return;
+      }
+
+      roomRef.current = room;
       setJoining(false);
 
       // Check if host is already in the room and has video
       for (const participant of room.remoteParticipants.values()) {
+        if (String(participant.identity) !== String(stream.user_id)) continue;
         for (const publication of participant.trackPublications.values()) {
           if (publication.track && publication.track.kind === Track.Kind.Video) {
+            hostIdentityRef.current = participant.identity;
             setHostVideoTrack(publication.track);
             setHostJoined(true);
           }
@@ -229,6 +326,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         .eq('stream_id', stream.id)
         .order('created_at', { ascending: true })
         .limit(50);
+      if (isStale()) return;
       setMessages(existingMessages ?? []);
 
       const { data: selectedQ } = await supabase
@@ -237,6 +335,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         .eq('stream_id', stream.id)
         .eq('is_selected', true)
         .single();
+      if (isStale()) return;
       if (selectedQ) setSelectedQuestion(selectedQ);
 
       const { count } = await supabase
@@ -244,11 +343,18 @@ export default function WatchLiveScreen({ navigation, route }) {
         .select('*', { count: 'exact' })
         .eq('stream_id', stream.id)
         .eq('user_id', currentUser.id);
+      if (isStale()) return;
       setQuestionsLeft(Math.max(0, (stream.max_questions ?? 5) - (count ?? 0)));
 
-      subscribeToChat();
-      subscribeToQuestions();
-      subscribeToStream();
+      // Check whether the host has muted/blocked this viewer for this stream.
+      // RLS returns only the viewer's own row; null means no moderation.
+      const ownModeration = await fetchOwnModeration();
+      if (isStale()) return;
+      setModerationAction(ownModeration);
+
+      subscribeToChat(setupId);
+      subscribeToQuestions(setupId);
+      subscribeToStream(setupId);
 
       // Load already pinned message
       const { data: streamData } = await supabase
@@ -256,6 +362,7 @@ export default function WatchLiveScreen({ navigation, route }) {
         .select('pinned_message')
         .eq('id', stream.id)
         .single();
+      if (isStale()) return;
       if (streamData?.pinned_message) setPinnedMessage(streamData.pinned_message);
 
       // Check if already following
@@ -266,11 +373,13 @@ export default function WatchLiveScreen({ navigation, route }) {
           .eq('follower_id', currentUser.id)
           .eq('following_id', stream.user_id)
           .maybeSingle();
+        if (isStale()) return;
         setIsFollowing(!!followData);
       }
 
     } catch (e) {
       __DEV__ && console.error('Setup error:', e);
+      if (isStale()) return;
       setDialog({
         visible: true,
         title: 'Error',
@@ -286,6 +395,15 @@ export default function WatchLiveScreen({ navigation, route }) {
     setJoining(true);
     setRetryCount(prev => prev + 1);
 
+    // Invalidate the previous setup session immediately so any of its
+    // in-flight async work becomes a no-op.
+    setupIdRef.current += 1;
+
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+
     if (roomRef.current) {
       try {
         await roomRef.current.disconnect();
@@ -293,21 +411,34 @@ export default function WatchLiveScreen({ navigation, route }) {
       roomRef.current = null;
     }
 
-    setTimeout(() => { setup(); }, 1000);
+    // Remove existing realtime subscriptions so setup() doesn't create
+    // duplicate channel subscriptions on retry.
+    await cleanupChannels();
+
+    retryTimeoutRef.current = setTimeout(() => {
+      retryTimeoutRef.current = null;
+      if (isCleaningUp.current) return;
+      setup();
+    }, 1000);
   }
 
   async function cleanup() {
     if (isCleaningUp.current) return;
     isCleaningUp.current = true;
 
+    // Invalidate any setup attempt still in flight.
+    setupIdRef.current += 1;
+
     if (hostWaitTimeoutRef.current) {
       clearTimeout(hostWaitTimeoutRef.current);
       hostWaitTimeoutRef.current = null;
     }
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
 
-    if (chatChannelRef.current) { await supabase.removeChannel(chatChannelRef.current); chatChannelRef.current = null; }
-    if (questionsChannelRef.current) { await supabase.removeChannel(questionsChannelRef.current); questionsChannelRef.current = null; }
-    if (streamChannelRef.current) { await supabase.removeChannel(streamChannelRef.current); streamChannelRef.current = null; }
+    await cleanupChannels();
 
     if (roomRef.current) {
       try { await roomRef.current.disconnect(); } catch (e) {}
@@ -315,68 +446,215 @@ export default function WatchLiveScreen({ navigation, route }) {
     }
   }
 
-  function subscribeToChat() {
+  function subscribeToChat(setupId) {
     chatChannelRef.current = supabase.channel(`watch_messages_${stream.id}`);
     chatChannelRef.current
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public',
         table: 'live_messages', filter: `stream_id=eq.${stream.id}`
       }, (payload) => {
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
         setMessages(prev => [...prev, payload.new]);
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        setTimeout(() => {
+          if (setupIdRef.current !== setupId || isCleaningUp.current) return;
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
       })
       .subscribe();
   }
 
-  function subscribeToQuestions() {
+  function subscribeToQuestions(setupId) {
     questionsChannelRef.current = supabase.channel(`watch_questions_${stream.id}`);
     questionsChannelRef.current
       .on('postgres_changes', {
         event: '*', schema: 'public',
         table: 'live_questions', filter: `stream_id=eq.${stream.id}`
       }, (payload) => {
-        if (payload.new.is_selected) {
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
+
+        if (payload.eventType === 'DELETE') {
+          if (payload.old?.id === selectedQuestionIdRef.current) {
+            setSelectedQuestion(null);
+          }
+          return;
+        }
+
+        // Brief confirmation when the viewer's OWN question is answered or
+        // dismissed. Track last-seen flag states per question so unrelated
+        // updates and re-fires of the same state never notify twice.
+        const ownId = currentUser?.id;
+        const newRow = payload.new;
+        if (ownId && newRow && newRow.user_id === ownId) {
+          const prev = ownQuestionStatesRef.current[newRow.id] || { is_answered: false, is_dismissed: false };
+
+          if (newRow.is_answered && !prev.is_answered) {
+            showQuestionNotif('✅ Your question was answered');
+          } else if (newRow.is_dismissed && !prev.is_dismissed) {
+            showQuestionNotif('Your question was dismissed');
+          }
+
+          ownQuestionStatesRef.current[newRow.id] = {
+            is_answered: !!newRow.is_answered,
+            is_dismissed: !!newRow.is_dismissed,
+          };
+        }
+
+        if (payload.new?.is_selected) {
           setSelectedQuestion(payload.new);
-        } else if (!payload.new.is_selected && payload.new.id === selectedQuestion?.id) {
+        } else if (!payload.new?.is_selected && payload.new?.id === selectedQuestionIdRef.current) {
           setSelectedQuestion(null);
         }
       })
       .subscribe();
   }
 
-  function subscribeToStream() {
+  // Transient, non-blocking notification (mirrors the host's showLiveNotif).
+  function showQuestionNotif(text) {
+    const id = questionNotifId.current++;
+    setQuestionNotifs(prev => [...prev, { id, text }]);
+    setTimeout(() => {
+      if (isCleaningUp.current) return;
+      setQuestionNotifs(prev => prev.filter(n => n.id !== id));
+    }, 3000);
+  }
+
+  function subscribeToStream(setupId) {
     streamChannelRef.current = supabase.channel(`watch_stream_${stream.id}`);
     streamChannelRef.current
       .on('postgres_changes', {
         event: 'DELETE', schema: 'public',
         table: 'live_streams', filter: `id=eq.${stream.id}`
-      }, () => { setStreamEnded(true); })
+      }, () => {
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
+        setStreamEnded(true);
+      })
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public',
         table: 'live_streams', filter: `id=eq.${stream.id}`
       }, (payload) => {
+        if (setupIdRef.current !== setupId || isCleaningUp.current) return;
         if (!payload.new.is_live) setStreamEnded(true);
         setPinnedMessage(payload.new.pinned_message ?? null);
       })
       .subscribe();
   }
 
-  async function sendMessage() {
-    if (!chatInput.trim() || !stream.id || !currentUser) return;
-    const msg = chatInput.replace(/<[^>]*>/g, '').trim();
-    setChatInput('');
+  // ─── MODERATION (viewer side) ─────────────────────────────────────────────
+  // Mute disables chat only; block disables chat + questions + reactions.
+  // The database (RLS + triggers) is always authoritative — local state only
+  // mirrors it and is refreshed from it whenever a write is rejected.
+  const isChatDisabled = moderationAction === 'mute' || moderationAction === 'block';
+  const isParticipationBlocked = moderationAction === 'block';
+
+  // Fetches this viewer's own live_moderation row for this stream. RLS
+  // guarantees only their own row is visible. Returns 'mute' | 'block' |
+  // null (no row, or the lookup itself failed).
+  async function fetchOwnModeration() {
     try {
-      await supabase.from('live_messages').insert({
-        stream_id: stream.id, user_id: currentUser.id, username, message: msg
-      });
-    } catch (e) { __DEV__ && console.log('Failed to send message:', e); }
+      const { data, error } = await supabase
+        .from('live_moderation')
+        .select('action')
+        .eq('stream_id', stream.id)
+        .maybeSingle();
+      if (error) {
+        __DEV__ && console.log('Moderation lookup failed:', error);
+        return null;
+      }
+      return data?.action ?? null;
+    } catch (e) {
+      __DEV__ && console.log('Moderation lookup failed:', e);
+      return null;
+    }
   }
 
-  async function submitQuestion() {
-    if (!questionInput.trim() || !currentUser) return;
-    const { data: streamData } = await supabase
-      .from('live_streams').select('allow_questions').eq('id', stream.id).single();
-    if (!streamData?.allow_questions) {
+  function showModerationDialog(action) {
+    setDialog(action === 'block' ? {
+      visible: true,
+      title: 'Blocked',
+      message: "You've been blocked from participating in this livestream. You can still watch.",
+      type: 'info',
+      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+    } : {
+      visible: true,
+      title: 'Muted',
+      message: "You've been muted by the host. You can still watch, ask questions, and react.",
+      type: 'info',
+      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+    });
+  }
+
+  // Shared failure path after a rejected chat/question/reaction write:
+  // re-fetch the viewer's own moderation row (never parsing error strings),
+  // sync local state from the authoritative answer, and show the matching
+  // message. When no moderation row exists the failure is treated as an
+  // ordinary network/database error and the generic dialog is shown instead.
+  async function handleModeratedWriteFailure(isChat, genericDialog) {
+    const action = await fetchOwnModeration();
+    // The viewer may have left the screen while the lookup was running —
+    // never touch React state or dialogs after cleanup has begun.
+    if (isCleaningUp.current) return;
+    if (action) setModerationAction(action);
+    if (action === 'block' || (action === 'mute' && isChat)) {
+      showModerationDialog(action);
+    } else {
+      setDialog(genericDialog);
+    }
+  }
+
+  const GENERIC_SEND_ERROR = {
+    title: 'Error',
+    message: 'Failed to send your message. Please try again.',
+    type: 'error',
+  };
+
+  // After a rejected question insert, re-fetch the authoritative database
+  // state and classify the failure WITHOUT parsing error strings:
+  // blocked -> Blocked dialog; stream gone/ended -> stream-ended UI;
+  // questions disabled -> info dialog; quota full -> Limit Reached
+  // (recomputed from fresh max_questions + exact count); otherwise generic.
+  // The typed question stays in the input on every failure path.
+  async function reconcileQuestionFailure() {
+    const questionStreamId = stream.id;
+    const isStale = () => isCleaningUp.current || questionStreamId !== stream.id;
+
+    const showGenericQuestionError = () => setDialog({
+      visible: true,
+      title: 'Error',
+      message: 'Failed to submit your question. Please try again.',
+      type: 'error',
+      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+    });
+
+    // 1) Moderation first: a blocked viewer gets the Blocked dialog.
+    const action = await fetchOwnModeration();
+    if (isStale()) return;
+    if (action) setModerationAction(action);
+    if (action === 'block') {
+      showModerationDialog('block');
+      return;
+    }
+
+    // 2) Fresh stream state — the route-param snapshot may be stale.
+    const { data: streamData, error: streamError } = await supabase
+      .from('live_streams')
+      .select('is_live, allow_questions, max_questions')
+      .eq('id', questionStreamId)
+      .maybeSingle();
+    if (isStale()) return;
+
+    // A failed lookup (data=null + error) is NOT proof the stream ended —
+    // only treat the stream as gone when the query itself succeeded.
+    if (streamError) {
+      showGenericQuestionError();
+      return;
+    }
+
+    if (!streamData || streamData.is_live !== true) {
+      setStreamEnded(true);
+      return;
+    }
+
+    if (streamData.allow_questions !== true) {
       setDialog({
         visible: true,
         title: 'Questions Disabled',
@@ -386,44 +664,208 @@ export default function WatchLiveScreen({ navigation, route }) {
       });
       return;
     }
-    if (questionsLeft <= 0) {
+
+    // 3) Exact count -> authoritative remaining quota.
+    const { count, error: countError } = await supabase
+      .from('live_questions')
+      .select('*', { count: 'exact', head: true })
+      .eq('stream_id', questionStreamId)
+      .eq('user_id', currentUser.id);
+    if (isStale()) return;
+
+    // A failed count query must not be treated as count = 0.
+    if (countError) {
+      showGenericQuestionError();
+      return;
+    }
+
+    const maxQuestions = streamData?.max_questions ?? 5;
+    const remaining = Math.max(0, maxQuestions - (count ?? 0));
+    setQuestionsLeft(remaining);
+
+    if (remaining <= 0) {
       setDialog({
         visible: true,
         title: 'Limit Reached',
-        message: `The scholar has set a limit of ${stream.max_questions} questions per viewer.`,
+        message: `The scholar has set a limit of ${maxQuestions} questions per viewer.`,
         type: 'info',
         buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
       });
       return;
     }
-    const q = questionInput.replace(/<[^>]*>/g, '').trim();
-    setQuestionInput('');
+
+    setDialog({
+      visible: true,
+      title: 'Error',
+      message: 'Failed to submit your question. Please try again.',
+      type: 'error',
+      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+    });
+  }
+
+  async function sendMessage() {
+    if (!chatInput.trim() || !stream.id || !currentUser) return;
+    if (sendingMessageRef.current) return;
+    sendingMessageRef.current = true;
+    const msg = chatInput.replace(/<[^>]*>/g, '').trim();
+    // Same content rules as the host: banned words are blocked before any
+    // DB write; links/card-like patterns are scrubbed to [removed].
+    const moderationResult = filterMessage(msg, username);
+    if (!moderationResult.allowed) {
+      sendingMessageRef.current = false;
+      setDialog({
+        visible: true,
+        title: 'Message Blocked',
+        message: 'Your message contains inappropriate content.',
+        type: 'warning',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      });
+      return;
+    }
+    let failed = false;
     try {
-      await supabase.from('live_questions').insert({
+      const { error } = await supabase.from('live_messages').insert({
+        stream_id: stream.id, user_id: currentUser.id, username, message: moderationResult.filteredText
+      });
+      if (error) {
+        __DEV__ && console.log('Failed to send message:', error);
+        failed = true;
+      }
+    } catch (e) {
+      __DEV__ && console.log('Failed to send message:', e);
+      failed = true;
+    }
+    sendingMessageRef.current = false;
+    if (!failed) {
+      setChatInput('');
+      return;
+    }
+    // Keep the typed message in the input on failure (only cleared on
+    // success) so a transient error doesn't silently destroy it.
+    await handleModeratedWriteFailure(true, { ...GENERIC_SEND_ERROR, visible: true, buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+  }
+
+  async function submitQuestion() {
+    if (!questionInput.trim() || !currentUser) return;
+    if (submittingQuestionRef.current) return;
+    submittingQuestionRef.current = true;
+    try {
+      const { data: streamData } = await supabase
+        .from('live_streams').select('allow_questions').eq('id', stream.id).single();
+      if (!streamData?.allow_questions) {
+        setDialog({
+          visible: true,
+          title: 'Questions Disabled',
+          message: 'The scholar is not accepting questions right now.',
+          type: 'info',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
+        return;
+      }
+      if (questionsLeft <= 0) {
+        setDialog({
+          visible: true,
+          title: 'Limit Reached',
+          message: `The scholar has set a limit of ${stream.max_questions} questions per viewer.`,
+          type: 'info',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
+        return;
+      }
+      const q = questionInput.replace(/<[^>]*>/g, '').trim();
+      const { error } = await supabase.from('live_questions').insert({
         stream_id: stream.id, user_id: currentUser.id, username, question: q
       });
-      setQuestionsLeft(prev => prev - 1);
-    } catch (e) { __DEV__ && console.log('Failed to submit question:', e); }
+      if (!error) {
+        setQuestionInput('');
+        setQuestionsLeft(prev => Math.max(0, prev - 1));
+      } else {
+        __DEV__ && console.log('Failed to submit question:', error);
+        await reconcileQuestionFailure();
+      }
+    } catch (e) {
+      __DEV__ && console.log('Failed to submit question:', e);
+      await reconcileQuestionFailure();
+    } finally {
+      submittingQuestionRef.current = false;
+    }
   }
 
   function sendReaction(emoji) {
+    if (!stream?.id || !currentUser || isParticipationBlocked) return;
+
+    // Client-side defense-in-depth only.
+    // The database trigger remains the authoritative rate limit.
+    // This shared throttle also prevents alternating between emoji
+    // reactions and the heart button to multiply DB writes.
+    const now = Date.now();
+    if (now - lastReactionAtRef.current < REACTION_THROTTLE_MS) return;
+    lastReactionAtRef.current = now;
+
     const id = reactionId.current++;
     const startX = Math.random() * (width - 60);
     const anim = new Animated.Value(0);
-    setFloatingReactions(prev => [...prev, { id, emoji, startX, anim }]);
-    Animated.timing(anim, { toValue: 1, duration: 2000, useNativeDriver: true }).start(() => {
-      setFloatingReactions(prev => prev.filter(r => r.id !== id));
+
+    setFloatingReactions(prev => [
+      ...prev,
+      { id, emoji, startX, anim }
+    ]);
+
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 2000,
+      useNativeDriver: true,
+    }).start(() => {
+      setFloatingReactions(prev =>
+        prev.filter(r => r.id !== id)
+      );
     });
-    if (stream?.id && currentUser) {
-      const saveReaction = async () => {
-        try {
-          await supabase.from('live_reactions').insert({
-            stream_id: stream.id, user_id: currentUser.id, reaction: emoji
+
+    const saveReaction = async () => {
+      try {
+        const { error } = await supabase
+          .from('live_reactions')
+          .insert({
+            stream_id: stream.id,
+            user_id: currentUser.id,
+            reaction: emoji,
           });
-        } catch (e) { __DEV__ && console.log('Reaction error:', e); }
-      };
-      saveReaction();
-    }
+
+        if (error) {
+          __DEV__ && console.log('Reaction error:', error);
+
+          await handleModeratedWriteFailure(false, {
+            ...GENERIC_SEND_ERROR,
+            message: 'Failed to send your reaction. Please try again.',
+            visible: true,
+            buttons: [
+              {
+                text: 'OK',
+                onPress: () =>
+                  setDialog(d => ({ ...d, visible: false })),
+              },
+            ],
+          });
+        }
+      } catch (e) {
+        __DEV__ && console.log('Reaction error:', e);
+
+        await handleModeratedWriteFailure(false, {
+          ...GENERIC_SEND_ERROR,
+          message: 'Failed to send your reaction. Please try again.',
+          visible: true,
+          buttons: [
+            {
+              text: 'OK',
+              onPress: () =>
+                setDialog(d => ({ ...d, visible: false })),
+            },
+          ],
+        });
+      }
+    };
+
+    saveReaction();
   }
 
   const handleDonate = async () => {
@@ -452,12 +894,17 @@ export default function WatchLiveScreen({ navigation, route }) {
         scholarId: stream.user_id,
       }),
     });
-    const data = await res.json();
-    if (data.checkoutUrl) {
-      setDonateModal(false);
-      setDonateAmount('');
-      setCheckoutUrl(data.checkoutUrl);
+    if (!res.ok) {
+      throw new Error(`Donation server error: ${res.status}`);
     }
+    const data = await res.json();
+    if (!data?.checkoutUrl || typeof data.checkoutUrl !== 'string') {
+      throw new Error('Donation server did not return a checkout URL');
+    }
+
+    setDonateModal(false);
+    setDonateAmount('');
+    setCheckoutUrl(data.checkoutUrl);
   } catch (e) {
     setDialog({
       visible: true,
@@ -481,13 +928,56 @@ export default function WatchLiveScreen({ navigation, route }) {
   };
 
   const handleLike = () => {
+    if (!stream?.id || !currentUser || isParticipationBlocked) return;
+
+    const now = Date.now();
+    if (now - lastReactionAtRef.current < REACTION_THROTTLE_MS) return;
+    lastReactionAtRef.current = now;
+
     setLikeCount(prev => prev + 1);
     spawnHeart(width - 60, height * 0.5);
-    if (stream?.id && currentUser) {
-      supabase.from('live_reactions').insert({
-        stream_id: stream.id, user_id: currentUser.id, reaction: '❤️'
-      }).then(() => {});
-    }
+
+    supabase
+      .from('live_reactions')
+      .insert({
+        stream_id: stream.id,
+        user_id: currentUser.id,
+        reaction: '❤️',
+      })
+      .then(({ error }) => {
+        if (error) {
+          __DEV__ && console.log('Reaction error:', error);
+
+          handleModeratedWriteFailure(false, {
+            ...GENERIC_SEND_ERROR,
+            message: 'Failed to send your reaction. Please try again.',
+            visible: true,
+            buttons: [
+              {
+                text: 'OK',
+                onPress: () =>
+                  setDialog(d => ({ ...d, visible: false })),
+              },
+            ],
+          });
+        }
+      })
+      .catch((e) => {
+        __DEV__ && console.log('Reaction error:', e);
+
+        handleModeratedWriteFailure(false, {
+          ...GENERIC_SEND_ERROR,
+          message: 'Failed to send your reaction. Please try again.',
+          visible: true,
+          buttons: [
+            {
+              text: 'OK',
+              onPress: () =>
+                setDialog(d => ({ ...d, visible: false })),
+            },
+          ],
+        });
+      });
   };
 
   const handleTapVideo = (e) => {
@@ -495,14 +985,48 @@ export default function WatchLiveScreen({ navigation, route }) {
     spawnHeart(locationX, locationY);
   };
 
+  const handleShare = async () => {
+    if (!stream?.id) return;
+
+    try {
+      await Share.share({
+        message: `Watch ${stream.title || 'this livestream'} live on Bushrann:\nbushrann://live/${stream.id}`,
+        title: stream.title || 'Bushrann Live',
+      });
+    } catch (error) {
+      __DEV__ && console.log('Failed to share livestream:', error);
+
+      setDialog({
+        visible: true,
+        title: 'Share Failed',
+        message: 'Could not share this livestream. Please try again.',
+        type: 'error',
+        buttons: [
+          {
+            text: 'OK',
+            onPress: () =>
+              setDialog(d => ({ ...d, visible: false })),
+          },
+        ],
+      });
+    }
+  };
+
   const handleFollow = async () => {
     if (!currentUser || !stream?.user_id) return;
     if (isFollowing) return;
     setIsFollowing(true);
-    await supabase.from('follows').insert({
+    const { error } = await supabase.from('follows').insert({
       follower_id: currentUser.id,
       following_id: stream.user_id,
     });
+    if (error) {
+      // Postgres unique_violation (already following) isn't a real failure —
+      // any other error means the follow didn't actually happen, so roll back.
+      if (error.code !== '23505') {
+        setIsFollowing(false);
+      }
+    }
   };
 
   const handleTabChat = useCallback(() => setActiveTab('chat'), []);
@@ -601,6 +1125,13 @@ export default function WatchLiveScreen({ navigation, route }) {
         </View>
       )}
 
+      {/* Transient own-question notifications (answered / dismissed) */}
+      {questionNotifs.map(n => (
+        <View key={n.id} style={styles.questionNotif}>
+          <Text style={styles.questionNotifText}>{n.text}</Text>
+        </View>
+      ))}
+
       {/* Pinned message */}
       {pinnedMessage && (
         <View style={styles.pinnedMessage}>
@@ -615,7 +1146,13 @@ export default function WatchLiveScreen({ navigation, route }) {
           <Text style={styles.rightBtnEmoji}>{isFollowing ? '✅' : '➕'}</Text>
           <Text style={styles.rightBtnText}>{isFollowing ? 'Following' : 'Follow'}</Text>
         </AnimatedButton>
-        <AnimatedButton style={styles.rightBtn} onPress={handleLike}>
+
+        <AnimatedButton style={styles.rightBtn} onPress={handleShare}>
+          <Text style={styles.rightBtnEmoji}>↗️</Text>
+          <Text style={styles.rightBtnText}>Share</Text>
+        </AnimatedButton>
+
+        <AnimatedButton style={styles.rightBtn} onPress={handleLike} disabled={isParticipationBlocked}>
           <Text style={styles.rightBtnEmoji}>❤️</Text>
           <Text style={styles.rightBtnText}>{likeCount}</Text>
         </AnimatedButton>
@@ -654,8 +1191,9 @@ export default function WatchLiveScreen({ navigation, route }) {
         {activeTab === 'chat' && (
           <View style={[styles.chatInputRow, { marginBottom: Math.max(0, keyboardHeight - 45) }]}>
             <TextInput style={styles.chatInput} value={chatInput} onChangeText={setChatInput}
-              placeholder="Say something..." placeholderTextColor="#64748b" onSubmitEditing={sendMessage} />
-            <AnimatedButton style={styles.sendBtn} onPress={sendMessage}>
+              placeholder="Say something..." placeholderTextColor="#64748b" onSubmitEditing={sendMessage}
+              editable={!isChatDisabled} maxLength={500} />
+            <AnimatedButton style={styles.sendBtn} onPress={sendMessage} disabled={isChatDisabled}>
               <Text style={styles.sendBtnText}>Send</Text>
             </AnimatedButton>
           </View>
@@ -680,7 +1218,7 @@ export default function WatchLiveScreen({ navigation, route }) {
                   <TextInput style={styles.chatInput} value={questionInput} onChangeText={setQuestionInput}
                     placeholder="Type your question..." placeholderTextColor="#64748b" multiline maxLength={200} />
                   <AnimatedButton style={[styles.sendBtn, questionsLeft <= 0 && { backgroundColor: COLORS.goldDark }]}
-                    onPress={submitQuestion} disabled={questionsLeft <= 0}>
+                    onPress={submitQuestion} disabled={questionsLeft <= 0 || isParticipationBlocked}>
                     <Text style={styles.sendBtnText}>Ask</Text>
                   </AnimatedButton>
                 </View>
@@ -691,7 +1229,8 @@ export default function WatchLiveScreen({ navigation, route }) {
 
         <View style={styles.reactionsRow}>
           {REACTIONS.map(emoji => (
-            <AnimatedButton key={emoji} style={styles.reactionBtn} onPress={() => sendReaction(emoji)}>
+            <AnimatedButton key={emoji} style={styles.reactionBtn} onPress={() => sendReaction(emoji)}
+              disabled={isParticipationBlocked}>
               <Text style={styles.reactionEmoji}>{emoji}</Text>
             </AnimatedButton>
           ))}
@@ -969,6 +1508,23 @@ const styles = StyleSheet.create({
     fontSize: 15, 
     fontWeight: '600',
     lineHeight: 22,
+  },
+  questionNotif: {
+    position: 'absolute',
+    top: 190,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    zIndex: 30,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  questionNotifText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   bottomPanel: { 
     position: 'absolute', 

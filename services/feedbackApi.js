@@ -16,10 +16,15 @@ export async function submitVideoFeedback(wantsVideos) {
     });
 
     console.log('[Feedback] Status code:', response.status);
+    if (!response.ok) {
+      throw new Error(`Feedback submission failed: HTTP ${response.status}`);
+    }
     const text = await response.text();
     console.log('[Feedback] Response length:', text.length);
+    return true;
   } catch (e) {
     console.log('[Feedback] Error:', e.message);
+    throw e;
   }
 }
 
@@ -38,7 +43,12 @@ export async function submitBugReport(message, phoneNumber) {
     });
 
     console.log('[BugReport] Status:', response.status);
+    if (!response.ok) {
+      throw new Error(`Bug report submission failed: HTTP ${response.status}`);
+    }
+    return true;
   } catch (e) {
     console.log('[BugReport] Error:', e.message);
+    throw e;
   }
 }

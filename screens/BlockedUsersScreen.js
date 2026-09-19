@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,9 +25,22 @@ export default function BlockedUsersScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
 
+  const isMountedRef = useRef(true);
+  const requestIdRef = useRef(0);
+  const currentUserIdRef = useRef(user?.id);
+
+  currentUserIdRef.current = user?.id;
+
   const fetchBlockedUsers = useCallback(async () => {
-    if (!user?.id) {
-      setLoading(false);
+    const requestId = ++requestIdRef.current;
+    const requestedUserId = user?.id;
+
+    if (!requestedUserId) {
+      if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+        setBlockedList([]);
+        setLoading(false);
+        setRefreshing(false);
+      }
       return;
     }
     
@@ -35,20 +48,27 @@ export default function BlockedUsersScreen({ navigation }) {
       const { data: blockedData, error: blockedError } = await supabase
         .from('blocked_users')
         .select('blocked_id')
-        .eq('blocker_id', user.id);
+        .eq('blocker_id', requestedUserId);
       
       if (blockedError) throw blockedError;
       
       if (!blockedData || blockedData.length === 0) {
-        setBlockedList([]);
+        if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+          setBlockedList([]);
+          setLoading(false);
+          setRefreshing(false);
+        }
         return;
       }
       
       const blockedIds = blockedData.map(b => b.blocked_id);
       
       if (blockedIds.length === 0) {
-        setBlockedList([]);
-        setLoading(false);
+        if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+          setBlockedList([]);
+          setLoading(false);
+          setRefreshing(false);
+        }
         return;
       }
       
@@ -69,25 +89,52 @@ export default function BlockedUsersScreen({ navigation }) {
         };
       });
       
-      setBlockedList(combined);
+      if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+        setBlockedList(combined);
+      }
     } catch (err) {
-      setDialog({
-        visible: true,
-        title: 'Error',
-        message: 'Failed to load blocked users: ' + err.message,
-        type: 'error',
-        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
-      });
+      if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+        setDialog({
+          visible: true,
+          title: 'Error',
+          message: 'Failed to load blocked users: ' + err.message,
+          type: 'error',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [user?.id]);
 
-  // Initial mount fetch
+  // Mount/unmount lifecycle guard only
   useEffect(() => {
-    fetchBlockedUsers();
-  }, [user?.id, fetchBlockedUsers]);
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Clear stale state on account change
+  useEffect(() => {
+    requestIdRef.current += 1;
+
+    if (isMountedRef.current) {
+      setBlockedList([]);
+      setLoading(true);
+      setRefreshing(false);
+      setDialog({
+        visible: false,
+        title: '',
+        message: '',
+        type: 'info',
+        buttons: []
+      });
+    }
+  }, [user?.id]);
 
   // Refetch when screen comes into focus (handles navigation caching)
   useFocusEffect(
@@ -109,18 +156,23 @@ export default function BlockedUsersScreen({ navigation }) {
           style: 'destructive',
           onPress: async () => {
             setDialog(d => ({ ...d, visible: false }));
+            const userIdAtStart = user?.id;
             try {
               await unblockUser(blockedUser.blocked_id);
-              fetchBlockedUsers();
+              if (isMountedRef.current && currentUserIdRef.current === userIdAtStart) {
+                fetchBlockedUsers();
+              }
             } catch (err) {
               console.error('Failed to unblock:', err);
-              setDialog({
-                visible: true,
-                title: 'Error',
-                message: 'Failed to unblock user',
-                type: 'error',
-                buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
-              });
+              if (isMountedRef.current && currentUserIdRef.current === userIdAtStart) {
+                setDialog({
+                  visible: true,
+                  title: 'Error',
+                  message: 'Failed to unblock user',
+                  type: 'error',
+                  buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+                });
+              }
             }
           }
         }
@@ -138,7 +190,7 @@ export default function BlockedUsersScreen({ navigation }) {
             <Ionicons name="person" size={24} color="#64748b" />
           </View>
         )}
-        <Text style={styles.username}>@{item.profiles?.username || 'unknown'}</Text>
+        <Text style={styles.username} numberOfLines={1}>@{item.profiles?.username || 'unknown'}</Text>
       </View>
       <TouchableOpacity 
         style={styles.unblockButton}
@@ -262,6 +314,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1a2e44',
+    flexShrink: 1,
   },
   unblockButton: {
     backgroundColor: '#fee2e2',

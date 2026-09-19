@@ -1,5 +1,5 @@
 import { View, Text, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import AnimatedButton from './AnimatedButton';
 import { COLORS } from '../constants/theme';
@@ -19,6 +19,7 @@ export default function ApplyScholarScreen({ navigation }) {
   const [bio,        setBio]        = useState('');
   const [loading,    setLoading]    = useState(false);
   const [toast,      setToast]      = useState(null);
+  const toastTimeoutRef = useRef(null);
   const [dialog, setDialog] = useState({ 
     visible: false, 
     title: '', 
@@ -26,6 +27,12 @@ export default function ApplyScholarScreen({ navigation }) {
     type: 'info', 
     buttons: [] 
   });
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    };
+  }, []);
 
   async function handleApply() {
     const fn  = fullName.trim();
@@ -85,41 +92,44 @@ export default function ApplyScholarScreen({ navigation }) {
       setDialog({ visible: true, title: 'Too Short', message: 'Bio must be at least 30 characters.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
       return; 
     }
-    setLoading(true);
+
     const user = authUser;
     if (!user) { 
-      setLoading(false); 
       setDialog({ visible: true, title: 'Error', message: 'You must be logged in to apply.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); 
       return; 
     }
 
-    const { data: existing } = await supabase
-      .from('scholar_applications')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    if (existing) {
+    setLoading(true);
+    try {
+      const { data: existing } = await supabase
+        .from('scholar_applications')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (existing) {
+        setDialog({ visible: true, title: 'Already Applied', message: 'You have already submitted a scholar application. Please wait for review.', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+        return;
+      }
+      const { error } = await supabase.from('scholar_applications').insert({
+        user_id: user.id,
+        full_name: fullName.trim(),
+        age: ageNum,
+        location: location.trim(),
+        education: education.trim(),
+        expertise: expertise.trim(),
+        bio: bio.trim(),
+      });
+      if (error) {
+        setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      } else {
+        setDialog({ visible: true, title: 'Application Submitted!', message: 'We will review your application and get back to you.', type: 'success', buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.goBack(); } }] });
+        setToast({ message: 'Application submitted successfully!', type: 'success' });
+        toastTimeoutRef.current = setTimeout(() => setToast(null), 3000);
+      }
+    } catch (e) {
+      setDialog({ visible: true, title: 'Error', message: 'Something went wrong. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+    } finally {
       setLoading(false);
-      setDialog({ visible: true, title: 'Already Applied', message: 'You have already submitted a scholar application. Please wait for review.', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
-      return;
-    }
-    const { error } = await supabase.from('scholar_applications').insert({
-      user_id: user.id,
-      full_name: fullName.trim(),
-      age: ageNum,
-      location: location.trim(),
-      education: education.trim(),
-      expertise: expertise.trim(),
-      bio: bio.trim(),
-    });
-    setLoading(false);
-    if (error) {
-      setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
-    } else {
-      setDialog({ visible: true, title: 'Application Submitted!', message: 'We will review your application and get back to you.', type: 'success', buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.goBack(); } }] });
-      // Show toast confirmation
-      setToast({ message: 'Application submitted successfully!', type: 'success' });
-      setTimeout(() => setToast(null), 3000);
     }
   }
 

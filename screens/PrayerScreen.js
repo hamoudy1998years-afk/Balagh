@@ -27,7 +27,7 @@ import {
   getNextPrayer, formatTime, getPrayerEmoji,
   savePrayerCache, loadPrayerCache, searchCity, reverseGeocode,
   saveCoordinatesPermanently, loadSavedCoordinates,
-  saveMonthlyCache,
+  saveMonthlyCache, loadMonthlyCache, getTodayTimingsFromMonthly,
 } from '../services/prayerApi';
 import { getPrayerNotifChoice, setPrayerNotifChoice, initPrayerNotifications, cancelPrayerNotifications, schedulePrayerNotifications, getNextOccurrence, requestExactAlarmPermission, updatePersistentNotification } from '../services/prayerNotificationService';
 
@@ -310,6 +310,23 @@ export default function PrayerScreen() {
   const prevFacingMakkahRef = useRef(false);
   const lastVibrationRef    = useRef(0);
 
+  // Request ID refs for stale request cancellation
+  const prayerRequestIdRef  = useRef(0);
+  const citySearchIdRef     = useRef(0);
+
+  // Sound ref for proper cleanup
+  const soundRef            = useRef(null);
+
+  // Master notification switch ref (synced with state to avoid startup race)
+  const notifsEnabledRef    = useRef(true);
+
+  // Timer refs for cleanup
+  const notifPromptTimerRef = useRef(null);
+  const notifInitTimerRef   = useRef(null);
+  const prayerNotifTimerRef = useRef(null);
+  const locationMsgTimerRef = useRef(null);
+  const monthlyRequestIdRef = useRef(0);
+
   const rotation    = useSharedValue(0);
   const pulseScale  = useSharedValue(1);
   const glowOpacity = useSharedValue(0);
@@ -359,8 +376,14 @@ export default function PrayerScreen() {
   // Auto-dismiss location update banner after 5 seconds
   useEffect(() => {
     if (locationUpdateMsg) {
-      const timer = setTimeout(() => setLocationUpdateMsg(null), 5000);
-      return () => clearTimeout(timer);
+      if (locationMsgTimerRef.current) clearTimeout(locationMsgTimerRef.current);
+      locationMsgTimerRef.current = setTimeout(() => setLocationUpdateMsg(null), 5000);
+      return () => {
+        if (locationMsgTimerRef.current) {
+          clearTimeout(locationMsgTimerRef.current);
+          locationMsgTimerRef.current = null;
+        }
+      };
     }
   }, [locationUpdateMsg]);
 
@@ -439,8 +462,23 @@ export default function PrayerScreen() {
   );
 
   useEffect(() => {
-    loadSavedSettings();
-    loadPrayerData();
+    async function initialize() {
+      await loadSavedSettings();
+      await loadPrayerData();
+
+      const choice = await getPrayerNotifChoice();
+      if (!choice) {
+        notifPromptTimerRef.current = setTimeout(() => setShowNotifPrompt(true), 1000);
+      } else if ((choice === 'enabled' || choice === 'silent') && notifsEnabledRef.current) {
+        // Delay notification init so it doesn't block render
+        notifInitTimerRef.current = setTimeout(() => {
+          if (notifsEnabledRef.current) {
+            initPrayerNotifications(choice === 'enabled');
+          }
+        }, 2000);
+      }
+    }
+    initialize();
     
     const unsubscribe = NetInfo.addEventListener((state) => {
       setIsOffline(!state.isConnected);
@@ -449,24 +487,17 @@ export default function PrayerScreen() {
     return () => {
       stopMagnetometer();
       clearInterval(countdownRef.current);
-      if (sound) sound.unloadAsync();
+      if (soundRef.current) {
+        soundRef.current.unloadAsync().catch(() => {});
+        soundRef.current = null;
+      }
+      if (notifPromptTimerRef.current) clearTimeout(notifPromptTimerRef.current);
+      if (notifInitTimerRef.current) clearTimeout(notifInitTimerRef.current);
+      if (prayerNotifTimerRef.current) clearTimeout(prayerNotifTimerRef.current);
+      if (locationMsgTimerRef.current) clearTimeout(locationMsgTimerRef.current);
+      if (huaweiUndoTimerRef.current) clearTimeout(huaweiUndoTimerRef.current);
       unsubscribe();
     };
-  }, []);
-
-  useEffect(() => {
-    async function checkNotifChoice() {
-      const choice = await getPrayerNotifChoice();
-      if (!choice) {
-        setTimeout(() => setShowNotifPrompt(true), 1000);
-      } else if (choice === 'enabled' || choice === 'silent') {
-        // Delay notification init so it doesn't block render
-        setTimeout(() => {
-          initPrayerNotifications(choice === 'enabled');
-        }, 2000);
-      }
-    }
-    checkNotifChoice();
   }, []);
 
   useEffect(() => {
@@ -497,7 +528,11 @@ export default function PrayerScreen() {
       if (saved) setNotifications(JSON.parse(saved));
       if (savedAdhan !== null) setAdhanStyle(parseInt(savedAdhan));
       if (savedAdhanEnabled !== null) setAdhanEnabled(savedAdhanEnabled === 'true');
-      if (savedNotifsEnabled !== null) setNotifsEnabled(savedNotifsEnabled === 'true');
+      if (savedNotifsEnabled !== null) {
+        const parsed = savedNotifsEnabled === 'true';
+        setNotifsEnabled(parsed);
+        notifsEnabledRef.current = parsed;
+      }
       if (savedHijriAdj !== null) setHijriAdjustment(parseInt(savedHijriAdj));
     } catch (e) {}
   }
@@ -516,6 +551,11 @@ export default function PrayerScreen() {
 
   // ── Core load: Manual city > Saved coordinates (no GPS) > Fresh GPS (first launch only) ──
   async function loadPrayerData() {
+    const requestId = ++prayerRequestIdRef.current;
+    if (prayerNotifTimerRef.current) {
+      clearTimeout(prayerNotifTimerRef.current);
+      prayerNotifTimerRef.current = null;
+    }
     let hadCache = false;
     try {
       setError(null);
@@ -527,11 +567,13 @@ export default function PrayerScreen() {
       // 1) Manual city mode — never needs GPS
       if (savedMode === 'manual' && savedCity) {
         const city = JSON.parse(savedCity);
+        if (requestId !== prayerRequestIdRef.current) return;
         setManualCity(city);
         setLocationMode('manual');
         const cached = await loadPrayerCache();
         if (cached) {
           hadCache = true;
+          if (requestId !== prayerRequestIdRef.current) return;
           setPrayerData(cached.data);
           setNextPrayer(getNextPrayer(cached.data.timings));
           setCoords(cached.coords);
@@ -541,13 +583,20 @@ export default function PrayerScreen() {
           setLoading(true);
         }
         const data = await getPrayerTimes(city.latitude, city.longitude);
+        if (requestId !== prayerRequestIdRef.current) return;
         setPrayerData(data);
         setNextPrayer(getNextPrayer(data.timings));
         setCoords({ latitude: city.latitude, longitude: city.longitude });
         setQiblaAngle(calculateQibla(city.latitude, city.longitude));
         await savePrayerCache(data, { latitude: city.latitude, longitude: city.longitude });
-        setTimeout(() => {
-          schedulePrayerNotifications(data.timings, adhanEnabled);
+        if (prayerNotifTimerRef.current) clearTimeout(prayerNotifTimerRef.current);
+        prayerNotifTimerRef.current = setTimeout(() => {
+          if (
+            requestId === prayerRequestIdRef.current &&
+            notifsEnabledRef.current
+          ) {
+            schedulePrayerNotifications(data.timings, adhanEnabled);
+          }
         }, 100);
         setError(null);
         setLocationUpdateMsg({ type: 'success', text: `✅ Location set to ${city.shortName}` });
@@ -562,14 +611,16 @@ export default function PrayerScreen() {
       // 2) GPS mode, but we already have saved coordinates — no GPS needed
       const savedCoords = await loadSavedCoordinates();
       if (savedCoords) {
+        if (requestId !== prayerRequestIdRef.current) return;
         setLocationMode('gps');
         setCoords(savedCoords);
         setQiblaAngle(calculateQibla(savedCoords.latitude, savedCoords.longitude));
         const savedName = await AsyncStorage.getItem('savedLocationName');
-        if (savedName) setGpsCityName(savedName);
+        if (savedName && requestId === prayerRequestIdRef.current) setGpsCityName(savedName);
         const cached = await loadPrayerCache();
         if (cached) {
           hadCache = true;
+          if (requestId !== prayerRequestIdRef.current) return;
           setPrayerData(cached.data);
           setNextPrayer(getNextPrayer(cached.data.timings));
           setLoading(false);
@@ -577,11 +628,18 @@ export default function PrayerScreen() {
           setLoading(true);
         }
         const data = await getPrayerTimes(savedCoords.latitude, savedCoords.longitude);
+        if (requestId !== prayerRequestIdRef.current) return;
         setPrayerData(data);
         setNextPrayer(getNextPrayer(data.timings));
         await savePrayerCache(data, savedCoords);
-        setTimeout(() => {
-          schedulePrayerNotifications(data.timings, adhanEnabled);
+        if (prayerNotifTimerRef.current) clearTimeout(prayerNotifTimerRef.current);
+        prayerNotifTimerRef.current = setTimeout(() => {
+          if (
+            requestId === prayerRequestIdRef.current &&
+            notifsEnabledRef.current
+          ) {
+            schedulePrayerNotifications(data.timings, adhanEnabled);
+          }
         }, 100);
 
         try {
@@ -596,28 +654,36 @@ export default function PrayerScreen() {
       setLocationMode('gps');
       setLoading(true);
       const location = await getCoordinates();
+      if (requestId !== prayerRequestIdRef.current) return;
       setCoords(location);
       setQiblaAngle(calculateQibla(location.latitude, location.longitude));
       await saveCoordinatesPermanently(location);
 
       // Run reverse geocoding and prayer times fetch in parallel
+      let resolvedName = null;
       const [data] = await Promise.all([
         getPrayerTimes(location.latitude, location.longitude),
         reverseGeocode(location.latitude, location.longitude)
-          .then(async (name) => {
-            if (name) {
-              await AsyncStorage.setItem('savedLocationName', name);
-              setGpsCityName(name);
-            }
-          })
+          .then((name) => { resolvedName = name; })
           .catch(() => {}),
       ]);
+      if (requestId !== prayerRequestIdRef.current) return;
+      if (resolvedName) {
+        await AsyncStorage.setItem('savedLocationName', resolvedName);
+        setGpsCityName(resolvedName);
+      }
 
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
       await savePrayerCache(data, location);
-      setTimeout(() => {
-        schedulePrayerNotifications(data.timings, adhanEnabled);
+      if (prayerNotifTimerRef.current) clearTimeout(prayerNotifTimerRef.current);
+      prayerNotifTimerRef.current = setTimeout(() => {
+        if (
+          requestId === prayerRequestIdRef.current &&
+          notifsEnabledRef.current
+        ) {
+          schedulePrayerNotifications(data.timings, adhanEnabled);
+        }
       }, 100);
       await AsyncStorage.setItem('locationMode', 'gps');
 
@@ -627,50 +693,104 @@ export default function PrayerScreen() {
         await saveMonthlyCache(monthly, location, now.getMonth() + 1, now.getFullYear());
       } catch (e) {}
     } catch (e) {
+      if (requestId !== prayerRequestIdRef.current) return;
       const msg = (e.message || e.toString() || '').toLowerCase();
       if (msg.includes('permission_permanently_denied') || msg.includes('permission_denied')) {
         setShowLocationChoice(true);
       } else if (msg.includes('network') || msg.includes('fetch')) {
-        if (!hadCache) setError('OFFLINE_NO_CACHE');
+        if (!hadCache && !(await tryLoadFromMonthlyCache())) setError('OFFLINE_NO_CACHE');
       } else {
         if (!hadCache) setError(e.message);
       }
     } finally {
-      setLoading(false);
+      if (requestId === prayerRequestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }
+
+  // ── Offline fallback: today's row from the saved monthly timetable ─────────
+  // Used when the fresh API fetch fails and the short daily cache is gone —
+  // the monthly cache is kept exactly for this case.
+  async function tryLoadFromMonthlyCache() {
+    try {
+      const monthlyCache = await loadMonthlyCache();
+      if (!monthlyCache) return false;
+      const now = new Date();
+      if (monthlyCache.month !== now.getMonth() + 1 || monthlyCache.year !== now.getFullYear()) {
+        return false;
+      }
+      const timings = getTodayTimingsFromMonthly(monthlyCache.monthlyData);
+      if (!timings) return false;
+      // Monthly timings may carry a " (TZ)" suffix — strip it before display
+      const cleanTimings = {};
+      for (const key of Object.keys(timings)) {
+        cleanTimings[key] = timings[key].split(' ')[0];
+      }
+      const dayNum = String(now.getDate()).padStart(2, '0');
+      const entry = monthlyCache.monthlyData.find(d => d.date.gregorian.day === dayNum);
+      if (!entry) return false;
+      setPrayerData({ ...entry, timings: cleanTimings });
+      setNextPrayer(getNextPrayer(cleanTimings));
+      if (monthlyCache.coords) {
+        setCoords(monthlyCache.coords);
+        setQiblaAngle(calculateQibla(monthlyCache.coords.latitude, monthlyCache.coords.longitude));
+      }
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 
   // ── Manual "Update My Location" — only time GPS is requested again ─────────
   async function updateLocationNow() {
+    const requestId = ++prayerRequestIdRef.current;
+    if (prayerNotifTimerRef.current) {
+      clearTimeout(prayerNotifTimerRef.current);
+      prayerNotifTimerRef.current = null;
+    }
     setShowChangeLocationModal(false);
     setShowCitySearch(false);
     setUpdatingLocation(true);
     setLocationUpdateMsg(null);
     try {
       const location = await getCoordinates();
+      if (requestId !== prayerRequestIdRef.current) return;
       await saveCoordinatesPermanently(location);
       try {
         const name = await reverseGeocode(location.latitude, location.longitude);
         if (name) {
           await AsyncStorage.setItem('savedLocationName', name);
-          setGpsCityName(name);
+          if (requestId === prayerRequestIdRef.current) setGpsCityName(name);
         } else {
           await AsyncStorage.removeItem('savedLocationName');
-          setGpsCityName(null);
+          if (requestId === prayerRequestIdRef.current) setGpsCityName(null);
         }
       } catch (e) {}
+      if (requestId !== prayerRequestIdRef.current) return;
       await AsyncStorage.setItem('locationMode', 'gps');
       await AsyncStorage.removeItem('manualCity');
+      if (requestId !== prayerRequestIdRef.current) return;
       setManualCity(null);
       setLocationMode('gps');
       setCoords(location);
       setQiblaAngle(calculateQibla(location.latitude, location.longitude));
+      setMonthlyData(null);
+      setShowMonthly(false);
+      ++monthlyRequestIdRef.current;
       const data = await getPrayerTimes(location.latitude, location.longitude);
+      if (requestId !== prayerRequestIdRef.current) return;
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
       await savePrayerCache(data, location);
-      setTimeout(() => {
-        schedulePrayerNotifications(data.timings, adhanEnabled);
+      if (prayerNotifTimerRef.current) clearTimeout(prayerNotifTimerRef.current);
+      prayerNotifTimerRef.current = setTimeout(() => {
+        if (
+          requestId === prayerRequestIdRef.current &&
+          notifsEnabledRef.current
+        ) {
+          schedulePrayerNotifications(data.timings, adhanEnabled);
+        }
       }, 100);
       setError(null);
       setLocationUpdateMsg({
@@ -678,6 +798,7 @@ export default function PrayerScreen() {
         text: '✅ Location updated! You can turn off GPS now — Bushrann will remember this location.',
       });
     } catch (e) {
+      if (requestId !== prayerRequestIdRef.current) return;
       if (e.message === 'PERMISSION_PERMANENTLY_DENIED') {
         setLocationUpdateMsg({
           type: 'error',
@@ -697,7 +818,9 @@ export default function PrayerScreen() {
         setLocationUpdateMsg({ type: 'error', text: 'Something went wrong. Please try again.' });
       }
     } finally {
-      setUpdatingLocation(false);
+      if (requestId === prayerRequestIdRef.current) {
+        setUpdatingLocation(false);
+      }
     }
   }
 
@@ -709,18 +832,19 @@ export default function PrayerScreen() {
     const allDone = updated.launchManager && updated.exactAlarm && updated.batteryOpt;
     if (allDone) {
       setHuaweiUndoBanner(true);
+      if (huaweiUndoTimerRef.current) clearTimeout(huaweiUndoTimerRef.current);
       huaweiUndoTimerRef.current = setTimeout(() => {
         setHuaweiUndoBanner(false);
         setHuaweiTipExpanded(false);
       }, 5000);
     } else {
-      clearTimeout(huaweiUndoTimerRef.current);
+      if (huaweiUndoTimerRef.current) clearTimeout(huaweiUndoTimerRef.current);
       setHuaweiUndoBanner(false);
     }
   }, [huaweiSteps]);
 
   async function undoHuaweiConfirm() {
-    clearTimeout(huaweiUndoTimerRef.current);
+    if (huaweiUndoTimerRef.current) clearTimeout(huaweiUndoTimerRef.current);
     setHuaweiUndoBanner(false);
     setHuaweiTipExpanded(true);
   }
@@ -748,6 +872,11 @@ export default function PrayerScreen() {
   }, []);
 
   async function handleCitySelect(city) {
+    const requestId = ++prayerRequestIdRef.current;
+    if (prayerNotifTimerRef.current) {
+      clearTimeout(prayerNotifTimerRef.current);
+      prayerNotifTimerRef.current = null;
+    }
     setManualCity(city);
     setLocationMode('manual');
     setShowCitySearch(false);
@@ -757,44 +886,75 @@ export default function PrayerScreen() {
     setCityResults([]);
     await AsyncStorage.setItem('locationMode', 'manual');
     await AsyncStorage.setItem('manualCity', JSON.stringify(city));
+    if (requestId !== prayerRequestIdRef.current) return;
     setLoading(true);
     try {
       const data = await getPrayerTimes(city.latitude, city.longitude);
+      if (requestId !== prayerRequestIdRef.current) return;
       setPrayerData(data);
       setNextPrayer(getNextPrayer(data.timings));
       setCoords({ latitude: city.latitude, longitude: city.longitude });
       setQiblaAngle(calculateQibla(city.latitude, city.longitude));
       await savePrayerCache(data, { latitude: city.latitude, longitude: city.longitude });
-      setTimeout(() => {
-        schedulePrayerNotifications(data.timings, adhanEnabled);
+      setMonthlyData(null);
+      setShowMonthly(false);
+      ++monthlyRequestIdRef.current;
+      if (prayerNotifTimerRef.current) clearTimeout(prayerNotifTimerRef.current);
+      prayerNotifTimerRef.current = setTimeout(() => {
+        if (
+          requestId === prayerRequestIdRef.current &&
+          notifsEnabledRef.current
+        ) {
+          schedulePrayerNotifications(data.timings, adhanEnabled);
+        }
       }, 100);
       setError(null);
       setLocationUpdateMsg({ type: 'success', text: `✅ Location set to ${city.shortName}` });
     } catch (e) {
-      setError(e.message);
+      if (requestId === prayerRequestIdRef.current) setError(e.message);
     } finally {
-      setLoading(false);
+      if (requestId === prayerRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }
 
   async function handleCitySearch(text) {
+    const searchId = ++citySearchIdRef.current;
     setCitySearch(text);
-    if (text.length < 3) { setCityResults([]); return; }
+    if (text.length < 3) {
+      setCityResults([]);
+      setCitySearchLoading(false);
+      return;
+    }
     setCitySearchLoading(true);
     try {
       const results = await searchCity(text);
+      if (searchId !== citySearchIdRef.current) return;
       setCityResults(results);
     } catch (e) {
-      setCityResults([]);
+      if (searchId === citySearchIdRef.current) setCityResults([]);
     } finally {
-      setCitySearchLoading(false);
+      if (searchId === citySearchIdRef.current) setCitySearchLoading(false);
     }
   }
 
   async function loadMonthly() {
-    if (monthlyData) { setShowMonthly(true); return; }
+    if (monthlyData) {
+      setShowMonthly(true);
+      return;
+    }
+
+    const requestId = ++monthlyRequestIdRef.current;
+
     try {
-      const data = await getMonthlyTimetable(coords.latitude, coords.longitude);
+      const data = await getMonthlyTimetable(
+        coords.latitude,
+        coords.longitude
+      );
+
+      if (requestId !== monthlyRequestIdRef.current) return;
+
       setMonthlyData(data);
       setShowMonthly(true);
     } catch (e) {}
@@ -880,22 +1040,40 @@ export default function PrayerScreen() {
     setNotifications(updated);
     await AsyncStorage.setItem('prayerNotifications', JSON.stringify(updated));
 
-    if (prayerData?.timings) {
+    if (notifsEnabledRef.current && prayerData?.timings) {
       await schedulePrayerNotifications(prayerData.timings, adhanEnabled);
     }
   }
 
   async function playAdhan() {
     try {
-      if (playingAdhan) { await sound?.stopAsync(); setPlayingAdhan(false); return; }
-      if (sound) await sound.unloadAsync();
+      if (playingAdhan) {
+        if (soundRef.current) {
+          await soundRef.current.stopAsync();
+        }
+        setPlayingAdhan(false);
+        return;
+      }
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
       const { sound: newSound } = await Audio.Sound.createAsync(
         ADHAN_STYLES[adhanStyle].url, { shouldPlay: true }
       );
+      soundRef.current = newSound;
       setSound(newSound);
       setPlayingAdhan(true);
-      newSound.setOnPlaybackStatusUpdate((s) => { if (s.didJustFinish) setPlayingAdhan(false); });
+      newSound.setOnPlaybackStatusUpdate((s) => {
+        if (s.didJustFinish) {
+          setPlayingAdhan(false);
+          if (soundRef.current === newSound) {
+            newSound.unloadAsync().catch(() => {});
+            soundRef.current = null;
+          }
+        }
+      });
     } catch (e) { setPlayingAdhan(false); }
   }
 
@@ -911,13 +1089,52 @@ export default function PrayerScreen() {
   }
 
   async function selectAdhan(index) {
+    const wasPlaying = playingAdhan;
+    const previousStyle = adhanStyle;
+
     setAdhanStyle(index);
     await AsyncStorage.setItem('adhanStyle', String(index));
+
+    if (!wasPlaying) return;
+    if (index === previousStyle) return;
+
+    try {
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+
+      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        ADHAN_STYLES[index].url,
+        { shouldPlay: true }
+      );
+
+      soundRef.current = newSound;
+      setSound(newSound);
+      setPlayingAdhan(true);
+
+      newSound.setOnPlaybackStatusUpdate((s) => {
+        if (s.didJustFinish) {
+          setPlayingAdhan(false);
+          if (soundRef.current === newSound) {
+            newSound.unloadAsync().catch(() => {});
+            soundRef.current = null;
+          }
+        }
+      });
+    } catch (e) {
+      setPlayingAdhan(false);
+    }
   }
 
   async function toggleAdhan(val) {
     setAdhanEnabled(val);
     await AsyncStorage.setItem('adhanEnabled', String(val));
+    if (notifsEnabledRef.current && prayerData?.timings) {
+      await schedulePrayerNotifications(prayerData.timings, val);
+    }
   }
 
   if (loading) {
@@ -1350,9 +1567,14 @@ export default function PrayerScreen() {
               value={notifsEnabled}
               onValueChange={async (val) => {
                 setNotifsEnabled(val);
+                notifsEnabledRef.current = val;
                 await AsyncStorage.setItem('notifsEnabled', String(val));
                 if (val) { await initPrayerNotifications(adhanEnabled); }
                 else {
+                  if (notifInitTimerRef.current) {
+                    clearTimeout(notifInitTimerRef.current);
+                    notifInitTimerRef.current = null;
+                  }
                   await cancelPrayerNotifications();
                   await Notifications.dismissNotificationAsync('prayer-persistent');
                 }
@@ -1433,7 +1655,7 @@ export default function PrayerScreen() {
               flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>✅ All 4 steps complete</Text>
+            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>✅ All 3 steps complete</Text>
             <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>↩ Tap to undo (5s)</Text>
           </TouchableOpacity>
         )}

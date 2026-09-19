@@ -19,6 +19,7 @@ import ModernDialog from './ModernDialog';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { useFocusEffect } from '@react-navigation/native';
 import Video from 'react-native-video';
+import { deleteVideoOnServer } from '../utils/apiClient';
 
 const VideoPlayer = React.memo(({ videoUrl, style }) => {
   return (
@@ -52,6 +53,10 @@ export default function AdminScreen({ navigation }) {
   const touchStartX = useRef(0);
   const tabScrollRef = useRef(null);
   const tabWidths = useRef({});
+  // FIX (async lifecycle): guards state updates that resolve after unmount
+  const isMountedRef = useRef(true);
+  // FIX (refreshing race): only the most recent manual pull-to-refresh is allowed to clear `refreshing`
+  const refreshTokenRef = useRef(0);
   const [dialog, setDialog] = useState({
     visible: false, 
     title: '', 
@@ -61,27 +66,80 @@ export default function AdminScreen({ navigation }) {
   });
 
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // FIX (refreshing race): clears `refreshing` only if this call owns the latest refresh token.
+  // Background/realtime-triggered loads pass no token, so they never touch the spinner.
+  const finishRefresh = useCallback((refreshToken) => {
+    if (!refreshToken) return;
+    if (!isMountedRef.current) return;
+    if (refreshToken !== refreshTokenRef.current) return;
+    setRefreshing(false);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const currentUserId = authUser?.id;
+
+    // FIX (admin auth lifecycle): clear any previous user's admin privileges immediately
+    // so a stale isAdmin/isSuperAdmin value is never shown while the new user is being checked.
+    setIsAdmin(false);
+    setIsSuperAdmin(false);
+
     const checkAdmin = async () => {
-      if (!authUser?.id) return;
-      
-      const { data: adminData } = await supabase
+      if (!currentUserId) {
+        if (!cancelled) {
+          setIsAdmin(false);
+          setIsSuperAdmin(false);
+          setLoading(false);
+        }
+        return;
+      }
+
+      const { data: adminData, error } = await supabase
         .from('admins')
         .select('id, role')
-        .eq('user_id', authUser.id)
+        .eq('user_id', currentUserId)
         .maybeSingle();
-      
+
+      if (cancelled || authUser?.id !== currentUserId) return;
+
+      if (error) {
+        console.error('Error checking admin status:', error);
+        if (!cancelled) {
+          setDialog({ visible: true, title: 'Error', message: 'Failed to verify admin status.', type: 'error', buttons: [{ text: 'OK', onPress: () => navigation.goBack() }] });
+          setLoading(false);
+        }
+        return;
+      }
+
       if (!adminData) {
-        setDialog({ visible: true, title: 'Access Denied', message: 'You do not have admin privileges.', type: 'error', buttons: [{ text: 'OK', onPress: () => navigation.goBack() }] });
+        if (!cancelled) {
+          setDialog({ visible: true, title: 'Access Denied', message: 'You do not have admin privileges.', type: 'error', buttons: [{ text: 'OK', onPress: () => navigation.goBack() }] });
+          setIsAdmin(false);
+          setIsSuperAdmin(false);
+          setLoading(false);
+        }
       } else {
-        setIsAdmin(true);
-        setIsSuperAdmin(adminData.role === 'super_admin');
+        if (!cancelled) {
+          setIsAdmin(true);
+          setIsSuperAdmin(adminData.role === 'super_admin');
+        }
       }
     };
     
     checkAdmin();
-  }, [authUser]);
 
-  const loadScholarApplications = useCallback(async () => {
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id]);
+
+  const loadScholarApplications = useCallback(async (refreshToken) => {
     try {
       const { data, error } = await supabase
         .from('scholar_applications')
@@ -90,20 +148,28 @@ export default function AdminScreen({ navigation }) {
         .order('submitted_at', { ascending: false });
 
       if (error) throw error;
+      if (!isMountedRef.current) return;
       setScholarApps(data || []);
     } catch (error) {
       console.error('Error loading scholar applications:', error);
+      if (!isMountedRef.current) return;
       setDialog({ visible: true, title: 'Error', message: 'Failed to load scholar applications', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+    } finally {
+      finishRefresh(refreshToken);
     }
-  }, []);
+  }, [finishRefresh]);
 
-  const loadAppeals = useCallback(async () => {
+  const loadAppeals = useCallback(async (refreshToken) => {
+    if (!authUser?.id) return;
+
     try {
-      const { data: adminData } = await supabase
+      const { data: adminData, error: adminError } = await supabase
         .from('admins')
         .select('id')
         .eq('user_id', authUser.id)
         .single();
+
+      if (adminError) throw adminError;
 
       const { data, error } = await supabase
         .from('appeals')
@@ -113,16 +179,17 @@ export default function AdminScreen({ navigation }) {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+      if (!isMountedRef.current) return;
       setAppeals(data || []);
     } catch (error) {
+      if (!isMountedRef.current) return;
       setDialog({ visible: true, title: 'Error', message: 'Failed to load appeals', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      finishRefresh(refreshToken);
     }
-  }, [authUser]);
+  }, [authUser, finishRefresh]);
 
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(async (refreshToken) => {
     try {
       const { data, error } = await supabase
         .from('user_messages')
@@ -130,14 +197,15 @@ export default function AdminScreen({ navigation }) {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+      if (!isMountedRef.current) return;
       setMessages(data || []);
     } catch (error) {
+      if (!isMountedRef.current) return;
       setDialog({ visible: true, title: 'Error', message: 'Failed to load messages', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      finishRefresh(refreshToken);
     }
-  }, []);
+  }, [finishRefresh]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -147,13 +215,15 @@ export default function AdminScreen({ navigation }) {
       const { count: appealsCount } = await supabase.from('appeals').select('*', { count: 'exact', head: true });
       const totalReviewed = (approvedCount || 0) + (rejectedCount || 0);
       const approvalRate = totalReviewed > 0 ? Math.round((approvedCount / totalReviewed) * 100) : 0;
+      if (!isMountedRef.current) return;
       setStats({ totalReviewed, approved: approvedCount || 0, rejected: rejectedCount || 0, pending: pendingCount || 0, appeals: appealsCount || 0, approvalRate });
     } catch (error) {
+      if (!isMountedRef.current) return;
       setDialog({ visible: true, title: 'Error', message: 'Failed to load stats', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }, []);
 
-  const loadPendingVideos = useCallback(async () => {
+  const loadPendingVideos = useCallback(async (refreshToken) => {
     try {
       const { data, error } = await supabase
         .from('videos')
@@ -162,32 +232,34 @@ export default function AdminScreen({ navigation }) {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+      if (!isMountedRef.current) return;
       setPendingVideos(data || []);
     } catch (error) {
+      if (!isMountedRef.current) return;
       setDialog({ visible: true, title: 'Error', message: 'Failed to load pending videos', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      finishRefresh(refreshToken);
     }
-  }, []);
+  }, [finishRefresh]);
 
-  const loadReports = useCallback(async () => {
+  const loadReports = useCallback(async (refreshToken) => {
     try {
       const { data, error } = await supabase
         .from('reports')
-        .select('*')
+        .select('*, reporter:profiles!reporter_id(username), reported_user:profiles!reported_user_id(username, rejection_count), video:videos!video_id(thumbnail_url, caption)')
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
+      if (!isMountedRef.current) return;
       setReports(data || []);
     } catch (error) {
+      if (!isMountedRef.current) return;
       setDialog({ visible: true, title: 'Error', message: 'Failed to load reports', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      finishRefresh(refreshToken);
     }
-  }, []);
+  }, [finishRefresh]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -199,6 +271,7 @@ export default function AdminScreen({ navigation }) {
     if (appeals.length === 0) promises.push(loadAppeals());
     promises.push(loadStats());
     Promise.all(promises).finally(() => {
+      if (!isMountedRef.current) return;
       setLoading(false);
     });
   }, [isAdmin]);
@@ -206,29 +279,38 @@ export default function AdminScreen({ navigation }) {
   useEffect(() => {
     if (!isAdmin) return;
 
+    // FIX (realtime refresh storms): separate debounce timer per table so an event on one
+    // table can no longer cancel/coalesce a pending load for a different table.
+    const debounceTimers = { videos: null, reports: null, scholars: null, messages: null, appeals: null };
+    const schedule = (key, fn) => {
+      if (debounceTimers[key]) clearTimeout(debounceTimers[key]);
+      debounceTimers[key] = setTimeout(fn, 500);
+    };
+
     const channel = supabase
       .channel('admin-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, () => {
-        loadPendingVideos();
+        schedule('videos', () => loadPendingVideos());
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => {
-        loadReports();
+        schedule('reports', () => loadReports());
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'scholar_applications' }, () => {
-        loadScholarApplications();
+        schedule('scholars', () => loadScholarApplications());
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'user_messages' }, () => {
-        loadMessages();
+        schedule('messages', () => loadMessages());
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'appeals' }, () => {
-        loadAppeals();
+        schedule('appeals', () => loadAppeals());
       })
       .subscribe();
 
     return () => {
+      Object.values(debounceTimers).forEach(t => t && clearTimeout(t));
       supabase.removeChannel(channel);
     };
-  }, [isAdmin]);
+  }, [isAdmin, authUser?.id]);
 
   useEffect(() => {
     setPlayingVideoId(null);
@@ -240,7 +322,7 @@ export default function AdminScreen({ navigation }) {
     tabScrollRef.current?.scrollTo({ x: Math.max(0, offset - 16), animated: true });
   }, [activeTab]);
 
-  const handleDismiss = async (reportId) => {
+  const handleDismiss = useCallback(async (reportId) => {
     try {
       const { error } = await supabase
         .from('reports')
@@ -252,14 +334,16 @@ export default function AdminScreen({ navigation }) {
         return;
       }
 
+      if (!isMountedRef.current) return;
       setReports(prev => prev.filter(r => r.id !== reportId));
       setDialog({ visible: true, title: 'Success', message: 'Report dismissed', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } catch (error) {
+      if (!isMountedRef.current) return;
       setDialog({ visible: true, title: 'Error', message: 'Failed to dismiss report', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
-  };
+  }, []);
 
-  const handleBanUser = async (userId, reportId) => {
+  const handleBanUser = useCallback(async (userId, reportId) => {
     setDialog({
       visible: true,
       title: 'Ban User',
@@ -273,30 +357,31 @@ export default function AdminScreen({ navigation }) {
           onPress: async () => {
             setDialog(d => ({ ...d, visible: false }));
             try {
-              await supabase
-                .from('profiles')
-                .update({ is_banned: true })
-                .eq('id', userId);
+              // Already atomic: server-side RPC handles ban + related video rejection in one transaction.
+              const { error } = await supabase.rpc('ban_user', {
+                p_user_id: userId,
+                p_report_id: reportId,
+              });
 
-              await supabase
-                .from('videos')
-                .update({ status: 'rejected', rejection_reason: 'User banned' })
-                .eq('user_id', userId)
-                .eq('status', 'pending');
-              
-              await supabase.from('reports').delete().eq('id', reportId);
+              if (error) {
+                setDialog({ visible: true, title: 'Error', message: 'Failed to ban user: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                return;
+              }
+
+              if (!isMountedRef.current) return;
               setReports(prev => prev.filter(r => r.id !== reportId));
               setDialog({ visible: true, title: 'Success', message: 'User banned and pending videos rejected.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             } catch (error) {
+              if (!isMountedRef.current) return;
               setDialog({ visible: true, title: 'Error', message: 'Failed to ban user', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
     });
-  };
+  }, []);
 
-  const handleDeleteVideo = async (videoId, reportId) => {
+  const handleDeleteVideo = useCallback(async (videoId, reportId) => {
     setDialog({
       visible: true,
       title: 'Delete Video',
@@ -310,20 +395,29 @@ export default function AdminScreen({ navigation }) {
           onPress: async () => {
             setDialog(d => ({ ...d, visible: false }));
             try {
-              await supabase.from('videos').delete().eq('id', videoId);
-              await supabase.from('reports').delete().eq('id', reportId);
+              // Server deletes the video row; reports cascade via ON DELETE
+              // CASCADE, so no separate report deletion is needed.
+              const { success, error: deleteError } = await deleteVideoOnServer(videoId);
+
+              if (!success) {
+                setDialog({ visible: true, title: 'Error', message: 'Failed to delete video: ' + deleteError, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                return;
+              }
+
+              if (!isMountedRef.current) return;
               setReports(prev => prev.filter(r => r.id !== reportId));
               setDialog({ visible: true, title: 'Success', message: 'Video deleted', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             } catch (error) {
+              if (!isMountedRef.current) return;
               setDialog({ visible: true, title: 'Error', message: 'Failed to delete video', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
     });
-  };
+  }, []);
 
-  const handleApproveScholar = async (application) => {
+  const handleApproveScholar = useCallback(async (application) => {
     setDialog({
       visible: true,
       title: 'Approve Scholar',
@@ -336,28 +430,29 @@ export default function AdminScreen({ navigation }) {
           onPress: async () => {
             setDialog(d => ({ ...d, visible: false }));
             try {
-              await supabase
-                .from('scholar_applications')
-                .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-                .eq('id', application.id);
-              
-              await supabase
-                .from('profiles')
-                .update({ is_scholar: true })
-                .eq('id', application.user_id);
-              
+              const { error } = await supabase.rpc('approve_scholar', {
+                p_application_id: application.id,
+              });
+
+              if (error) {
+                setDialog({ visible: true, title: 'Error', message: 'Failed to approve scholar: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                return;
+              }
+
+              if (!isMountedRef.current) return;
               setScholarApps(prev => prev.filter(app => app.id !== application.id));
               setDialog({ visible: true, title: 'Success', message: 'Scholar approved!', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             } catch (error) {
+              if (!isMountedRef.current) return;
               setDialog({ visible: true, title: 'Error', message: 'Failed to approve scholar', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
     });
-  };
+  }, []);
 
-  const handleRejectScholar = async (application) => {
+  const handleRejectScholar = useCallback(async (application) => {
     setDialog({
       visible: true,
       title: 'Reject Application',
@@ -371,23 +466,30 @@ export default function AdminScreen({ navigation }) {
           onPress: async () => {
             setDialog(d => ({ ...d, visible: false }));
             try {
-              await supabase
+              const { error } = await supabase
                 .from('scholar_applications')
                 .update({ status: 'rejected', reviewed_at: new Date().toISOString() })
                 .eq('id', application.id);
-              
+
+              if (error) {
+                setDialog({ visible: true, title: 'Error', message: 'Failed to reject application: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                return;
+              }
+
+              if (!isMountedRef.current) return;
               setScholarApps(prev => prev.filter(app => app.id !== application.id));
               setDialog({ visible: true, title: 'Rejected', message: 'Application rejected', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             } catch (error) {
+              if (!isMountedRef.current) return;
               setDialog({ visible: true, title: 'Error', message: 'Failed to reject application', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
     });
-  };
+  }, []);
 
-  const handleApproveVideo = async (video) => {
+  const handleApproveVideo = useCallback(async (video) => {
     setDialog({
       visible: true,
       title: 'Approve Video',
@@ -400,26 +502,29 @@ export default function AdminScreen({ navigation }) {
           onPress: async () => {
             setDialog(d => ({ ...d, visible: false }));
             try {
-              const { error: approveError } = await supabase
-                .from('videos')
-                .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-                .eq('id', video.id);
+              const { error } = await supabase.rpc('approve_video', {
+                p_video_id: video.id,
+              });
 
-              if (approveError) throw new Error(approveError.message);
+              if (error) {
+                setDialog({ visible: true, title: 'Error', message: 'Failed to approve video: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                return;
+              }
+
+              if (!isMountedRef.current) return;
               setPendingVideos(prev => prev.filter(v => v.id !== video.id));
-              await supabase.from('profiles').update({ rejection_count: 0 }).eq('id', video.user_id);
-              await supabase.from('notifications').insert({ user_id: video.user_id, actor_id: authUser.id, video_id: video.id, type: 'video_approved' });
               setDialog({ visible: true, title: 'Success', message: 'Video approved!', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             } catch (error) {
+              if (!isMountedRef.current) return;
               setDialog({ visible: true, title: 'Error', message: 'Failed to approve video', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
     });
-  };
+  }, [authUser?.id]);
 
-  const handleRejectVideo = async (video) => {
+  const handleRejectVideo = useCallback(async (video) => {
     setDialog({
       visible: true,
       title: 'Reject Video',
@@ -443,22 +548,47 @@ export default function AdminScreen({ navigation }) {
                   text: reason,
                   onPress: async () => {
                     setDialog(d => ({ ...d, visible: false }));
-                    await supabase
+                    const { error: rejectError } = await supabase
                       .from('videos')
                       .update({ status: 'rejected', reviewed_at: new Date().toISOString(), rejection_reason: reason })
                       .eq('id', video.id);
+
+                    if (rejectError) {
+                      setDialog({ visible: true, title: 'Error', message: 'Failed to reject video: ' + rejectError.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                      return;
+                    }
+
+                    if (!isMountedRef.current) return;
                     setPendingVideos(prev => prev.filter(v => v.id !== video.id));
-                    const { data: profileData } = await supabase.from('profiles').select('rejection_count').eq('id', video.user_id).single();
-                    const newCount = (profileData?.rejection_count || 0) + 1;
-                    await supabase.from('profiles').update({ rejection_count: newCount }).eq('id', video.user_id);
-                    await supabase.from('notifications').insert({ user_id: video.user_id, actor_id: authUser.id, video_id: video.id, type: 'video_rejected' });
+
+                    // Already atomic: increment_rejection_count is a server-side RPC (no read-then-write race).
+                    const { data: newCount, error: countError } = await supabase.rpc('increment_rejection_count', {
+                      p_user_id: video.user_id,
+                    });
+
+                    if (countError) {
+                      setDialog({ visible: true, title: 'Error', message: 'Failed to update rejection count: ' + countError.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                      return;
+                    }
+
+                    const { error: notifError } = await supabase.from('notifications').insert({ user_id: video.user_id, actor_id: authUser.id, video_id: video.id, type: 'video_rejected' });
+                    if (notifError) console.error('Failed to send video_rejected notification:', notifError);
+
+                    if (!isMountedRef.current) return;
+
                     if (newCount >= 5) {
                       setDialog({ visible: true, title: '⚠️ 5 Rejections Reached', message: `This user has ${newCount} rejections. Their next upload will require admin review. Ban them now?`, type: 'warning', buttons: [
                         { text: 'Not Now', onPress: () => setDialog(d => ({ ...d, visible: false })) },
                         { text: 'Ban User', style: 'destructive', onPress: async () => {
                           setDialog(d => ({ ...d, visible: false }));
-                          await supabase.from('profiles').update({ is_banned: true }).eq('id', video.user_id);
-                          await supabase.from('videos').update({ status: 'rejected', rejection_reason: 'User banned' }).eq('user_id', video.user_id).eq('status', 'pending');
+                          const { error: banError } = await supabase.rpc('ban_user', {
+                            p_user_id: video.user_id,
+                            p_report_id: null,
+                          });
+                          if (banError) {
+                            setDialog({ visible: true, title: 'Error', message: 'Failed to ban user: ' + banError.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                            return;
+                          }
                           setDialog({ visible: true, title: 'User Banned', message: 'User has been banned and all pending videos rejected.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
                         }}
                       ]});
@@ -469,13 +599,14 @@ export default function AdminScreen({ navigation }) {
                 }))
               });
             } catch (error) {
+              if (!isMountedRef.current) return;
               setDialog({ visible: true, title: 'Error', message: 'Failed to reject video', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
             }
           }
         }
       ]
     });
-  };
+  }, [authUser?.id]);
 
   const renderAppeal = useCallback(({ item }) => (
     <View style={styles.reportCard}>
@@ -505,9 +636,25 @@ export default function AdminScreen({ navigation }) {
               { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
               { text: 'Reject', style: 'destructive', onPress: async () => {
                 setDialog(d => ({ ...d, visible: false }));
-                const { data: adminInfo2 } = await supabase.from('admins').select('id').eq('user_id', authUser.id).single();
-                await supabase.from('appeals').update({ status: 'rejected', reviewed_by: adminInfo2?.id }).eq('id', item.id);
-                await supabase.from('notifications').insert({ user_id: item.user_id, actor_id: authUser.id, video_id: item.video_id, type: 'appeal_rejected' });
+                const { data: adminInfo2, error: adminInfoError } = await supabase.from('admins').select('id').eq('user_id', authUser.id).single();
+                if (adminInfoError) {
+                  setDialog({ visible: true, title: 'Error', message: 'Failed to verify admin identity: ' + adminInfoError.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                  return;
+                }
+                if (!adminInfo2?.id) {
+                  setDialog({ visible: true, title: 'Error', message: 'Admin identity not found.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                  return;
+                }
+                const { error: appealError } = await supabase.from('appeals').update({ status: 'rejected', reviewed_by: adminInfo2.id }).eq('id', item.id);
+                if (appealError) {
+                  setDialog({ visible: true, title: 'Error', message: 'Failed to reject appeal: ' + appealError.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                  return;
+                }
+
+                const { error: notifError } = await supabase.from('notifications').insert({ user_id: item.user_id, actor_id: authUser.id, video_id: item.video_id, type: 'appeal_rejected' });
+                if (notifError) console.error('Failed to send appeal_rejected notification:', notifError);
+
+                if (!isMountedRef.current) return;
                 setAppeals(prev => prev.filter(a => a.id !== item.id));
                 setDialog({ visible: true, title: 'Appeal Rejected', message: 'Decision is final.', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
               }}
@@ -523,12 +670,23 @@ export default function AdminScreen({ navigation }) {
               { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
               { text: 'Approve', onPress: async () => {
                 setDialog(d => ({ ...d, visible: false }));
-                await supabase.from('videos').update({ status: 'approved' }).eq('id', item.video_id);
-                const { data: adminInfo } = await supabase.from('admins').select('id').eq('user_id', authUser.id).single();
-                await supabase.from('appeals').update({ status: 'approved', reviewed_by: adminInfo?.id }).eq('id', item.id);
-                await supabase.from('notifications').insert({ user_id: item.user_id, actor_id: authUser.id, video_id: item.video_id, type: 'appeal_approved' });
-                setAppeals(prev => prev.filter(a => a.id !== item.id));
-                setDialog({ visible: true, title: 'Appeal Approved', message: 'Video is now live!', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                try {
+                  const { error } = await supabase.rpc('approve_appeal', {
+                    p_appeal_id: item.id,
+                  });
+
+                  if (error) {
+                    setDialog({ visible: true, title: 'Error', message: 'Failed to approve appeal: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                    return;
+                  }
+
+                  if (!isMountedRef.current) return;
+                  setAppeals(prev => prev.filter(a => a.id !== item.id));
+                  setDialog({ visible: true, title: 'Appeal Approved', message: 'Video is now live!', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                } catch (error) {
+                  if (!isMountedRef.current) return;
+                  setDialog({ visible: true, title: 'Error', message: 'Failed to approve appeal', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                }
               }}
             ]});
           }}
@@ -537,7 +695,7 @@ export default function AdminScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     </View>
-  ), []);
+  ), [authUser]);
 
   const renderMessage = useCallback(({ item }) => (
     <View style={styles.reportCard}>
@@ -577,18 +735,32 @@ export default function AdminScreen({ navigation }) {
                     { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
                     { text: 'Mark Resolved', onPress: async () => {
                       setDialog(d => ({ ...d, visible: false }));
-                      await supabase.from('user_messages').update({ status: 'resolved' }).eq('id', item.id);
+                      const { error } = await supabase.from('user_messages').update({ status: 'resolved' }).eq('id', item.id);
+                      if (error) {
+                        setDialog({ visible: true, title: 'Error', message: 'Failed to mark as resolved: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                        return;
+                      }
+                      if (!isMountedRef.current) return;
                       setMessages(prev => prev.map(m => m.id === item.id ? { ...m, status: 'resolved' } : m));
                     }},
                     { text: 'Send Reply', onPress: async () => {
                       setDialog(d => ({ ...d, visible: false }));
-                      await supabase.from('user_messages').insert({
+                      const { error: replyError } = await supabase.from('user_messages').insert({
                         user_id: item.user_id,
                         subject: 'Re: ' + item.subject,
                         message: `Admin replied to your message. Please check your contact admin screen.`,
                         status: 'resolved',
                       });
-                      await supabase.from('user_messages').update({ status: 'resolved' }).eq('id', item.id);
+
+                      if (replyError) {
+                        setDialog({ visible: true, title: 'Error', message: 'Failed to send reply: ' + replyError.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                        return;
+                      }
+
+                      const { error: statusError } = await supabase.from('user_messages').update({ status: 'resolved' }).eq('id', item.id);
+                      if (statusError) console.error('Reply sent, but failed to mark original message resolved:', statusError);
+
+                      if (!isMountedRef.current) return;
                       setMessages(prev => prev.map(m => m.id === item.id ? { ...m, status: 'resolved' } : m));
                       setDialog({ visible: true, title: 'Reply Sent', message: 'User has been notified.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
                     }}
@@ -611,7 +783,12 @@ export default function AdminScreen({ navigation }) {
                       { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
                       { text: 'Escalate', onPress: async () => {
                         setDialog(d => ({ ...d, visible: false }));
-                        await supabase.from('user_messages').update({ status: 'escalated', escalated_by: authUser.id }).eq('id', item.id);
+                        const { error } = await supabase.from('user_messages').update({ status: 'escalated', escalated_by: authUser.id }).eq('id', item.id);
+                        if (error) {
+                          setDialog({ visible: true, title: 'Error', message: 'Failed to escalate message: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                          return;
+                        }
+                        if (!isMountedRef.current) return;
                         setMessages(prev => prev.map(m => m.id === item.id ? { ...m, status: 'escalated' } : m));
                       }}
                     ]
@@ -631,7 +808,7 @@ export default function AdminScreen({ navigation }) {
         )}
       </View>
     </View>
-  ), []);
+  ), [authUser, isSuperAdmin]);
 
   const renderPendingVideo = useCallback(({ item }) => (
     <Swipeable
@@ -675,7 +852,6 @@ export default function AdminScreen({ navigation }) {
           </Text>
           {playingVideoId === item.id ? (
             <>
-              {console.log('VIDEO DEBUG - ID:', item.id, 'URL:', item.video_url)}
               <VideoPlayer videoUrl={item.video_url} style={styles.thumbnail} />
             </>
           ) : (
@@ -715,9 +891,9 @@ export default function AdminScreen({ navigation }) {
         </View>
       </View>
     </Swipeable>
-  ), [playingVideoId]);
+  ), [playingVideoId, handleApproveVideo, handleRejectVideo]);
 
-  const renderScholarApplication = ({ item }) => (
+  const renderScholarApplication = useCallback(({ item }) => (
     <View style={styles.reportCard}>
       <View style={styles.reportHeader}>
         <View style={styles.userInfo}>
@@ -757,7 +933,7 @@ export default function AdminScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     </View>
-  );
+  ), [handleRejectScholar, handleApproveScholar]);
 
   const renderStats = () => (
     <View style={{ padding: s(8) }}>
@@ -800,9 +976,9 @@ export default function AdminScreen({ navigation }) {
         <Text style={styles.date}>
           {new Date(item.created_at).toLocaleDateString()}
         </Text>
-        {item.uploader?.rejection_count >= 5 && (
+        {item.reported_user?.rejection_count >= 5 && (
           <View style={{ backgroundColor: '#fef2f2', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: '#fecaca' }}>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: '#dc2626' }}>⚠️ {item.uploader.rejection_count} rejections</Text>
+            <Text style={{ fontSize: 11, fontWeight: '800', color: '#dc2626' }}>⚠️ {item.reported_user.rejection_count} rejections</Text>
           </View>
         )}
       </View>
@@ -857,7 +1033,7 @@ export default function AdminScreen({ navigation }) {
         )}
       </View>
     </View>
-  ), []);
+  ), [handleDismiss, handleBanUser, handleDeleteVideo]);
 
   useFocusEffect(
     useCallback(() => {
@@ -967,17 +1143,20 @@ export default function AdminScreen({ navigation }) {
             removeClippedSubviews={true}
             updateCellsBatchingPeriod={10}
             onRefresh={() => {
+              // FIX (refreshing race): stamp this refresh with a token; only the load call
+              // that carries the current token is allowed to clear `refreshing`.
+              const token = ++refreshTokenRef.current;
               setRefreshing(true);
               if (activeTab === 'reports') {
-                loadReports();
+                loadReports(token);
               } else if (activeTab === 'scholars') {
-                loadScholarApplications();
+                loadScholarApplications(token);
               } else if (activeTab === 'messages') {
-                loadMessages();
+                loadMessages(token);
               } else if (activeTab === 'appeals') {
-                loadAppeals();
+                loadAppeals(token);
               } else {
-                loadPendingVideos();
+                loadPendingVideos(token);
               }
             }}
             ListEmptyComponent={

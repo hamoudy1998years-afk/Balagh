@@ -13,13 +13,21 @@ module.exports = function withAndroidSplashIcon(config) {
         path.join(platformRoot, 'app/src/main/res/values-v31/styles.xml'),
       ];
 
+      const searchString = '<item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>';
+      const replaceString = '<item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>';
+
       for (const filePath of filesToPatch) {
         if (fs.existsSync(filePath)) {
           let content = fs.readFileSync(filePath, 'utf8');
-          content = content.replace(
-            '<item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>',
-            '<item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>'
-          );
+
+          if (!content.includes(searchString)) {
+            throw new Error(
+              `withAndroidSplashIcon: expected string not found in ${filePath}. ` +
+              `The file may have changed format (e.g. a new Expo/AGP version) and this plugin needs updating.`
+            );
+          }
+
+          content = content.replace(searchString, replaceString);
           fs.writeFileSync(filePath, content);
         }
       }

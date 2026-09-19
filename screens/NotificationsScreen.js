@@ -14,7 +14,13 @@ import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import NetInfo from '@react-native-community/netinfo';
 
-const NotificationItem = React.memo(function NotificationItem({ item, onDelete, onMarkRead, navigation }) {
+const NotificationItem = React.memo(function NotificationItem({
+  item,
+  onDelete,
+  onMarkRead,
+  navigation,
+  setDialog,
+}) {
   const translateX    = useRef(new Animated.Value(0)).current;
   const deleteOpacity = useRef(new Animated.Value(0)).current;
   const rowScale      = useRef(new Animated.Value(1)).current;
@@ -161,6 +167,7 @@ export default function NotificationsScreen({ navigation }) {
   const [loading,       setLoading]       = useState(true);
   const [refreshing,    setRefreshing]    = useState(false);
   const [isOffline,     setIsOffline]     = useState(false);
+  const isOfflineRef = useRef(false);
   const [dialog, setDialog] = useState({ 
     visible: false, 
     title: '', 
@@ -172,34 +179,83 @@ export default function NotificationsScreen({ navigation }) {
   const { user: authUser } = useUser();
   const currentUserId = authUser?.id ?? null;
   const flatListRef = useRef(null);
+  const wasOfflineRef = useRef(false);
+  const notificationsRef = useRef([]);
+  const loadGenerationRef = useRef(0);
+  const deletingIdsRef = useRef(new Set());
+  const requestIdRef = useRef(0);
+  const deletionEpochRef = useRef(0);
+  const clearAllInFlightRef = useRef(false);
+  const readOpVersionsRef = useRef(new Map());
+  const realtimeAddedIdsRef = useRef(new Set());
 
   const handleDelete = useCallback(async (id) => {
+    let deletedItem;
+    let deletedIndex;
+    const myDeletionEpoch = deletionEpochRef.current;
+    deletingIdsRef.current.add(id);
+    setNotifications(prev => {
+      deletedIndex = prev.findIndex(n => n.id === id);
+      deletedItem = prev[deletedIndex];
+      return prev.filter(n => n.id !== id);
+    });
     try {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-      await supabase.from('notifications').delete().eq('id', id);
+      const { error } = await supabase.from('notifications').delete().eq('id', id);
+      if (error) throw error;
+      deletingIdsRef.current.delete(id);
+      realtimeAddedIdsRef.current.delete(id);
     } catch (e) {
       __DEV__ && console.error('[NotificationsScreen] handleDelete error:', e);
+      deletingIdsRef.current.delete(id);
+      // Don't restore if a Clear All has succeeded since this delete started —
+      // that would resurrect an item the user just bulk-cleared.
+      if (deletedItem && deletionEpochRef.current === myDeletionEpoch) {
+        setNotifications(prev => {
+          if (prev.some(n => n.id === id)) return prev; // already back (e.g. re-added by realtime)
+          const next = [...prev];
+          next.splice(Math.min(deletedIndex, next.length), 0, deletedItem);
+          return next;
+        });
+      }
     }
+  }, []);
+
+  const bumpReadVersion = useCallback((id) => {
+    const v = (readOpVersionsRef.current.get(id) || 0) + 1;
+    readOpVersionsRef.current.set(id, v);
+    return v;
   }, []);
 
   const handleMarkRead = useCallback(async (id) => {
+    const opVersion = bumpReadVersion(id);
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
     try {
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+      if (error) throw error;
     } catch (e) {
       __DEV__ && console.error('[NotificationsScreen] handleMarkRead error:', e);
+      // Only revert if no later mark-read/mark-all-read operation touched this id since.
+      if (readOpVersionsRef.current.get(id) === opVersion) {
+        setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: false } : n));
+      }
     }
-  }, []);
+  }, [bumpReadVersion]);
 
   const renderNotificationItem = useCallback(({ item }) => (
-    <NotificationItem item={item} onDelete={handleDelete} onMarkRead={handleMarkRead} navigation={navigation} />
-  ), [handleDelete, handleMarkRead, navigation]);
+    <NotificationItem
+      item={item}
+      onDelete={handleDelete}
+      onMarkRead={handleMarkRead}
+      navigation={navigation}
+      setDialog={setDialog}
+    />
+  ), [handleDelete, handleMarkRead, navigation, setDialog]);
 
   useFocusEffect(
     useCallback(() => {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      // Dark icons for light/white background
-      const entry = SystemBars.pushStackEntry({ style: 'dark' });
+      // Light icons for the navy header/status-bar strip
+      const entry = SystemBars.pushStackEntry({ style: 'light' });
       return () => {
         SystemBars.popStackEntry(entry);
       };
@@ -211,7 +267,9 @@ export default function NotificationsScreen({ navigation }) {
     
     // Check network status
     NetInfo.fetch().then(state => {
-      const offline = !state.isInternetReachable;
+      const offline = state.isConnected === false || state.isInternetReachable === false;
+      wasOfflineRef.current = offline;
+      isOfflineRef.current = offline;
       setIsOffline(offline);
       setShowOffline(offline);
       if (!offline) {
@@ -223,10 +281,18 @@ export default function NotificationsScreen({ navigation }) {
     
     // Subscribe to network changes
     const unsubscribeNetInfo = NetInfo.addEventListener(state => {
-      const offline = !state.isInternetReachable;
+      const offline = state.isConnected === false || state.isInternetReachable === false;
+      const wasOffline = wasOfflineRef.current;
+      wasOfflineRef.current = offline;
+      isOfflineRef.current = offline;
       setIsOffline(offline);
       setShowOffline(offline);
+      if (wasOffline && !offline) {
+        loadNotifications();
+      }
     });
+
+    let isActive = true;
 
     const channel = supabase
       .channel(`notifications_realtime_${currentUserId}`)
@@ -241,40 +307,92 @@ export default function NotificationsScreen({ navigation }) {
           .select('id, username, avatar_url')
           .eq('id', payload.new.actor_id)
           .maybeSingle();
-        setNotifications(prev => [{ ...payload.new, actor }, ...prev]);
+        if (!isActive) return;
+        setNotifications(prev => {
+          if (deletingIdsRef.current.has(payload.new.id)) return prev;
+          if (clearAllInFlightRef.current) return prev;
+          if (prev.some(n => n.id === payload.new.id)) return prev;
+
+          realtimeAddedIdsRef.current.add(payload.new.id);
+          return [{ ...payload.new, actor }, ...prev];
+        });
       })
       .subscribe();
 
     return () => { 
+      isActive = false;
+      loadGenerationRef.current += 1;
       supabase.removeChannel(channel);
       unsubscribeNetInfo();
     };
   }, [currentUserId]);
 
   const loadNotifications = useCallback(async () => {
+    const __loadNotifStart = Date.now();
+    __DEV__ && console.log('[NotificationsScreen] loadNotifications START. currentUserId present:', !!currentUserId);
     // Skip API call if offline
-    if (isOffline) {
+    if (isOfflineRef.current) {
       __DEV__ && console.log('[NotificationsScreen] Offline - skipping load');
       setLoading(false);
       return;
     }
-    
+
+    if (clearAllInFlightRef.current) {
+      __DEV__ && console.log('[NotificationsScreen] Clear All in progress - skipping load');
+      return;
+    }
+
+    const requestGeneration = loadGenerationRef.current;
+    const myRequestId = ++requestIdRef.current;
+
     try {
+      __DEV__ && console.log('[NotificationsScreen] before notifications query');
       const { data, error } = await supabase
         .from('notifications')
         .select(`*, actor:profiles!notifications_actor_id_fkey(id, username, avatar_url)`)
         .eq('user_id', currentUserId)
         .order('created_at', { ascending: false })
         .limit(50);
+      __DEV__ && console.log('[NotificationsScreen] after notifications query. elapsed ms:', Date.now() - __loadNotifStart, 'data present:', !!data, 'error present:', !!error);
       if (error) throw error;
-      setNotifications(data ?? []);
+      if (loadGenerationRef.current !== requestGeneration) {
+        __DEV__ && console.log('[NotificationsScreen] EARLY RETURN: stale generation');
+        return; // stale — lifecycle moved on
+      }
+      if (requestIdRef.current !== myRequestId) {
+        __DEV__ && console.log('[NotificationsScreen] EARLY RETURN: superseded requestId');
+        return; // superseded by a newer load request
+      }
+      setNotifications(prev => {
+        const fetched = (data ?? []).filter(n => !deletingIdsRef.current.has(n.id));
+        const fetchedIds = new Set(fetched.map(n => n.id));
+        // A fetch confirms these ids one way or another — no longer "unconfirmed new".
+        fetchedIds.forEach(id => realtimeAddedIdsRef.current.delete(id));
+        // Only keep items we know genuinely arrived via Realtime and haven't been
+        // confirmed gone by a fetch yet — NOT every id merely absent from this fetch,
+        // since absence can also mean the item was legitimately deleted elsewhere.
+        const missingFromFetch = prev.filter(
+          n => !fetchedIds.has(n.id) &&
+               !deletingIdsRef.current.has(n.id) &&
+               realtimeAddedIdsRef.current.has(n.id)
+        );
+        return [...fetched, ...missingFromFetch].sort(
+          (a, b) => new Date(b.created_at) - new Date(a.created_at)
+        );
+      });
     } catch (e) {
       __DEV__ && console.error('Error loading notifications:', e);
       // Don't show error Alert - just keep existing data or show empty
     } finally {
-      setLoading(false);
+      __DEV__ && console.log('[NotificationsScreen] loadNotifications finally entered');
+      if (loadGenerationRef.current === requestGeneration && requestIdRef.current === myRequestId) {
+        __DEV__ && console.log('[NotificationsScreen] setLoading(false) EXECUTED');
+        setLoading(false);
+      } else {
+        __DEV__ && console.log('[NotificationsScreen] setLoading(false) SKIPPED due to generation/request mismatch');
+      }
     }
-  }, [currentUserId, isOffline]);
+  }, [currentUserId]);
 
   const onRefresh = useCallback(async () => {
     if (isOffline) {
@@ -288,9 +406,27 @@ export default function NotificationsScreen({ navigation }) {
   }, [loadNotifications, isOffline]);
 
   const handleMarkAllRead = useCallback(async () => {
-    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-    await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUserId);
-  }, [currentUserId]);
+    // Compute from notificationsRef (a plain read, no side effects) rather than inside
+    // the setNotifications updater, since React may invoke updaters more than once.
+    const flippedIds = new Set(notificationsRef.current.filter(n => !n.is_read).map(n => n.id));
+    const opVersions = new Map();
+    flippedIds.forEach(id => opVersions.set(id, bumpReadVersion(id)));
+    setNotifications(prev => prev.map(n => (flippedIds.has(n.id) ? { ...n, is_read: true } : n)));
+    try {
+      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', currentUserId);
+      if (error) throw error;
+    } catch (e) {
+      __DEV__ && console.error('[NotificationsScreen] handleMarkAllRead error:', e);
+      // Only revert ids whose current version still matches the one this operation set —
+      // if a later handleMarkRead/handleMarkAllRead touched an id since, leave it alone.
+      setNotifications(prev => prev.map(n => {
+        if (flippedIds.has(n.id) && readOpVersionsRef.current.get(n.id) === opVersions.get(n.id)) {
+          return { ...n, is_read: false };
+        }
+        return n;
+      }));
+    }
+  }, [currentUserId, bumpReadVersion]);
 
   const handleDeleteAll = useCallback(() => {
     setDialog({
@@ -302,12 +438,40 @@ export default function NotificationsScreen({ navigation }) {
         { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
         { text: 'Clear All', style: 'destructive', onPress: async () => {
           setDialog(d => ({ ...d, visible: false }));
-          setNotifications([]);
-          await supabase.from('notifications').delete().eq('user_id', currentUserId);
+          // Invalidate in-flight individual-delete rollbacks and in-flight loads the moment
+          // Clear All begins — not after it succeeds — so nothing started earlier can
+          // repopulate/restore notifications out from under this bulk clear.
+          clearAllInFlightRef.current = true;
+          deletionEpochRef.current += 1;
+          requestIdRef.current += 1;
+          let previousNotifications;
+          setNotifications(prev => {
+            previousNotifications = prev;
+            return [];
+          });
+          try {
+            const { error } = await supabase.from('notifications').delete().eq('user_id', currentUserId);
+            if (error) throw error;
+          } catch (e) {
+            __DEV__ && console.error('[NotificationsScreen] handleDeleteAll error:', e);
+            setNotifications(prev => {
+              // merge back: keep anything that arrived after the failed clear (e.g. realtime INSERT),
+              // restore the rest from the pre-clear snapshot
+              const existingIds = new Set(prev.map(n => n.id));
+              const restored = previousNotifications.filter(n => !existingIds.has(n.id));
+              return [...prev, ...restored].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            });
+          } finally {
+            clearAllInFlightRef.current = false;
+          }
         }},
       ]
     });
   }, [currentUserId]);
+
+  useEffect(() => {
+    notificationsRef.current = notifications;
+  }, [notifications]);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
@@ -345,7 +509,7 @@ export default function NotificationsScreen({ navigation }) {
             )}
             {notifications.length > 0 && (
               <AnimatedButton onPress={handleDeleteAll} style={styles.headerBtn}>
-                <Text style={[styles.headerBtnText, { color: COLORS.live }]}>Clear all</Text>
+                <Text style={[styles.headerBtnText, { color: COLORS.gold }]}>Clear all</Text>
               </AnimatedButton>
             )}
           </View>
@@ -393,16 +557,16 @@ export default function NotificationsScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  fullScreen:        { flex: 1, backgroundColor: '#ffffff' },
+  fullScreen:        { flex: 1, backgroundColor: '#1a2e44' },
   container:         { flex: 1, backgroundColor: '#ffffff' },
   loadingContainer:  { flex: 1, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', gap: 12 },
   centered:          { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  header:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 16, borderBottomWidth: 0.5, borderBottomColor: '#e5e5e5', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, elevation: 2 },
-  headerTitle:       { fontSize: 22, fontWeight: '800', color: '#1a2e44' },
+  header:            { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1a2e44', paddingHorizontal: 16, paddingVertical: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, marginBottom: 12 },
+  headerTitle:       { fontSize: 24, fontWeight: '700', color: '#ffffff' },
   unreadBadge:       { fontSize: 15, fontWeight: '700', color: COLORS.gold },
   headerActions:     { flexDirection: 'row', gap: 12 },
-  headerBtn:         { paddingVertical: 10, paddingHorizontal: 8, minHeight: 36, justifyContent: 'center', backgroundColor: '#f5f5f5', borderRadius: 10 },
-  headerBtnText:     { fontSize: 13, color: '#888888', fontWeight: '600' },
+  headerBtn:         { paddingVertical: 10, paddingHorizontal: 12, minHeight: 36, justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 10 },
+  headerBtnText:     { fontSize: 13, color: '#ffffff', fontWeight: '600' },
   hintBanner:        { backgroundColor: '#fff8ec', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: '#f0e0c0' },
   hintBannerText:    { fontSize: 12, color: '#c8a04a', textAlign: 'center' },
   deleteBackground:  { ...StyleSheet.absoluteFillObject, backgroundColor: COLORS.live, justifyContent: 'center', alignItems: 'center' },

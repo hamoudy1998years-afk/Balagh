@@ -116,6 +116,12 @@ class AdhanForegroundService : Service() {
     }
 
     private fun playAdhan(prayer: String, styleIndex: Int = 0) {
+        // At most one live MediaPlayer owned by this service: detach and
+        // release any previous player (and its pending callbacks) BEFORE
+        // creating a new one, so a second onStartCommand can never orphan a
+        // still-playing player that Stop could never reach.
+        releaseCurrentPlayer()
+
         try {
             val appOpen = AdhanModule.isAppInForeground
             val resId = if (appOpen) {
@@ -143,6 +149,8 @@ class AdhanForegroundService : Service() {
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
                 setOnPreparedListener {
+                    // Stale player (already replaced/released) must never start
+                    if (mediaPlayer !== this) return@setOnPreparedListener
                     start()
                     // Vibration: 25% of adhan when app open, 50% when app closed/killed
                     val duration = duration.toLong()
@@ -150,11 +158,14 @@ class AdhanForegroundService : Service() {
                     handler.postDelayed({ vibrator?.cancel() }, vibrationMillis)
                 }
                 setOnCompletionListener {
+                    // Stale player must never stop/release the current one
+                    if (mediaPlayer !== this) return@setOnCompletionListener
                     postLastAdhanNote()
                     stopAdhan()
                     stopSelf()
                 }
                 setOnErrorListener { _, _, _ ->
+                    if (mediaPlayer !== this) return@setOnErrorListener true
                     stopSelf()
                     true
                 }
@@ -163,6 +174,29 @@ class AdhanForegroundService : Service() {
         } catch (e: Exception) {
             e.printStackTrace()
             stopSelf()
+        }
+    }
+
+    // Detaches callbacks and safely stops/releases the held player, if any.
+    // Safe in every state (preparing, playing, completed, stopped, released)
+    // and never touches the vibrator or the service lifecycle — playAdhan()
+    // runs right after startVibration() for the new adhan.
+    private fun releaseCurrentPlayer() {
+        handler.removeCallbacksAndMessages(null)
+        val old = mediaPlayer
+        mediaPlayer = null
+        old?.setOnPreparedListener(null)
+        old?.setOnCompletionListener(null)
+        old?.setOnErrorListener(null)
+        try {
+            if (old?.isPlaying == true) {
+                old.stop()
+            }
+        } catch (e: Exception) {
+        }
+        try {
+            old?.release()
+        } catch (e: Exception) {
         }
     }
 
@@ -201,14 +235,7 @@ class AdhanForegroundService : Service() {
     }
 
     private fun stopAdhan() {
-        handler.removeCallbacksAndMessages(null)
-        mediaPlayer?.apply {
-            if (isPlaying) {
-                stop()
-            }
-            release()
-        }
-        mediaPlayer = null
+        releaseCurrentPlayer()
         vibrator?.cancel()
     }
 

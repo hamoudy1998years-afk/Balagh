@@ -18,6 +18,12 @@ object AdhanNotificationHelper {
     private const val CHANNEL_ID = "adhan-alarm-channel"
     private const val NOTIFICATION_ID = 1003
 
+    // Active fallback playback, if any. Only ONE fallback MediaPlayer may
+    // exist at a time; Dismiss (cancelNotification) stops/releases it so the
+    // notification can never disappear while audio keeps playing.
+    private var fallbackPlayer: MediaPlayer? = null
+    private var fallbackVibrator: Vibrator? = null
+
     fun postAdhanNotification(
         context: Context,
         prayer: String,
@@ -83,6 +89,11 @@ object AdhanNotificationHelper {
     }
 
     private fun playAdhan(context: Context, prayer: String, styleIndex: Int) {
+        // Replace any previous fallback playback first: detach its callbacks,
+        // stop/release the old player, and drop the old vibration — a stale
+        // player's callbacks must never touch the new player.
+        releaseFallbackPlayer()
+
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
             vm.defaultVibrator
@@ -90,6 +101,7 @@ object AdhanNotificationHelper {
             @Suppress("DEPRECATION")
             context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
+        fallbackVibrator = vibrator
 
         // Start vibration
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -113,29 +125,69 @@ object AdhanNotificationHelper {
                 }
             }
 
-            MediaPlayer.create(context, resId).apply {
+            val player = MediaPlayer.create(context, resId)
+                ?: throw IllegalStateException("MediaPlayer.create returned null")
+            player.apply {
                 setOnCompletionListener {
-                    vibrator.cancel()
+                    // Only the CURRENT player may run completion cleanup —
+                    // a stale player's callback must never release/stop a newer one
+                    if (fallbackPlayer !== this) return@setOnCompletionListener
+                    fallbackPlayer = null
+                    fallbackVibrator?.cancel()
+                    fallbackVibrator = null
                     release()
                     cancelNotification(context)
                     AdhanPersistentNotification.post(context)
                 }
                 setOnErrorListener { _, _, _ ->
-                    vibrator.cancel()
+                    // Stale player must perform ZERO cleanup against current playback
+                    if (fallbackPlayer !== this) {
+                        return@setOnErrorListener true
+                    }
+                    fallbackPlayer = null
+                    fallbackVibrator?.cancel()
+                    fallbackVibrator = null
                     release()
                     cancelNotification(context)
                     AdhanPersistentNotification.post(context)
                     true
                 }
-                start()
             }
+            fallbackPlayer = player
+            player.start()
         } catch (e: Exception) {
             e.printStackTrace()
-            vibrator.cancel()
+            releaseFallbackPlayer()
+            fallbackVibrator?.cancel()
+            fallbackVibrator = null
+        }
+    }
+
+    // Detaches callbacks and safely stops/releases the active fallback
+    // player, if any. Safe in every MediaPlayer state.
+    private fun releaseFallbackPlayer() {
+        val old = fallbackPlayer
+        fallbackPlayer = null
+        old?.setOnCompletionListener(null)
+        old?.setOnErrorListener(null)
+        try {
+            if (old?.isPlaying == true) {
+                old.stop()
+            }
+        } catch (e: Exception) {
+        }
+        try {
+            old?.release()
+        } catch (e: Exception) {
         }
     }
 
     fun cancelNotification(context: Context) {
+        // Stop the audio that owns the sound, THEN remove the UI — Dismiss
+        // must never leave an uncontrollable player running.
+        releaseFallbackPlayer()
+        fallbackVibrator?.cancel()
+        fallbackVibrator = null
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.cancel(NOTIFICATION_ID)
     }

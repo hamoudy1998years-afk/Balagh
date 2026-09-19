@@ -70,8 +70,12 @@ override fun getName() = "AdhanModule"
             set(Calendar.MILLISECOND, 0)
         }
         
+        // Past prayer time: skip this alarm entirely — never roll it forward.
+        // Each alarm belongs to a specific date/dayOffset, and the next
+        // dayOffset already carries that future date's own times. Rolling a
+        // past alarm to tomorrow would duplicate that day's real alarm.
         if (calendar.timeInMillis <= System.currentTimeMillis()) {
-            calendar.add(Calendar.DAY_OF_YEAR, 1)
+            return
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -203,6 +207,15 @@ override fun getName() = "AdhanModule"
     }
 
     @ReactMethod
+    fun saveDailyTimings(json: String) {
+        try {
+            adhanPrefs.saveDailyTimings(json)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    @ReactMethod
     fun showPersistent() {
         AdhanPersistentNotification.post(reactApplicationContext)
     }
@@ -247,9 +260,3 @@ override fun getName() = "AdhanModule"
         }
     }
 }
-
-
-
-
-
-

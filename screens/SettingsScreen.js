@@ -20,7 +20,7 @@ import { clearFeedCache } from './HomeScreen';
 import { useUser } from '../context/UserContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { submitBugReport } from '../services/feedbackApi';
-import * as StoreReview from 'expo-store-review';
+import * as WebBrowser from 'expo-web-browser';
 
 const ACCENT     = COLORS.gold;
 const ACCENT_DIM = `${COLORS.gold}18`;
@@ -338,17 +338,38 @@ export default function SettingsScreen({ navigation }) {
 
   async function handleRateUs() {
     try {
-      const available = await StoreReview.isAvailableAsync();
-      if (available) {
-        await StoreReview.requestReview();
-      } else {
-        await Linking.openURL('market://details?id=com.bushrann.app');
+      const marketUrl = 'market://details?id=com.bushrann.app';
+      const playUrl = 'https://play.google.com/store/apps/details?id=com.bushrann.app';
+      const supported = await Linking.canOpenURL(marketUrl);
+      if (supported) {
+        try {
+          await Linking.openURL(marketUrl);
+          return;
+        } catch (e) {
+          // market:// open failed, fall through to HTTPS Play Store URL
+        }
       }
-    } catch (e) {}
+      const httpsSupported = await Linking.canOpenURL(playUrl);
+      if (httpsSupported) {
+        await Linking.openURL(playUrl);
+        return;
+      }
+      throw new Error('Could not open the store on this device.');
+    } catch (error) {
+      setDialog({
+        visible: true,
+        title: ERROR_TITLES.ERROR,
+        message: error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG,
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
+      });
+    }
   }
 
   async function confirmLogout() {
     setShowLogoutModal(false);
+    const { DeviceEventEmitter } = require('react-native');
+    DeviceEventEmitter.emit('pauseAllVideos');
     await userCache.clear();
     clearFeedCache();
     await supabase.auth.signOut({ scope: 'local' });
@@ -480,6 +501,7 @@ export default function SettingsScreen({ navigation }) {
           });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || 'Deletion failed');
+          await userCache.savedAccounts.remove(currentUser.id);
           await userCache.clear();
           await supabase.auth.signOut();
           } catch (error) {
@@ -500,9 +522,19 @@ export default function SettingsScreen({ navigation }) {
         { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
         { text: 'Send Link', onPress: async () => {
           setDialog(d => ({ ...d, visible: false }));
-          if (currentUser?.email) {
-            await supabase.auth.resetPasswordForEmail(currentUser.email);
-            setDialog({ visible: true, title: 'Sent! ✉️', message: 'Check your email for the reset link.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+          if (!currentUser?.email) {
+            setDialog({ visible: true, title: ERROR_TITLES.ERROR, message: 'No email address is associated with this account.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+            return;
+          }
+          try {
+            const { error } = await supabase.auth.resetPasswordForEmail(currentUser.email);
+            if (error) {
+              setDialog({ visible: true, title: ERROR_TITLES.ERROR, message: error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+            } else {
+              setDialog({ visible: true, title: 'Sent! ✉️', message: 'Check your email for the reset link.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+            }
+          } catch (error) {
+            setDialog({ visible: true, title: ERROR_TITLES.ERROR, message: error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
           }
         }},
       ]
@@ -661,6 +693,13 @@ export default function SettingsScreen({ navigation }) {
 
   if (screen === 'account') return (
     <SubScreen title="Account" onBack={() => setScreen(null)} insets={insets}>
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+      />
       <GroupLabel text="PROFILE" />
       <Card>
         <Row icon="✏️" label="Edit Profile" sublabel="Name, bio, photo" onPress={handleNavigateEditProfile} />
@@ -845,6 +884,13 @@ export default function SettingsScreen({ navigation }) {
 
   if (screen === 'help') return (
     <SubScreen title="Help & Support" onBack={() => setScreen(null)} insets={insets}>
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+      />
       <GroupLabel text="SUPPORT" />
       <Card>
         <Row icon="❓" label="FAQ" sublabel="Frequently asked questions" onPress={handleNavigateFaq} />
@@ -859,8 +905,31 @@ export default function SettingsScreen({ navigation }) {
         <Row 
           icon="⚖️" 
           label="Content Policy" 
-          sublabel="Copyright & DMCA"
-          onPress={() => Linking.openURL(CONFIG.CONTENT_POLICY_URL)} 
+          sublabel="Copyright & DMCA · Opens web policy"
+          onPress={async () => {
+            try {
+              await WebBrowser.openBrowserAsync(CONFIG.CONTENT_POLICY_URL);
+            } catch (error) {
+              __DEV__ && console.warn('[SettingsScreen] Content Policy link error:', error);
+
+              setDialog({
+                visible: true,
+                title: 'Unable to Open Policy',
+                message: 'The Content Policy webpage could not be opened. Please try again.',
+                type: 'error',
+                buttons: [
+                  {
+                    text: 'OK',
+                    onPress: () =>
+                      setDialog(d => ({
+                        ...d,
+                        visible: false,
+                      })),
+                  },
+                ],
+              });
+            }
+          }}
           last 
         />
       </Card>
@@ -869,6 +938,60 @@ export default function SettingsScreen({ navigation }) {
         <Row icon="📱" label="About Bushrann" sublabel="Version 1.0.0"
           onPress={() => setDialog({ visible: true, title: 'Bushrann', message: 'Version 1.0.0\n\nA platform for sharing Islamic knowledge and connecting with scholars.\n\nMade with ❤️', type: 'info', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] })} last />
       </Card>
+
+      {showBugDialog && (
+        <KeyboardAvoidingView
+          style={styles.bugDialogOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            style={{ flex: 1, width: '100%' }}
+            contentContainerStyle={styles.bugDialogScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.bugDialog}>
+              {!bugSubmitted ? (
+                <>
+                  <Text style={styles.bugDialogTitle}>🐛 Report a Problem</Text>
+                  <Text style={styles.bugDialogSub}>Describe what went wrong:</Text>
+                  <TextInput
+                    style={styles.bugInput}
+                    multiline
+                    numberOfLines={4}
+                    placeholder="e.g. Prayer times not loading..."
+                    placeholderTextColor="#aaa"
+                    value={bugText}
+                    onChangeText={setBugText}
+                    autoFocus
+                  />
+                  <TextInput
+                    style={styles.bugPhoneInput}
+                    placeholder="Your phone number (so we can reply and fix it)"
+                    placeholderTextColor="#aaa"
+                    value={bugPhone}
+                    onChangeText={setBugPhone}
+                    keyboardType="phone-pad"
+                  />
+                  <View style={styles.bugDialogButtons}>
+                    <TouchableOpacity style={styles.bugDialogCancel} onPress={() => { setShowBugDialog(false); setBugText(''); setBugPhone(''); }}>
+                      <Text style={styles.bugDialogCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.bugDialogSend} onPress={handleBugReport}>
+                      <Text style={styles.bugDialogSendText}>Send</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                <View style={{ alignItems: 'center', padding: 20 }}>
+                  <Text style={{ fontSize: 40, marginBottom: 12 }}>✅</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#1a2e44' }}>Thank you!</Text>
+                  <Text style={{ fontSize: 13, color: '#888', marginTop: 6, textAlign: 'center' }}>The developer has seen your report and is now working on it. 🙏</Text>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      )}
     </SubScreen>
   );
 
@@ -1060,51 +1183,6 @@ export default function SettingsScreen({ navigation }) {
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
       </ScrollView>
-
-      {showBugDialog && (
-        <KeyboardAvoidingView style={styles.bugDialogOverlay} behavior="padding">
-          <View style={styles.bugDialog}>
-            {!bugSubmitted ? (
-              <>
-                <Text style={styles.bugDialogTitle}>🐛 Report a Problem</Text>
-                <Text style={styles.bugDialogSub}>Describe what went wrong:</Text>
-                <TextInput
-                  style={styles.bugInput}
-                  multiline
-                  numberOfLines={4}
-                  placeholder="e.g. Prayer times not loading..."
-                  placeholderTextColor="#aaa"
-                  value={bugText}
-                  onChangeText={setBugText}
-                  autoFocus
-                />
-                <TextInput
-                  style={styles.bugPhoneInput}
-                  placeholder="Your phone number (so we can reply and fix it)"
-                  placeholderTextColor="#aaa"
-                  value={bugPhone}
-                  onChangeText={setBugPhone}
-                  keyboardType="phone-pad"
-                />
-                <View style={styles.bugDialogButtons}>
-                  <TouchableOpacity style={styles.bugDialogCancel} onPress={() => { setShowBugDialog(false); setBugText(''); setBugPhone(''); }}>
-                    <Text style={styles.bugDialogCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.bugDialogSend} onPress={handleBugReport}>
-                    <Text style={styles.bugDialogSendText}>Send</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <View style={{ alignItems: 'center', padding: 20 }}>
-                <Text style={{ fontSize: 40, marginBottom: 12 }}>✅</Text>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#1a2e44' }}>Thank you!</Text>
-                <Text style={{ fontSize: 13, color: '#888', marginTop: 6, textAlign: 'center' }}>The developer has seen your report and is now working on it. 🙏</Text>
-              </View>
-            )}
-          </View>
-        </KeyboardAvoidingView>
-      )}
     </View>
   );
 }
@@ -1386,6 +1464,11 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999,
     alignItems: 'center', justifyContent: 'flex-end', padding: 24,
+  },
+  bugDialogScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+    width: '100%',
   },
   bugDialog: {
     backgroundColor: '#fff', borderRadius: 24, padding: 24, width: '100%',

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import {
-  View, Text, StyleSheet, Animated, Pressable, PanResponder, Image,
+  View, Text, StyleSheet, Animated, Pressable, PanResponder, Image, ActivityIndicator,
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,68 +11,25 @@ import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import ModernDialog from '../screens/ModernDialog';
+import { shareVideoFile, isShareableVideo } from '../utils/videoShare';
 
 const SHEET_HEIGHT = 400;
 
 export default function GlobalVideoOptionsSheet() {
   const insets = useSafeAreaInsets();
   const context = useDownload();
-  const { currentUser, blockUser } = useUser();
+  const { blockUser } = useUser();
   const fallbackNavigation = useNavigation();
   const [loginDialogVisible, setLoginDialogVisible] = useState(false);
   const [loginDialogAction, setLoginDialogAction] = useState('');
   const [blockConfirmVisible, setBlockConfirmVisible] = useState(false);
   const [blockUserData, setBlockUserData] = useState(null);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
-
-  const animatedScales = useRef({
-    download: new Animated.Value(1),
-    pin: new Animated.Value(1),
-    delete: new Animated.Value(1),
-    block: new Animated.Value(1),
-  }).current;
-
-  const pressIn = (key) => {
-    Animated.spring(animatedScales[key], {
-      toValue: 0.88,
-      useNativeDriver: true,
-      speed: 50,
-    }).start();
-  };
-
-  const pressOut = (key) => {
-    Animated.spring(animatedScales[key], {
-      toValue: 1,
-      useNativeDriver: true,
-      speed: 20,
-    }).start();
-  };
+  const [isPreparingShare, setIsPreparingShare] = useState(false);
+  const shareLockRef = useRef(false);
   
   // TikTok sheet animation
   const tikTokTranslateY = useRef(new Animated.Value(0)).current;
-  
-  useEffect(() => {
-  
-    if (tiktokShareVisible) {
-
-      // Stop any running animation and reset to off-screen position
-      tikTokTranslateY.stopAnimation(() => {
-
-        tikTokTranslateY.setValue(400);
-
-        Animated.spring(tikTokTranslateY, {
-          toValue: 0,
-          tension: 65,
-          friction: 11,
-          useNativeDriver: true,
-        }).start(() => {
-
-        });
-      });
-    } else {
-
-    }
-  }, [tiktokShareVisible]);
 
   const tikTokPanResponder = useRef(
     PanResponder.create({
@@ -106,33 +64,25 @@ export default function GlobalVideoOptionsSheet() {
     })
   ).current;
   
-  if (!context) {
+  const sheetState = context?.sheetState;
+  const hideVideoOptionsSheet = context?.hideVideoOptionsSheet;
+  const hideTikTokShare = context?.hideTikTokShare;
 
-    return null;
-  }
-  
-  const { sheetState, hideVideoOptionsSheet, hideTikTokShare } = context;
-  
-  if (!sheetState) {
-    return null;
-  }
+  const { visible, video, isOwner, hasDownloaded, currentUserId, onPin, onDelete, onDownload, onBlock, tiktokShareVisible } = sheetState || {};
 
-
-
-  const { visible, video, isOwner, hasDownloaded, currentUserId, onPin, onDelete, onDownload, onBlock, tiktokShareVisible } = sheetState;
-  // Force reset animation when tiktokShareVisible becomes true
-  if (tiktokShareVisible && tikTokTranslateY.__getValue() > 350) {
-
-    tikTokTranslateY.setValue(400);
-    Animated.spring(tikTokTranslateY, {
-      toValue: 0,
-      tension: 65,
-      friction: 11,
-      useNativeDriver: true,
-    }).start(() => {
-
-    });
-  }
+  useEffect(() => {
+    if (tiktokShareVisible) {
+      tikTokTranslateY.stopAnimation(() => {
+        tikTokTranslateY.setValue(400);
+        Animated.spring(tikTokTranslateY, {
+          toValue: 0,
+          tension: 65,
+          friction: 11,
+          useNativeDriver: true,
+        }).start();
+      });
+    }
+  }, [tiktokShareVisible]);
   
   // Properly check if user is logged in
   const isGuest = !currentUserId || currentUserId === null || currentUserId === undefined;
@@ -143,9 +93,8 @@ export default function GlobalVideoOptionsSheet() {
     hideTikTokShare();
   };
 
-  const handleCopyLink = () => {
-    const { Clipboard } = require('react-native');
-    Clipboard.setString(`https://bushrann.app/video/${video?.id}`);
+  const handleCopyLink = async () => {
+    await Clipboard.setStringAsync(`https://bushrann.app/video/${video?.id}`);
     hideTikTokShare();
     setDialog({
       visible: true,
@@ -156,52 +105,47 @@ export default function GlobalVideoOptionsSheet() {
     });
   };
 
-  const handleShareWhatsApp = () => {
-    const url = `whatsapp://send?text=Check out this video on Bushrann! ${video?.caption || ''} https://bushrann.app/video/${video?.id}`;
-    Linking.openURL(url).catch(() => {
+  const handleShareVideo = async () => {
+    if (shareLockRef.current || isPreparingShare) return;
+
+    shareLockRef.current = true;
+
+    if (!isShareableVideo(video)) {
+      shareLockRef.current = false;
       setDialog({
         visible: true,
-        title: 'Not Installed',
-        message: 'WhatsApp not installed',
-        type: 'error',
+        title: 'Not Available',
+        message: 'Video sharing is not available for livestreams yet.',
+        type: 'info',
         buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
       });
+      return;
+    }
+
+    setIsPreparingShare(true);
+
+    await shareVideoFile(video, {
+      onStart: () => setIsPreparingShare(true),
+      onComplete: () => {
+        setIsPreparingShare(false);
+        shareLockRef.current = false;
+        hideTikTokShare();
+      },
+      onError: (message) => {
+        setIsPreparingShare(false);
+        shareLockRef.current = false;
+        setDialog({
+          visible: true,
+          title: 'Share Failed',
+          message,
+          type: 'error',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+        });
+      },
     });
-    hideTikTokShare();
   };
 
-  const handleShareFacebook = () => {
-    const url = `https://www.facebook.com/sharer/sharer.php?u=https://bushrann.app/video/${video?.id}`;
-    Linking.openURL(url);
-    hideTikTokShare();
-  };
 
-  const handleShareMessenger = () => {
-    const url = `fb-messenger://share/?link=https://bushrann.app/video/${video?.id}`;
-    Linking.openURL(url).catch(() => {
-      setDialog({
-        visible: true,
-        title: 'Not Installed',
-        message: 'Messenger not installed',
-        type: 'error',
-        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
-      });
-    });
-    hideTikTokShare();
-  };
-
-  const handleShareSMS = () => {
-    const url = `sms:?body=Check out this video on Bushrann! https://bushrann.app/video/${video?.id}`;
-    Linking.openURL(url);
-    hideTikTokShare();
-  };
-
-  const handleShareEmail = () => {
-    const url = `mailto:?subject=Check out this video on Bushrann&body=https://bushrann.app/video/${video?.id}`;
-    Linking.openURL(url);
-    hideTikTokShare();
-  };
-  
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
@@ -238,8 +182,20 @@ export default function GlobalVideoOptionsSheet() {
     })
   ).current;
 
+  if (!context) return null;
+  if (!sheetState) return null;
+
   // Show if either main sheet or TikTok share is visible
-  if (!visible && !tiktokShareVisible) return null;
+  if (
+    !visible &&
+    !tiktokShareVisible &&
+    !dialog.visible &&
+    !loginDialogVisible &&
+    !blockConfirmVisible &&
+    !isPreparingShare
+  ) {
+    return null;
+  }
 
   // Use navigation from sheetState or fallback to useNavigation
   const navigation = sheetState.navigation || fallbackNavigation;
@@ -267,7 +223,6 @@ export default function GlobalVideoOptionsSheet() {
   };
 
   const handleBlock = () => {
-    console.log('🚫 Blocking user:', video?.user_id);
     if (isGuest) {
       setLoginDialogAction('block users');
       setLoginDialogVisible(true);
@@ -330,7 +285,7 @@ export default function GlobalVideoOptionsSheet() {
         
         {/* Action Grid - Modern Layout */}
         <View style={styles.actionGrid}>
-          {/* Share removed - now on right side action bar */}
+          {/* Share moved to TikTok-style share modal */}
 
           {/* Download */}
           <TouchableOpacity 
@@ -340,7 +295,6 @@ export default function GlobalVideoOptionsSheet() {
           >
             <Animated.View style={[
               styles.gridIcon, 
-              { transform: [{ scale: animatedScales.download }] },
               hasDownloaded ? { backgroundColor: 'rgba(34, 197, 94, 0.15)' } : { backgroundColor: 'rgba(16, 185, 129, 0.15)' }
             ]}>
               <Ionicons 
@@ -359,7 +313,6 @@ export default function GlobalVideoOptionsSheet() {
             <TouchableOpacity style={styles.gridItem} onPress={handlePin}>
               <Animated.View style={[
                 styles.gridIcon,
-                { transform: [{ scale: animatedScales.pin }] },
                 video?.is_pinned ? { backgroundColor: 'rgba(183, 110, 121, 0.2)' } : { backgroundColor: 'rgba(255, 255, 255, 0.1)' }
               ]}>
                 <Text style={{ fontSize: 22 }}>📌</Text>
@@ -375,7 +328,6 @@ export default function GlobalVideoOptionsSheet() {
             <TouchableOpacity style={styles.gridItem} onPress={handleBlock}>
               <Animated.View style={[
                 styles.gridIcon, 
-                { transform: [{ scale: animatedScales.block }] },
                 { backgroundColor: 'rgba(239, 68, 68, 0.15)' }
               ]}>
                 <Ionicons name="ban-outline" size={24} color="#ef4444" />
@@ -389,7 +341,6 @@ export default function GlobalVideoOptionsSheet() {
             <TouchableOpacity style={styles.gridItem} onPress={handleDelete}>
               <Animated.View style={[
                 styles.gridIcon, 
-                { transform: [{ scale: animatedScales.delete }] },
                 { backgroundColor: 'rgba(239, 68, 68, 0.15)' }
               ]}>
                 <Ionicons name="trash-outline" size={24} color="#ef4444" />
@@ -458,46 +409,18 @@ export default function GlobalVideoOptionsSheet() {
             </View>
             
             <View style={styles.tiktokGrid}>
+              <Pressable style={styles.tiktokItem} onPress={handleShareVideo}>
+                <View style={[styles.tiktokIcon, { backgroundColor: '#3b82f6' }]}>
+                  <Ionicons name="share-outline" size={28} color="#ffffff" />
+                </View>
+                <Text style={styles.tiktokLabel}>Share video</Text>
+              </Pressable>
+
               <Pressable style={styles.tiktokItem} onPress={handleCopyLink}>
                 <View style={[styles.tiktokIcon, { backgroundColor: '#f1f5f9' }]}>
                   <Ionicons name="link" size={28} color="#1a2e44" />
                 </View>
                 <Text style={styles.tiktokLabel}>Copy link</Text>
-              </Pressable>
-
-              <Pressable style={styles.tiktokItem} onPress={handleShareWhatsApp}>
-                <View style={[styles.tiktokIcon, { backgroundColor: '#25D366' }]}>
-                  <Ionicons name="logo-whatsapp" size={28} color="#ffffff" />
-                </View>
-                <Text style={styles.tiktokLabel}>WhatsApp</Text>
-              </Pressable>
-
-              <Pressable style={styles.tiktokItem} onPress={handleShareFacebook}>
-                <View style={[styles.tiktokIcon, { backgroundColor: '#1877F2' }]}>
-                  <Ionicons name="logo-facebook" size={28} color="#ffffff" />
-                </View>
-                <Text style={styles.tiktokLabel}>Facebook</Text>
-              </Pressable>
-
-              <Pressable style={styles.tiktokItem} onPress={handleShareMessenger}>
-                <View style={[styles.tiktokIcon, { backgroundColor: '#00B2FF' }]}>
-                  <Ionicons name="chatbubble-ellipses" size={28} color="#ffffff" />
-                </View>
-                <Text style={styles.tiktokLabel}>Messenger</Text>
-              </Pressable>
-
-              <Pressable style={styles.tiktokItem} onPress={handleShareSMS}>
-                <View style={[styles.tiktokIcon, { backgroundColor: '#34C759' }]}>
-                  <Ionicons name="chatbubble" size={28} color="#ffffff" />
-                </View>
-                <Text style={styles.tiktokLabel}>SMS</Text>
-              </Pressable>
-
-              <Pressable style={styles.tiktokItem} onPress={handleShareEmail}>
-                <View style={[styles.tiktokIcon, { backgroundColor: '#EA4335' }]}>
-                  <Ionicons name="mail" size={28} color="#ffffff" />
-                </View>
-                <Text style={styles.tiktokLabel}>Email</Text>
               </Pressable>
             </View>
           </Animated.View>
@@ -549,8 +472,16 @@ export default function GlobalVideoOptionsSheet() {
         message={dialog.message}
         type={dialog.type}
         buttons={dialog.buttons}
-        onDismiss={() => setDialog({ ...dialog, visible: false })}
+        onDismiss={() => setDialog(d => ({ ...d, visible: false }))}
       />
+
+      {/* Share preparation loading overlay */}
+      {isPreparingShare && (
+        <View style={styles.preparingOverlay}>
+          <ActivityIndicator size="large" color="#ffffff" />
+          <Text style={styles.preparingText}>Preparing video...</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -898,5 +829,25 @@ const styles = StyleSheet.create({
   blockConfirmButtonText: {
     fontSize: 15,
     fontWeight: '600',
+  },
+
+  // Share preparation loading overlay
+  preparingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 200000,
+    elevation: 200000,
+  },
+  preparingText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 16,
   },
 });

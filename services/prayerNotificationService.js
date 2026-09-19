@@ -1,11 +1,10 @@
 ﻿import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
-import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import { Platform, Vibration } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { getPrayerTimes, getNextPrayer, formatTime, getPrayerEmoji, loadPrayerCache, savePrayerCache, loadMonthlyCache, saveMonthlyCache, getTodayTimingsFromMonthly, getMonthlyTimetable } from './prayerApi';
+import { getPrayerTimes, getNextPrayer, formatTime, getPrayerEmoji, loadPrayerCache, savePrayerCache, loadMonthlyCache, saveMonthlyCache, getTodayTimingsFromMonthly, getMonthlyTimetable, loadSavedCoordinates } from './prayerApi';
 
 const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND-NOTIFICATION-TASK';
 
@@ -126,6 +125,89 @@ export function getNextOccurrence(hours, minutes) {
   return next;
 }
 
+// Parses "HH:MM" or "HH:MM (TZ)" into [hours, minutes]
+function parseTimeHM(time) {
+  const parts = (time || '').split(' ')[0].split(':').map(Number);
+  if (parts.length >= 2 && !Number.isNaN(parts[0]) && !Number.isNaN(parts[1])) {
+    return [parts[0], parts[1]];
+  }
+  return [null, null];
+}
+
+// Coordinates for fetching a monthly timetable: manual city (if that's the
+// active mode) first, otherwise the permanently saved GPS coordinates.
+async function resolveCoordsForMonthly() {
+  try {
+    const locationMode = await AsyncStorage.getItem('locationMode');
+    if (locationMode === 'manual') {
+      const cityRaw = await AsyncStorage.getItem('manualCity');
+      if (cityRaw) {
+        const city = JSON.parse(cityRaw);
+        if (city?.latitude != null && city?.longitude != null) {
+          return { latitude: city.latitude, longitude: city.longitude };
+        }
+      }
+    }
+  } catch (e) {}
+  return await loadSavedCoordinates();
+}
+
+// Timings for a specific future date, from the monthly timetable cache
+// (fetched fresh if the cached month doesn't cover the target date).
+// Same day-lookup logic as getTodayTimingsFromMonthly, generalized to any date.
+// Returns null when that date's timetable is unavailable — a missing schedule
+// is preferable to a known-wrong prayer time copied from another day.
+async function getTimingsForDate(targetDate) {
+  try {
+    const month = targetDate.getMonth() + 1;
+    const year = targetDate.getFullYear();
+    let monthlyCache = await loadMonthlyCache();
+    if (!monthlyCache || monthlyCache.month !== month || monthlyCache.year !== year) {
+      const coords = await resolveCoordsForMonthly();
+      if (!coords) return null;
+      const fresh = await getMonthlyTimetable(coords.latitude, coords.longitude);
+      await saveMonthlyCache(fresh, coords, month, year);
+      monthlyCache = { monthlyData: fresh, month, year };
+    }
+    const dayNum = String(targetDate.getDate()).padStart(2, '0');
+    const entry = monthlyCache.monthlyData.find(d => d.date.gregorian.day === dayNum);
+    return entry?.timings || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Per-day timings for the next `totalDays` days: today's timings for day 0,
+// each future date's own timings from the monthly timetable. Never replicates
+// today's timings onto future dates — that is what made adhan alarms drift
+// stale day after day. Dates whose timetable is unavailable stay null and are
+// skipped by the scheduling loops.
+async function buildDailyTimings(todayTimings, totalDays) {
+  const daily = [todayTimings];
+  for (let day = 1; day < totalDays; day++) {
+    const target = new Date();
+    target.setDate(target.getDate() + day);
+    daily.push(await getTimingsForDate(target));
+  }
+  return daily;
+}
+
+// Date-keyed map of the per-day timings ("YYYY-MM-DD" -> timings) for native
+// persistence. Null/unavailable days are omitted so a reboot restores only
+// the dates that have real timetable data — never a copy of today's times.
+function buildDailyTimingsMap(dailyTimings) {
+  const map = {};
+  for (let day = 0; day < dailyTimings.length; day++) {
+    const t = dailyTimings[day];
+    if (!t) continue;
+    const d = new Date();
+    d.setDate(d.getDate() + day);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    map[key] = t;
+  }
+  return map;
+}
+
 export async function schedulePrayerNotifications(timings, withSound = true) {
   await cancelPrayerNotifications();
 
@@ -145,17 +227,30 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
         const savedAdhanStyle = await AsyncStorage.getItem('adhanStyle');
         const styleIndex = savedAdhanStyle ? parseInt(savedAdhanStyle) : 0;
 
+        // Per-day timings — each future date gets its own prayer times
+        const dailyTimings = await buildDailyTimings(timings, 14);
+
+        // Persist per-date timings (keyed by YYYY-MM-DD) so AdhanBootReceiver
+        // restores each date's own times after reboot instead of replaying
+        // today's flat timings across future days
+        AdhanModule.saveDailyTimings(JSON.stringify(buildDailyTimingsMap(dailyTimings)));
+
         // Save prayer data to native SharedPreferences for boot/update recovery (once, not per-prayer)
         const timingsJson = JSON.stringify(timings);
         const prefsJson = JSON.stringify(prefs);
-        AdhanModule.savePrayerData(timingsJson, prefsJson, styleIndex, true);
+        const notifsEnabledRaw = await AsyncStorage.getItem('notifsEnabled');
+        const notifsEnabled = notifsEnabledRaw !== 'false';
+        AdhanModule.savePrayerData(timingsJson, prefsJson, styleIndex, notifsEnabled);
 
         for (let day = 0; day < 14; day++) {
+          const dayTimings = dailyTimings[day];
+          if (!dayTimings) continue; // that date's timetable unavailable — skip it
           for (const prayer of PRAYERS) {
             if (prefs[prayer] === false) continue;
-            const time = timings[prayer];
+            const time = dayTimings[prayer];
             if (!time) continue;
-            const [hours, minutes] = time.split(':').map(Number);
+            const [hours, minutes] = parseTimeHM(time);
+            if (hours == null) continue;
             AdhanModule.scheduleAdhan(prayer, hours, minutes, day, styleIndex);
           }
         }
@@ -169,12 +264,16 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
   // JS fallback — schedule 7 days via expo-notifications
   const savedAdhanStyle = await AsyncStorage.getItem('adhanStyle');
   const styleIndex = savedAdhanStyle ? parseInt(savedAdhanStyle) : 0;
+  const dailyTimings = await buildDailyTimings(timings, 7);
   for (let day = 0; day < 7; day++) {
+    const dayTimings = dailyTimings[day];
+    if (!dayTimings) continue; // that date's timetable unavailable — skip it
     for (const prayer of PRAYERS) {
       if (prefs[prayer] === false) continue;
-      const time = timings[prayer];
+      const time = dayTimings[prayer];
       if (!time) continue;
-      const [hours, minutes] = time.split(':').map(Number);
+      const [hours, minutes] = parseTimeHM(time);
+      if (hours == null) continue;
 
       const triggerDate = new Date();
       triggerDate.setDate(triggerDate.getDate() + day);
@@ -252,6 +351,16 @@ async function schedulePersistentRefreshes(timings) {
 
 // â”€â”€ Cancel all prayer notifications â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function cancelPrayerNotifications() {
+  // Cancel native adhan alarms too — leaving them armed means adhan keeps
+  // firing after the user disables prayer notifications.
+  if (Platform.OS === 'android') {
+    try {
+      const { NativeModules } = require('react-native');
+      if (NativeModules.AdhanModule?.cancelAllAdhans) {
+        NativeModules.AdhanModule.cancelAllAdhans();
+      }
+    } catch (e) {}
+  }
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const n of scheduled) {
     if (n.identifier.startsWith('prayer-slot-')) {
@@ -374,15 +483,34 @@ export async function initPrayerNotifications(withSound = true) {
       await schedulePersistentRefreshes(cached.data.timings);
     }
 
-    // Fetch fresh data in background
-    const { status: locationStatus } = await Location.getForegroundPermissionsAsync();
-    if (locationStatus === 'granted') {
-      const location = await Location.getCurrentPositionAsync({});
-      const data = await getPrayerTimes(location.coords.latitude, location.coords.longitude);
-      await savePrayerCache(data, location.coords);
+    // Fetch fresh data in background using ONLY the persisted location.
+    // Never touch live GPS here — GPS is required solely when the user
+    // explicitly updates their location in PrayerScreen.
+    const locationMode = await AsyncStorage.getItem('locationMode');
+    let refreshCoords = null;
+    if (locationMode === 'manual') {
+      const savedCityRaw = await AsyncStorage.getItem('manualCity');
+      if (savedCityRaw) {
+        try {
+          const city = JSON.parse(savedCityRaw);
+          if (city?.latitude != null && city?.longitude != null) {
+            refreshCoords = { latitude: city.latitude, longitude: city.longitude };
+          }
+        } catch (e) {}
+      }
+    }
+    if (!refreshCoords) {
+      refreshCoords = await loadSavedCoordinates();
+    }
+
+    if (refreshCoords) {
+      const data = await getPrayerTimes(refreshCoords.latitude, refreshCoords.longitude);
+      await savePrayerCache(data, refreshCoords);
       await schedulePrayerNotifications(data.timings, withSound);
       await showPersistentNotification(data.timings);
       await schedulePersistentRefreshes(data.timings);
+    } else {
+      __DEV__ && console.warn('[PrayerNotif] No saved location — skipping background refresh (set location in PrayerScreen first)');
     }
     // Android: native AdhanModule owns adhan playback, this task is a no-op there —
     // skip registering on Android entirely to avoid expo-task-manager's onPause

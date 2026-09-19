@@ -1,4 +1,4 @@
-﻿package com.bushrann.app
+package com.bushrann.app
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -14,6 +14,37 @@ class AdhanPreferences(context: Context) {
         const val KEY_PREFS = "prayer_prefs"
         const val KEY_STYLE = "adhan_style"
         const val KEY_ENABLED = "notifications_enabled"
+        // Per-date adhan timings saved by schedulePrayerNotifications():
+        // JSON object keyed by "YYYY-MM-DD", each value a prayer -> "HH:MM" map.
+        const val KEY_DAILY_TIMINGS = "daily_timings"
+    }
+
+    fun saveDailyTimings(json: String) {
+        prefs.edit().putString(KEY_DAILY_TIMINGS, json).apply()
+    }
+
+    // Returns date ("YYYY-MM-DD") -> timings map, or null if never saved.
+    fun getDailyTimings(): Map<String, Map<String, String>>? {
+        val jsonStr = prefs.getString(KEY_DAILY_TIMINGS, null) ?: return null
+        return try {
+            val result = mutableMapOf<String, Map<String, String>>()
+            val root = JSONObject(jsonStr)
+            val dates = root.keys()
+            while (dates.hasNext()) {
+                val date = dates.next()
+                val timingsObj = root.getJSONObject(date)
+                val timings = mutableMapOf<String, String>()
+                val keys = timingsObj.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    timings[key] = timingsObj.getString(key)
+                }
+                result[date] = timings
+            }
+            result
+        } catch (e: Exception) {
+            null
+        }
     }
 
     fun saveTimings(timings: Map<String, String>) {

@@ -20,7 +20,7 @@ const slides = [
   {
     id: '1',
     emoji: '🕌',
-    title: 'Welcome to Balagh',
+    title: 'Welcome to Bushrann',
     subtitle: 'A platform for Islamic knowledge sharing',
     description: 'Watch, learn, and connect with scholars from around the world.',
   },
@@ -195,6 +195,7 @@ export default function OnboardingScreen({ onComplete }) {
             onPress={handleComplete}
             accessibilityLabel="Skip onboarding button"
             accessibilityRole="button"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Text style={styles.skipText}>Skip</Text>
           </TouchableOpacity>
@@ -236,6 +237,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: 'center',
     letterSpacing: -0.5,
+    maxFontSizeMultiplier: 1.3,
   },
   subtitle: {
     fontSize: 17,
@@ -243,12 +245,14 @@ const styles = StyleSheet.create({
     color: COLORS.gold,
     marginBottom: 16,
     textAlign: 'center',
+    maxFontSizeMultiplier: 1.3,
   },
   description: {
     fontSize: 15,
     color: 'rgba(255,255,255,0.55)',
     textAlign: 'center',
     lineHeight: 24,
+    maxFontSizeMultiplier: 1.3,
   },
   dotsContainer: {
     flexDirection: 'row',

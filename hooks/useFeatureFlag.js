@@ -11,6 +11,9 @@ export const useFeatureFlag = (flagName) => {
       return;
     }
 
+    let isActive = true;
+    setLoading(true);
+
     const fetchFlag = async () => {
       const { data, error } = await supabase
         .from('feature_flags')
@@ -18,19 +21,20 @@ export const useFeatureFlag = (flagName) => {
         .eq('name', flagName)
         .single();
 
+      if (!isActive) return;
+
       if (error) {
         __DEV__ && console.error('Feature flag error:', error);
         setEnabled(false);
       } else {
         setEnabled(data?.enabled ?? false);
       }
-      
+
       setLoading(false);
     };
 
     fetchFlag();
 
-    // Subscribe to real-time changes (optional but cool!)
     const subscription = supabase
       .channel(`feature-flag:${flagName}`)
       .on(
@@ -42,13 +46,15 @@ export const useFeatureFlag = (flagName) => {
           filter: `name=eq.${flagName}`,
         },
         (payload) => {
+          if (!isActive) return;
           setEnabled(payload.new.enabled);
         }
       )
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      isActive = false;
+      supabase.removeChannel(subscription);
     };
   }, [flagName]);
 

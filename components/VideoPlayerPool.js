@@ -1,5 +1,5 @@
 // components/VideoPlayerPool.js
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 
 // Global tracker to stop all audio on hot reload
 const activeRefs = new Set();
@@ -32,8 +32,13 @@ export function useVideoPlayerPool() {
 
   const playerRefs = useRef([player1Ref, player2Ref, player3Ref, player4Ref, player5Ref]).current;
 
-  // Register refs globally for hot reload cleanup
-  playerRefs.forEach(ref => activeRefs.add(ref));
+  // Register refs globally for hot reload cleanup; unregister on unmount
+  useEffect(() => {
+    playerRefs.forEach(ref => activeRefs.add(ref));
+    return () => {
+      playerRefs.forEach(ref => activeRefs.delete(ref));
+    };
+  }, [playerRefs]);
 
   // Track which ref holds which video URL
   const videoMap = useRef(new Map()).current;
@@ -107,7 +112,7 @@ export function useVideoPlayerPool() {
       videoMap.set(ref, videoUrl);
       setTimeout(() => {
         try {
-          if (ref?.current) ref.current.seek(0);
+          if (ref?.current && videoMap.get(ref) === videoUrl) ref.current.seek(0);
         } catch (e) {}
       }, 0);
     }

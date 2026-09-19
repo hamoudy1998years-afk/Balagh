@@ -15,10 +15,12 @@ import { useUser } from '../context/UserContext';
 // ─── Single user row ──────────────────────────────────────────────────────────
 function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
   const [following, setFollowing] = useState(item.isFollowing ?? false);
+  const [pending, setPending] = useState(false);
   const isOwnAccount = item.id === currentUserId;
 
   async function handleFollow() {
-    if (isOwnAccount) return;
+    if (isOwnAccount || pending) return;
+    setPending(true);
     if (following) {
       setFollowing(false);
       const { error } = await supabase.from('follows').delete()
@@ -33,6 +35,7 @@ function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
       });
       if (error) setFollowing(false);
     }
+    setPending(false);
   }
 
   const letter = item.username?.[0]?.toUpperCase() ?? '?';
@@ -59,6 +62,7 @@ function UserRow({ item, onPress, currentUserId, isViewingOwnList }) {
         <TouchableOpacity
           style={[styles.followBtn, following && styles.followingBtn]}
           onPress={handleFollow}
+          disabled={pending}
         >
           <Text style={[styles.followBtnText, following && styles.followingBtnText]}>
             {following ? 'Following' : 'Follow'}
@@ -76,10 +80,12 @@ export default function FollowListScreen({ route, navigation }) {
 
   const [users,         setUsers]         = useState([]);
   const [loading,       setLoading]       = useState(true);
+  const [loadError,     setLoadError]     = useState(false);
   const [refreshing,    setRefreshing]    = useState(false);
   const { user: authUser } = useUser();
   const currentUserId = authUser?.id ?? null;
   const flatListRef = useRef(null);
+  const requestIdRef = useRef(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -94,27 +100,33 @@ export default function FollowListScreen({ route, navigation }) {
   }, [currentUserId]);
 
   const loadUsers = async () => {
+    const requestId = ++requestIdRef.current;
+
     try {
+      setLoadError(false);
       let profileIds = [];
 
       // Get blocked users list
-      const { data: blockedUsers } = await supabase
+      const { data: blockedUsers, error: blocksError } = await supabase
         .from('blocks')
         .select('blocked_id')
         .eq('blocker_id', currentUserId);
+      if (blocksError) throw blocksError;
       const blockedIds = blockedUsers?.map(b => b.blocked_id) ?? [];
 
       if (type === 'followers') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('follows')
           .select('follower_id')
           .eq('following_id', userId);
+        if (error) throw error;
         profileIds = (data ?? []).map(row => row.follower_id);
       } else {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('follows')
           .select('following_id')
           .eq('follower_id', userId);
+        if (error) throw error;
         profileIds = (data ?? []).map(row => row.following_id);
       }
 
@@ -124,32 +136,43 @@ export default function FollowListScreen({ route, navigation }) {
       }
 
       if (profileIds.length === 0) {
-        setUsers([]);
-        setLoading(false);
+        if (requestId === requestIdRef.current) {
+          setUsers([]);
+          setLoading(false);
+        }
         return;
       }
 
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, username, full_name, avatar_url')
         .in('id', profileIds);
+      if (profilesError) throw profilesError;
 
       const list = profiles ?? [];
 
       if (currentUserId && list.length > 0) {
-        const { data: myFollows } = await supabase
+        const { data: myFollows, error: myFollowsError } = await supabase
           .from('follows')
           .select('following_id')
           .eq('follower_id', currentUserId);
+        if (myFollowsError) throw myFollowsError;
         const myFollowIds = new Set((myFollows ?? []).map(f => f.following_id));
         list.forEach(u => u.isFollowing = myFollowIds.has(u.id));
       }
 
-      setUsers(list);
+      if (requestId === requestIdRef.current) {
+        setUsers(list);
+      }
     } catch (e) {
       __DEV__ && console.error('Error loading follow list:', e);
+      if (requestId === requestIdRef.current) {
+        setLoadError(true);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -180,6 +203,11 @@ export default function FollowListScreen({ route, navigation }) {
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={COLORS.gold} />
+        </View>
+      ) : loadError ? (
+        <View style={styles.centered}>
+          <Text style={styles.emptyIcon}>⚠️</Text>
+          <Text style={styles.emptyText}>Failed to load. Pull down to retry.</Text>
         </View>
       ) : (
         <FlashList

@@ -12,13 +12,32 @@ Notifications.setNotificationHandler({
   }),
 });
 
+let isRegistering = false;
+let registerPending = false;
+
 export function usePushNotifications() {
   useEffect(() => {
     registerForPushNotifications();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        registerForPushNotifications();
+      }
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 }
 
 async function registerForPushNotifications() {
+  if (isRegistering) {
+    registerPending = true;
+    return;
+  }
+  isRegistering = true;
+
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
     let finalStatus = existing;
@@ -37,12 +56,22 @@ async function registerForPushNotifications() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({ push_token: token })
       .eq('id', user.id);
 
+    if (error) {
+      __DEV__ && console.error('Push token save error:', error);
+    }
+
   } catch (e) {
     __DEV__ && console.log('Push token error:', e);
+  } finally {
+    isRegistering = false;
+    if (registerPending) {
+      registerPending = false;
+      registerForPushNotifications();
+    }
   }
 }

@@ -15,17 +15,21 @@ import {
   ActivityIndicator,
   StatusBar,
   AppState,
+  NativeModules,
+  NativeEventEmitter,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { fetchSurahs, fetchVerses, fetchVerseAudioUrl } from '../services/quranApi';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS } from '../constants/theme';
 import { isLowEndDevice } from '../utils/deviceInfo';
 import PlaybackModeDialog from '../components/PlaybackModeDialog';
+
+const { ScreenState } = NativeModules;
 
 const REVELATION_COLORS = {
   Makkah: '#c9a84c',
@@ -34,6 +38,32 @@ const REVELATION_COLORS = {
 
 const SURAHS_CACHE_KEY = 'quran_surahs_cache';
 const SURAHS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 1 week — Quran doesn't change
+
+const RECITER_NAME = 'Mishary Rashid Alafasy';
+
+// Safely stop + remove an expo-audio player without throwing/unhandled rejections.
+// pause() first so a pending playAudioUntilDone listener gets a final status event.
+async function releasePlayer(player) {
+  if (!player) return;
+  try {
+    player.pause();
+  } catch (_) {}
+  try {
+    player.remove();
+  } catch (_) {}
+}
+
+// Full stop of the run's shared player: drop lock-screen controls, release it,
+// and clear the ref. expo-audio handles background playback natively.
+function stopActivePlayer(soundRef) {
+  const player = soundRef.current;
+  soundRef.current = null;
+  if (!player) return;
+  try {
+    player.setActiveForLockScreen(false);
+  } catch (_) {}
+  releasePlayer(player);
+}
 
 export default function QuranScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -48,7 +78,30 @@ export default function QuranScreen({ navigation }) {
   const [pendingPlayParams, setPendingPlayParams] = useState({ si: 0, vi: 0 });
   const quranPlayingRef = useRef(false);
   const soundRef = useRef(null);
+  // Set when a run is stopped on purpose (Stop button, unmount, or app-mode
+  // background). Used to counter expo-audio's native auto-resume on foreground.
+  const intentionallyStoppedRef = useRef(false);
   const surahsRef = useRef([]);
+  const isMountedRef = useRef(true);
+  // Generation token: every new playback run gets its own token.
+  // Stopping or unmounting invalidates the token so stale runs exit.
+  const playTokenRef = useRef(0);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Component unmounting — invalidate playback, stop audio, prevent leaks.
+      playTokenRef.current += 1;
+      quranPlayingRef.current = false;
+      intentionallyStoppedRef.current = true;
+      stopActivePlayer(soundRef);
+
+      try {
+        ScreenState?.setQuranPlaybackMode(null);
+      } catch (_) {}
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -63,7 +116,9 @@ export default function QuranScreen({ navigation }) {
     async function loadResumePosition() {
       try {
         const saved = await AsyncStorage.getItem('quran_resume_position');
-        if (saved) setResumePosition(JSON.parse(saved));
+        if (saved && isMountedRef.current) {
+          setResumePosition(JSON.parse(saved));
+        }
       } catch (_) {}
     }
     loadResumePosition();
@@ -73,7 +128,7 @@ export default function QuranScreen({ navigation }) {
     loadSurahs();
   }, []);
 
-    async function loadSurahs() {
+  async function loadSurahs() {
     try {
       setError(null);
 
@@ -83,21 +138,25 @@ export default function QuranScreen({ navigation }) {
         const { data, timestamp } = JSON.parse(raw);
         const isExpired = Date.now() - timestamp > SURAHS_CACHE_TTL;
         if (!isExpired && data?.length > 0) {
-          setSurahs(data);
-          surahsRef.current = data;
-          setFiltered(data);
-          setLoading(false);
+          if (isMountedRef.current) {
+            setSurahs(data);
+            surahsRef.current = data;
+            setFiltered(data);
+            setLoading(false);
+          }
           // Don't refresh in background — Quran list never changes
           return;
         }
       }
 
       // Slow path: no cache — fetch from API
-      setLoading(true);
+      if (isMountedRef.current) setLoading(true);
       const data = await fetchSurahs();
-      setSurahs(data);
-      surahsRef.current = data;
-      setFiltered(data);
+      if (isMountedRef.current) {
+        setSurahs(data);
+        surahsRef.current = data;
+        setFiltered(data);
+      }
 
       await AsyncStorage.setItem(SURAHS_CACHE_KEY, JSON.stringify({
         data,
@@ -105,156 +164,530 @@ export default function QuranScreen({ navigation }) {
       }));
 
     } catch (e) {
-      setError('Could not load surahs. Check your connection.');
+      if (isMountedRef.current) {
+        setError('Could not load surahs. Check your connection.');
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   }
 
-  async function playAudioUntilDone(sound) {
+  async function playAudioUntilDone(player) {
     return new Promise((resolve) => {
-      sound.setOnPlaybackStatusUpdate((st) => {
+      let settled = false;
+      let sub = null;
+      const done = (reason) => {
+        if (settled) return;
+        settled = true;
+        if (sub) {
+          try {
+            sub.remove();
+          } catch (_) {}
+        }
+        resolve(reason);
+      };
+      sub = player.addListener('playbackStatusUpdate', (st) => {
         if (st.didJustFinish) {
-          resolve('finished');
+          done('finished');
           return;
         }
-        if (st.isLoaded && !st.isPlaying && st.positionMillis > 0) {
-          resolve('stopped');
-          return;
+        // loaded && !playing && currentTime > 0 = playback halted mid-clip
+        // (user stop, or — in app mode — the native pause on background).
+        if (st.isLoaded && !st.playing && st.currentTime > 0) {
+          done('stopped');
         }
       });
     });
   }
 
-  async function runPlay(startSurahIndex, startVerseIndex, mode) {
-    console.log('runPlay START, mode:', mode, 'from surah:', startSurahIndex, 'verse:', startVerseIndex);
-    let appStateSubscription = null;
-    try {
-      quranPlayingRef.current = true;
+    async function runPlay(startSurahIndex, startVerseIndex, mode) {
+      console.log(
+        'runPlay START, mode:',
+        mode,
+        'from surah:',
+        startSurahIndex,
+        'verse:',
+        startVerseIndex
+      );
 
-      if (mode === 'background') {
-        appStateSubscription = AppState.addEventListener('change', (state) => {
-          console.log('AppState:', state, '- background mode keeps playing');
-        });
-      } else if (mode === 'lock') {
-        appStateSubscription = AppState.addEventListener('change', (state) => {
-          console.log('AppState:', state, '- lock mode keeps playing');
-        });
-      }
+      let appStateSubscription = null;
+      let screenStateSubscription = null;
+      let userLeaveSubscription = null;
 
-      setIsPlayingQuran(true);
+      const myToken = ++playTokenRef.current;
 
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: mode === 'lock' || mode === 'background',
-        shouldDuckAndroid: true,
-      });
+      const isAppMode = mode === 'app';
+      const isBackgroundMode = mode === 'background';
+      const isLockMode = mode === 'lock';
 
-      const allSurahs = surahsRef.current;
+      let player = null;
 
-      for (let s = startSurahIndex; s < allSurahs.length; s++) {
-        if (!quranPlayingRef.current) break;
-        const surah = allSurahs[s];
+      try {
+        ScreenState?.setQuranPlaybackMode(mode);
+      } catch (_) {}
 
-        let verses;
-        try {
-          verses = await fetchVerses(surah.id);
-          console.log('Surah', surah.id, 'verses:', verses?.length);
-        } catch (e) {
-          console.log('fetchVerses failed:', e.message);
-          continue;
+      const stopThisRun = () => {
+        if (
+          myToken !== playTokenRef.current ||
+          !quranPlayingRef.current
+        ) {
+          return;
         }
 
-        const startV = s === startSurahIndex ? startVerseIndex : 0;
+        intentionallyStoppedRef.current = true;
 
-        if (startV === 0 && surah.id !== 1 && surah.id !== 9) {
-          try {
-            const bismillahUrl = await fetchVerseAudioUrl('1:1');
-            const { sound: bSound } = await Audio.Sound.createAsync(
-              { uri: bismillahUrl },
-              { shouldPlay: true }
-            );
-            soundRef.current = bSound;
-            await playAudioUntilDone(bSound);
-            await bSound.unloadAsync();
-            soundRef.current = null;
-          } catch (e) {
-            console.log('Bismillah error:', e.message);
-          }
-          if (!quranPlayingRef.current) {
-            await AsyncStorage.setItem('quran_resume_position', JSON.stringify({
-              surahIndex: s,
-              verseIndex: 0,
-              surahName: surah.name_simple,
-            }));
-            setResumePosition({ surahIndex: s, verseIndex: 0, surahName: surah.name_simple });
-            break;
-          }
+        // Invalidate before stopping so stale completion/fetch work
+        // cannot advance playback.
+        playTokenRef.current += 1;
+        quranPlayingRef.current = false;
+
+        if (soundRef.current === player) {
+          stopActivePlayer(soundRef);
         }
 
-        for (let i = startV; i < verses.length; i++) {
-          if (!quranPlayingRef.current) {
-            await AsyncStorage.setItem('quran_resume_position', JSON.stringify({
-              surahIndex: s,
-              verseIndex: i,
-              surahName: surah.name_simple,
-            }));
-            setResumePosition({ surahIndex: s, verseIndex: i, surahName: surah.name_simple });
-            break;
-          }
+        if (isMountedRef.current) {
+          setIsPlayingQuran(false);
+        }
+      };
 
-          const verseKey = verses[i].verse_key;
-          const url = await fetchVerseAudioUrl(verseKey);
-          console.log('Playing verse:', verseKey, 'URL:', url);
+      try {
+        quranPlayingRef.current = true;
+        intentionallyStoppedRef.current = false;
 
-          try {
-            const { sound } = await Audio.Sound.createAsync(
-              { uri: url },
-              { shouldPlay: true }
-            );
-            soundRef.current = sound;
-            const reason = await playAudioUntilDone(sound);
-            console.log('Audio ended:', reason, 'for verse', verseKey);
-            await sound.unloadAsync();
-            soundRef.current = null;
+        /*
+        * IN APP ONLY
+        *
+        * Leaving Bushrann for ANY reason stops playback.
+        *
+        * Lock Screen mode deliberately does NOT make its decision
+        * here anymore. Doing that created the AppState/SCREEN_OFF
+        * ordering race.
+        */
+        appStateSubscription = AppState.addEventListener(
+          'change',
+          (state) => {
+            if (myToken !== playTokenRef.current) return;
 
-            if (!quranPlayingRef.current) {
-              await AsyncStorage.setItem('quran_resume_position', JSON.stringify({
-                surahIndex: s,
-                verseIndex: i,
-                surahName: surah.name_simple,
-              }));
-              setResumePosition({ surahIndex: s, verseIndex: i, surahName: surah.name_simple });
-              break;
+            if (state !== 'active') {
+              if (isAppMode) {
+                stopThisRun();
+              }
+            } else if (intentionallyStoppedRef.current) {
+              try {
+                soundRef.current?.pause();
+              } catch (_) {}
             }
-          } catch (audioError) {
-            console.log('Audio error:', audioError.message);
+          }
+        );
+
+        if (ScreenState) {
+          const emitter = new NativeEventEmitter(ScreenState);
+
+          /*
+          * BACKGROUND MODE
+          *
+          * Switching apps is allowed.
+          * Physical screen-off is not.
+          */
+          screenStateSubscription = emitter.addListener(
+            'BushrannScreenStateChanged',
+            (isOn) => {
+              if (myToken !== playTokenRef.current) return;
+
+              if (isBackgroundMode && !isOn) {
+                stopThisRun();
+              }
+            }
+          );
+
+          /*
+          * LOCK SCREEN MODE
+          *
+          * onUserLeaveHint() means the user intentionally left
+          * Bushrann while interacting with the device.
+          *
+          * Screen-off itself does NOT trigger this JS stop path,
+          * allowing expo-audio's native background playback to
+          * continue while the display is off.
+          */
+          userLeaveSubscription = emitter.addListener(
+            'BushrannUserLeave',
+            () => {
+              if (myToken !== playTokenRef.current) return;
+
+              if (isLockMode) {
+                stopThisRun();
+              }
+            }
+          );
+        }
+
+        if (isMountedRef.current) {
+          setIsPlayingQuran(true);
+        }
+
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: !isAppMode,
+          interruptionMode: isAppMode ? 'duckOthers' : 'doNotMix',
+        });
+
+        // One player reused for Bismillah + Quran verses.
+        player = createAudioPlayer(null);
+        soundRef.current = player;
+
+        if (!isAppMode) {
+          try {
+            player.setActiveForLockScreen(
+              true,
+              {
+                title: RECITER_NAME,
+                artist: RECITER_NAME,
+              },
+              {
+                showSeekForward: false,
+                showSeekBackward: false,
+              }
+            );
+          } catch (_) {}
+        }
+
+        const allSurahs = surahsRef.current;
+
+        for (
+          let s = startSurahIndex;
+          s < allSurahs.length;
+          s++
+        ) {
+          if (
+            !quranPlayingRef.current ||
+            myToken !== playTokenRef.current
+          ) {
+            break;
+          }
+
+          const surah = allSurahs[s];
+
+          let verses;
+
+          try {
+            verses = await fetchVerses(surah.id);
+            console.log(
+              'Surah',
+              surah.id,
+              'verses:',
+              verses?.length
+            );
+          } catch (e) {
+            console.log('fetchVerses failed:', e.message);
             continue;
           }
+
+          if (
+            myToken !== playTokenRef.current ||
+            !quranPlayingRef.current
+          ) {
+            break;
+          }
+
+          const startV =
+            s === startSurahIndex
+              ? startVerseIndex
+              : 0;
+
+          // Bismillah except Al-Fatihah and At-Tawbah.
+          if (
+            startV === 0 &&
+            surah.id !== 1 &&
+            surah.id !== 9
+          ) {
+            try {
+              const bismillahUrl =
+                await fetchVerseAudioUrl('1:1');
+
+              if (
+                myToken !== playTokenRef.current ||
+                !quranPlayingRef.current
+              ) {
+                break;
+              }
+
+              player.replace({
+                uri: bismillahUrl,
+              });
+
+              if (!isAppMode) {
+                try {
+                  player.updateLockScreenMetadata({
+                    title: `${surah.name_simple} — 1:1`,
+                    artist: RECITER_NAME,
+                  });
+                } catch (_) {}
+              }
+
+              player.play();
+
+              await playAudioUntilDone(player);
+            } catch (e) {
+              console.log(
+                'Bismillah error:',
+                e.message
+              );
+            }
+
+            if (
+              !quranPlayingRef.current ||
+              myToken !== playTokenRef.current
+            ) {
+              if (isMountedRef.current) {
+                await AsyncStorage.setItem(
+                  'quran_resume_position',
+                  JSON.stringify({
+                    surahIndex: s,
+                    verseIndex: 0,
+                    surahName: surah.name_simple,
+                  })
+                );
+
+                setResumePosition({
+                  surahIndex: s,
+                  verseIndex: 0,
+                  surahName: surah.name_simple,
+                });
+              }
+
+              break;
+            }
+          }
+
+          for (
+            let i = startV;
+            i < verses.length;
+            i++
+          ) {
+            if (
+              !quranPlayingRef.current ||
+              myToken !== playTokenRef.current
+            ) {
+              if (isMountedRef.current) {
+                await AsyncStorage.setItem(
+                  'quran_resume_position',
+                  JSON.stringify({
+                    surahIndex: s,
+                    verseIndex: i,
+                    surahName: surah.name_simple,
+                  })
+                );
+
+                setResumePosition({
+                  surahIndex: s,
+                  verseIndex: i,
+                  surahName: surah.name_simple,
+                });
+              }
+
+              break;
+            }
+
+            const verseKey = verses[i].verse_key;
+            const url =
+              await fetchVerseAudioUrl(verseKey);
+
+            console.log(
+              'Playing verse:',
+              verseKey,
+              'URL:',
+              url
+            );
+
+            if (
+              myToken !== playTokenRef.current ||
+              !quranPlayingRef.current
+            ) {
+              if (isMountedRef.current) {
+                await AsyncStorage.setItem(
+                  'quran_resume_position',
+                  JSON.stringify({
+                    surahIndex: s,
+                    verseIndex: i,
+                    surahName: surah.name_simple,
+                  })
+                );
+
+                setResumePosition({
+                  surahIndex: s,
+                  verseIndex: i,
+                  surahName: surah.name_simple,
+                });
+              }
+
+              break;
+            }
+
+            try {
+              player.replace({
+                uri: url,
+              });
+
+              if (!isAppMode) {
+                try {
+                  player.updateLockScreenMetadata({
+                    title: `${surah.name_simple} — ${verseKey}`,
+                    artist: RECITER_NAME,
+                  });
+                } catch (_) {}
+              }
+
+              player.play();
+
+              if (
+                myToken !== playTokenRef.current ||
+                !quranPlayingRef.current
+              ) {
+                break;
+              }
+
+              const reason =
+                await playAudioUntilDone(player);
+
+              console.log(
+                'Audio ended:',
+                reason,
+                'for verse',
+                verseKey
+              );
+
+              if (
+                !quranPlayingRef.current ||
+                myToken !== playTokenRef.current
+              ) {
+                if (isMountedRef.current) {
+                  await AsyncStorage.setItem(
+                    'quran_resume_position',
+                    JSON.stringify({
+                      surahIndex: s,
+                      verseIndex: i,
+                      surahName: surah.name_simple,
+                    })
+                  );
+
+                  setResumePosition({
+                    surahIndex: s,
+                    verseIndex: i,
+                    surahName: surah.name_simple,
+                  });
+                }
+
+                break;
+              }
+            } catch (audioError) {
+              console.log(
+                'Audio error:',
+                audioError.message
+              );
+
+              continue;
+            }
+          }
+
+          if (
+            !quranPlayingRef.current ||
+            myToken !== playTokenRef.current
+          ) {
+            break;
+          }
         }
 
-        if (!quranPlayingRef.current) break;
-      }
+        if (appStateSubscription) {
+          appStateSubscription.remove();
+        }
 
-      if (appStateSubscription) appStateSubscription.remove();
-      setIsPlayingQuran(false);
-      quranPlayingRef.current = false;
-    } catch (e) {
-      if (appStateSubscription) appStateSubscription.remove();
-      console.log('runPlay error:', e.message);
-      setIsPlayingQuran(false);
-      quranPlayingRef.current = false;
+        if (screenStateSubscription) {
+          screenStateSubscription.remove();
+        }
+
+        if (userLeaveSubscription) {
+          userLeaveSubscription.remove();
+        }
+
+        // Only the current run may clean up shared audio state.
+        if (myToken === playTokenRef.current) {
+          quranPlayingRef.current = false;
+
+          try {
+            ScreenState?.setQuranPlaybackMode(null);
+          } catch (_) {}
+
+          if (isMountedRef.current) {
+            setIsPlayingQuran(false);
+          }
+
+          if (soundRef.current === player) {
+            stopActivePlayer(soundRef);
+          }
+
+          try {
+            await setAudioModeAsync({
+              shouldPlayInBackground: false,
+              interruptionMode: 'duckOthers',
+            });
+          } catch (_) {}
+        } else {
+          // Stale run: release only its own player.
+          releasePlayer(player);
+        }
+      } catch (e) {
+        if (appStateSubscription) {
+          appStateSubscription.remove();
+        }
+
+        if (screenStateSubscription) {
+          screenStateSubscription.remove();
+        }
+
+        if (userLeaveSubscription) {
+          userLeaveSubscription.remove();
+        }
+
+        console.log(
+          'runPlay error:',
+          e.message
+        );
+
+        if (myToken === playTokenRef.current) {
+          quranPlayingRef.current = false;
+
+          try {
+            ScreenState?.setQuranPlaybackMode(null);
+          } catch (_) {}
+
+          if (isMountedRef.current) {
+            setIsPlayingQuran(false);
+          }
+
+          if (soundRef.current === player) {
+            stopActivePlayer(soundRef);
+          }
+        } else {
+          releasePlayer(player);
+        }
+      }
     }
-  }
 
   function playEntireQuran(startSurahIndex = 0, startVerseIndex = 0) {
     if (surahs.length === 0) return;
 
     if (isPlayingQuran) {
+      playTokenRef.current += 1;
       quranPlayingRef.current = false;
-      if (soundRef.current) {
-        soundRef.current.stopAsync();
-      }
+      intentionallyStoppedRef.current = true;
+      stopActivePlayer(soundRef);
+
+      try {
+        ScreenState?.setQuranPlaybackMode(null);
+      } catch (_) {}
+
+      if (isMountedRef.current) setIsPlayingQuran(false);
       return;
     }
 
@@ -322,6 +755,7 @@ export default function QuranScreen({ navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
+
         <View>
           <Text style={styles.headerTitle}>Al-Quran</Text>
           <Text style={styles.headerSub}>Read · Memorize · Recite</Text>
@@ -355,7 +789,7 @@ export default function QuranScreen({ navigation }) {
           <Text style={styles.resumeText}>Continue from {resumePosition.surahName}</Text>
           <TouchableOpacity onPress={async () => {
             await AsyncStorage.removeItem('quran_resume_position');
-            setResumePosition(null);
+            if (isMountedRef.current) setResumePosition(null);
           }}>
             <Ionicons name="close-circle" size={18} color="#666" />
           </TouchableOpacity>
@@ -423,7 +857,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)',
   },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: { color: '#000', fontSize: 20, fontWeight: '700', textAlign: 'center' },
   headerSub: { color: '#666', fontSize: 12, textAlign: 'center', marginTop: 2 },
   searchRow: {

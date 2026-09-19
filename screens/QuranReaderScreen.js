@@ -32,6 +32,17 @@ import { isLowEndDevice } from '../utils/deviceInfo';
 const GOLD = COLORS.gold ?? '#c9a84c';
 const STORAGE_KEY = (surahId) => `quran_memorized_${surahId}`;
 
+// Safely stop + unload a sound object without throwing/unhandled rejections.
+async function safeUnload(sound) {
+  if (!sound) return;
+  try {
+    await sound.stopAsync();
+  } catch (_) {}
+  try {
+    await sound.unloadAsync();
+  } catch (_) {}
+}
+
 export default function QuranReaderScreen({ navigation, route }) {
   const { surah } = route.params;
   const insets = useSafeAreaInsets();
@@ -45,12 +56,54 @@ export default function QuranReaderScreen({ navigation, route }) {
   const [isPlayingSurah, setIsPlayingSurah] = useState(false);
   const surahPlayingRef = useRef(false);
   const soundRef = useRef(null);
+  const isMountedRef = useRef(true);
+  // Bumped every time a new audio "owner" (individual verse or Play All) takes
+  // over, so stale in-flight async work can detect it's been superseded.
+  const playTokenRef = useRef(0);
+  // Resolver ref for the currently pending Play All wait (Bismillah or verse).
+  // Set when a wait begins, called when the sound finishes naturally OR when
+  // Play All is cancelled (stop, individual verse, focus loss, etc.).
+  const playAllWaitResolverRef = useRef(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Resolve any pending Play All wait and clear the resolver.
+  const resolvePlayAllWait = useCallback(() => {
+    const resolver = playAllWaitResolverRef.current;
+    if (resolver) {
+      playAllWaitResolverRef.current = null;
+      resolver();
+    }
+  }, []);
+
+  // Cancel/unload any in-flight or active playback and reset playback state.
+  const stopAllPlayback = useCallback(async () => {
+    playTokenRef.current += 1; // invalidate any pending playAudio()/playSurah() work
+    surahPlayingRef.current = false;
+    resolvePlayAllWait(); // release any pending Play All wait
+    const sound = soundRef.current;
+    soundRef.current = null;
+    await safeUnload(sound);
+    if (isMountedRef.current) {
+      setIsPlayingSurah(false);
+      setPlayingKey(null);
+    }
+  }, [resolvePlayAllWait]);
 
   useFocusEffect(
     useCallback(() => {
       const entry = SystemBars.pushStackEntry({ style: 'dark' });
-      return () => SystemBars.popStackEntry(entry);
-    }, [])
+      return () => {
+        SystemBars.popStackEntry(entry);
+        // Screen lost focus (or is unmounting) — stop/cancel any audio.
+        stopAllPlayback();
+      };
+    }, [stopAllPlayback])
   );
 
   // Load verses + saved progress
@@ -59,7 +112,8 @@ export default function QuranReaderScreen({ navigation, route }) {
     return () => {
       // Unload audio on unmount
       if (soundRef.current) {
-        soundRef.current.unloadAsync();
+        safeUnload(soundRef.current);
+        soundRef.current = null;
       }
     };
   }, []);
@@ -71,14 +125,17 @@ export default function QuranReaderScreen({ navigation, route }) {
         fetchVerses(surah.id),
         AsyncStorage.getItem(STORAGE_KEY(surah.id)),
       ]);
+      if (!isMountedRef.current) return;
       setVerses(versesData);
       if (savedRaw) {
         setMemorizedKeys(new Set(JSON.parse(savedRaw)));
       }
     } catch (e) {
-      Alert.alert('Error', 'Could not load verses. Check your connection.');
+      if (isMountedRef.current) {
+        Alert.alert('Error', 'Could not load verses. Check your connection.');
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   }
 
@@ -123,107 +180,198 @@ export default function QuranReaderScreen({ navigation, route }) {
 
   // Play audio for a verse
   async function playAudio(verseKey) {
-    try {
-      // Stop any existing audio
-      if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-        if (playingKey === verseKey) {
-          setPlayingKey(null);
-          return;
-        }
-      }
+    // Individual verse playback takes ownership — cancel any active Play All.
+    surahPlayingRef.current = false;
+    if (isMountedRef.current) setIsPlayingSurah(false);
+    resolvePlayAllWait(); // release any pending Play All wait
 
-      setPlayingKey(verseKey);
+    const myToken = ++playTokenRef.current;
+
+    // Tapping the currently playing verse stops it.
+    if (playingKey === verseKey && soundRef.current) {
+      const sound = soundRef.current;
+      soundRef.current = null;
+      if (isMountedRef.current) setPlayingKey(null);
+      await safeUnload(sound);
+      return;
+    }
+
+    // Stop whatever is currently playing before starting the new verse.
+    const prevSound = soundRef.current;
+    soundRef.current = null;
+    await safeUnload(prevSound);
+
+    if (myToken !== playTokenRef.current) return; // superseded while stopping
+
+    if (isMountedRef.current) setPlayingKey(verseKey);
+
+    try {
       const url = await fetchVerseAudioUrl(verseKey);
+      if (myToken !== playTokenRef.current) return; // superseded
+
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
       const { sound } = await Audio.Sound.createAsync(
         { uri: url },
         { shouldPlay: true }
       );
+
+      if (myToken !== playTokenRef.current) {
+        // A newer request/focus-loss already took over — don't leak this sound.
+        await safeUnload(sound);
+        return;
+      }
+
       soundRef.current = sound;
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.didJustFinish) {
-          setPlayingKey(null);
-          soundRef.current = null;
+          const finishedSound = sound;
+          if (soundRef.current === finishedSound) {
+            soundRef.current = null;
+          }
+          if (myToken === playTokenRef.current && isMountedRef.current) {
+            setPlayingKey(null);
+          }
+          safeUnload(finishedSound);
         }
       });
     } catch (e) {
-      setPlayingKey(null);
-      Alert.alert('Audio Error', 'Could not play audio for this verse.');
+      if (myToken === playTokenRef.current && isMountedRef.current) {
+        setPlayingKey(null);
+        Alert.alert('Audio Error', 'Could not play audio for this verse.');
+      }
     }
   }
 
   async function playSurah() {
     if (isPlayingSurah) {
-        surahPlayingRef.current = false;
-        setIsPlayingSurah(false);
-        if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-        }
-        setPlayingKey(null);
-        return;
+      playTokenRef.current += 1;
+      surahPlayingRef.current = false;
+      resolvePlayAllWait(); // release any pending Play All wait
+      if (isMountedRef.current) setIsPlayingSurah(false);
+      const sound = soundRef.current;
+      soundRef.current = null;
+      if (isMountedRef.current) setPlayingKey(null);
+      await safeUnload(sound);
+      return;
     }
+
+    // Starting Play All — invalidate any pending individual playAudio() request
+    // and stop whatever is currently playing before beginning the sequence.
+    const myToken = ++playTokenRef.current;
     surahPlayingRef.current = true;
-    setIsPlayingSurah(true);
+    if (isMountedRef.current) setIsPlayingSurah(true);
+
+    const prevSound = soundRef.current;
+    soundRef.current = null;
+    await safeUnload(prevSound);
+
+    if (myToken !== playTokenRef.current || !surahPlayingRef.current) {
+      if (isMountedRef.current) setIsPlayingSurah(false);
+      return;
+    }
 
     // Play Bismillah first (except Surah 1 and 9)
     if (surah.id !== 1 && surah.id !== 9) {
       try {
         const bismillahUrl = await fetchVerseAudioUrl('1:1');
+        if (myToken !== playTokenRef.current) return; // superseded
         await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
         const { sound: bismillahSound } = await Audio.Sound.createAsync({ uri: bismillahUrl }, { shouldPlay: true });
+        if (myToken !== playTokenRef.current) {
+          await safeUnload(bismillahSound);
+          return;
+        }
         soundRef.current = bismillahSound;
+
+        // Install resolver for this wait
+        playAllWaitResolverRef.current = null;
         await new Promise((resolve) => {
+          playAllWaitResolverRef.current = resolve;
           bismillahSound.setOnPlaybackStatusUpdate((status) => {
-            if (status.didJustFinish) resolve();
+            if (status.didJustFinish) {
+              const r = playAllWaitResolverRef.current;
+              if (r) {
+                playAllWaitResolverRef.current = null;
+                r();
+              }
+            }
           });
         });
-        await bismillahSound.unloadAsync();
-        soundRef.current = null;
+
+        if (soundRef.current === bismillahSound) {
+          soundRef.current = null;
+        }
+        await safeUnload(bismillahSound);
       } catch (e) {
         console.log('Bismillah playback error:', e.message);
         // Network/audio failure — stop gracefully instead of crashing
-        setIsPlayingSurah(false);
-        setPlayingKey(null);
-        surahPlayingRef.current = false;
-        Alert.alert('Connection Issue', 'Could not load audio. Please check your internet connection and try again.');
+        if (myToken === playTokenRef.current) {
+          surahPlayingRef.current = false;
+          if (isMountedRef.current) {
+            setIsPlayingSurah(false);
+            setPlayingKey(null);
+            Alert.alert('Connection Issue', 'Could not load audio. Please check your internet connection and try again.');
+          }
+        }
         return;
       }
     }
 
     for (let i = 0; i < verses.length; i++) {
-        if (!surahPlayingRef.current) break;
+        if (!surahPlayingRef.current || myToken !== playTokenRef.current) break;
         const verseKey = verses[i].verse_key;
-        setPlayingKey(verseKey);
+        if (isMountedRef.current) setPlayingKey(verseKey);
         try {
           const url = await fetchVerseAudioUrl(verseKey);
+          if (myToken !== playTokenRef.current || !surahPlayingRef.current) break;
           const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+          if (myToken !== playTokenRef.current || !surahPlayingRef.current) {
+            await safeUnload(sound);
+            break;
+          }
           soundRef.current = sound;
+
+          // Install resolver for this wait
+          playAllWaitResolverRef.current = null;
           await new Promise((resolve) => {
+            playAllWaitResolverRef.current = resolve;
             sound.setOnPlaybackStatusUpdate((status) => {
-              if (status.didJustFinish) resolve();
+              if (status.didJustFinish) {
+                const r = playAllWaitResolverRef.current;
+                if (r) {
+                  playAllWaitResolverRef.current = null;
+                  r();
+                }
+              }
             });
           });
-          await sound.unloadAsync();
-          soundRef.current = null;
+
+          if (soundRef.current === sound) {
+            soundRef.current = null;
+          }
+          await safeUnload(sound);
         } catch (e) {
           console.log('Verse playback error:', verseKey, e.message);
           // Network/audio failure mid-surah — stop gracefully instead of crashing
-          setIsPlayingSurah(false);
-          setPlayingKey(null);
-          surahPlayingRef.current = false;
-          Alert.alert('Connection Issue', 'Could not load audio. Please check your internet connection and try again.');
+          if (myToken === playTokenRef.current) {
+            surahPlayingRef.current = false;
+            if (isMountedRef.current) {
+              setIsPlayingSurah(false);
+              setPlayingKey(null);
+              Alert.alert('Connection Issue', 'Could not load audio. Please check your internet connection and try again.');
+            }
+          }
           return;
         }
     }
-    setIsPlayingSurah(false);
-    setPlayingKey(null);
-    surahPlayingRef.current = false;
+    if (myToken === playTokenRef.current) {
+      surahPlayingRef.current = false;
+      if (isMountedRef.current) {
+        setIsPlayingSurah(false);
+        setPlayingKey(null);
+      }
     }
+  }
 
   const memorizedCount = memorizedKeys.size;
   const totalVerses = surah.verses_count;

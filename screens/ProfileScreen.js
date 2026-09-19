@@ -12,6 +12,8 @@ import NetInfo from '@react-native-community/netinfo';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
 
 import AnimatedButton from './AnimatedButton';
 import { useDownload } from '../context/DownloadContext';
@@ -23,6 +25,7 @@ import { ROUTES } from '../constants/routes';
 import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { deleteVideoOnServer } from '../utils/apiClient';
 
 const useDownloadedVideos = () => {
   const downloadedRef = useRef(new Set());
@@ -54,6 +57,7 @@ function profileReducer(state, action) {
     case 'SET_PENDING_APPLICATION': return { ...state, hasPendingApplication: action.hasPendingApplication };
     case 'SET_FOLLOW_COUNTS': return { ...state, followersCount: action.followersCount, followingCount: action.followingCount };
     case 'SET_FOLLOWING': return { ...state, following: action.following };
+    case 'SET_BLOCKED': return { ...state, blocked: action.blocked };
     case 'SET_ALL_PROFILE': return { ...state, profile: action.profile, followersCount: action.followersCount, followingCount: action.followingCount, isScholar: action.isScholar, scholarData: action.scholarData, hasPendingApplication: action.hasPendingApplication };
     case 'FOLLOW_CHANGE': return { ...state, following: action.following, followersCount: Math.max(0, state.followersCount + action.delta) };
     case 'BLOCK': return { ...state, blocked: true, following: false };
@@ -158,7 +162,7 @@ const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongP
         {isLivestreamItem && (
           <View style={styles.liveLabel}>
             <Text style={styles.liveLabelText}>
-              {item.video_url && item.video_url !== 'processing' ? '🔴 REPLAY' : '⏳ Processing...'}
+              {item.video_url === 'failed' ? '❌ Replay processing failed' : item.video_url && item.video_url !== 'processing' ? '🔴 REPLAY' : '⏳ Processing...'}
             </Text>
           </View>
         )}
@@ -188,13 +192,10 @@ export default function ProfileScreen({ route, navigation }) {
 
   useEffectHook(() => {
     if (!navigation) return;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) navigation.replace(ROUTES.LOGIN);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session) navigation.replace(ROUTES.LOGIN);
-    });
-    return () => subscription.unsubscribe();
   }, []);
 
   const downloadContext = useDownload();
@@ -218,11 +219,15 @@ export default function ProfileScreen({ route, navigation }) {
   useEffectHook(() => {
     const { DeviceEventEmitter } = require('react-native');
     const sub = DeviceEventEmitter.addListener('followChanged', ({ userId, isFollowing }) => {
+      // followingCount only makes sense to adjust when this screen is showing the
+      // logged-in user's own profile — a follow/unfollow elsewhere in the app should
+      // never touch the count displayed for a profile that isn't currentUser's own.
+      if (!isOwnProfile) return;
       if (userId === currentUser?.id) return;
       dispatchProfile({ type: 'ADJUST_FOLLOWING_COUNT', delta: isFollowing ? 1 : -1 });
     });
     return () => sub.remove();
-  }, [currentUser]);
+  }, [currentUser, isOwnProfile]);
 
   const flatListRef = useRef(null);
   const livestreamIdsRef = useRef(new Set());
@@ -234,6 +239,20 @@ export default function ProfileScreen({ route, navigation }) {
 
   // Track timeouts for cleanup
   const timeoutsRef = useRef([]);
+
+  // Check for cached user when globalUser is null (offline scenario)
+  const [cachedUser, setCachedUser] = useState(null);
+  const [isOffline, setIsOffline] = useState(false);
+  const [deleteModal, setDeleteModal] = useState({ visible: false, video: null });
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+  const [loadingVideo, setLoadingVideo] = useState(false);
+  const [dialog, setDialog] = useState({ 
+    visible: false, 
+    title: '', 
+    message: '', 
+    type: 'info', 
+    buttons: [] 
+  });
 
     useFocusEffect(
     useCallback(() => {
@@ -277,9 +296,8 @@ export default function ProfileScreen({ route, navigation }) {
       
       // Always refresh on focus to get latest data (especially after livestream)
       if (currentId) {
-        if (currentId !== lastUserIdRef.current) {
-          lastUserIdRef.current = currentId;
-        }
+        // lastUserIdRef is now set inside init() itself, based on its own comparison —
+        // don't pre-empt that comparison here.
         
         // Delay fetch slightly to allow background save to complete
         // This ensures new livestreams appear immediately after ending stream
@@ -325,12 +343,14 @@ export default function ProfileScreen({ route, navigation }) {
 
   async function init(viewingId) {
     const user = globalUser || cachedUser;
+    __DEV__ && console.log('[ProfileScreen] init START. isOffline:', isOffline, 'currentUserId present:', !!user?.id, 'viewingId present:', !!viewingId);
     
     // Only reset videos if switching to a different user
     const previousId = lastUserIdRef.current;
     if (viewingId !== previousId) {
       dispatchVideo({ type: 'RESET' });
     }
+    lastUserIdRef.current = viewingId;
 
     if (user && viewingId) {
       const ownProfile = viewingId === user.id;
@@ -355,6 +375,7 @@ export default function ProfileScreen({ route, navigation }) {
 
       // If offline, skip network requests and show cached data only
       if (isOffline) {
+        __DEV__ && console.log('[ProfileScreen] init EARLY RETURN: isOffline true, skipping Promise.all');
         // Try to load from cache if available, but don't fail
         try {
           const cachedProfile = await userCache.get();
@@ -366,11 +387,13 @@ export default function ProfileScreen({ route, navigation }) {
         return;
       }
 
+      __DEV__ && console.log('[ProfileScreen] init: starting Promise.all(loadProfile, loadVideos, loadLivestreams)');
       Promise.all([
         loadProfile(viewingId),
         loadVideos(viewingId, ownProfile),
         loadLivestreams(viewingId),
       ]).then(([profileResult, videoResult, _]) => {
+        __DEV__ && console.log('[ProfileScreen] init: Promise.all COMPLETE');
         if (profileResult) {
           const { data, frsCount, fngCount, scholarResult } = profileResult;
           dispatchProfile({
@@ -382,6 +405,7 @@ export default function ProfileScreen({ route, navigation }) {
             scholarData: data.is_scholar ? (scholarResult.data ?? null) : null,
             hasPendingApplication: data.is_scholar ? false : !!scholarResult.data,
           });
+          __DEV__ && console.log('[ProfileScreen] profile SET (SET_ALL_PROFILE dispatched)');
         }
         if (videoResult) {
           const { pubVideos, privVideos } = videoResult;
@@ -390,7 +414,7 @@ export default function ProfileScreen({ route, navigation }) {
         }
         dispatchUI({ type: 'SET_LOADING', loading: false });
       }).catch(async (e) => {
-        
+        __DEV__ && console.log('[ProfileScreen] init: Promise.all REJECTED', e?.message || e);
         // If API fails, try to use cached data
         try {
           const cachedProfile = await userCache.get();
@@ -432,7 +456,11 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   async function loadProfile(userId) {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    const __loadProfileStart = Date.now();
+    __DEV__ && console.log('[ProfileScreen] loadProfile START');
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    __DEV__ && console.log('[ProfileScreen] loadProfile END. elapsed ms:', Date.now() - __loadProfileStart, 'data present:', !!data, 'error present:', !!error);
+    if (error) throw error;
     if (!data) return null;
     const [{ count: frsCount }, { count: fngCount }, scholarResult] = await Promise.all([
       supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
@@ -445,6 +473,8 @@ export default function ProfileScreen({ route, navigation }) {
   }
 
   async function loadVideos(userId, isOwner) {
+    const __loadVideosStart = Date.now();
+    __DEV__ && console.log('[ProfileScreen] loadVideos START');
     const { data: pub } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', false).eq('status', 'approved')
       .order('is_pinned', { ascending: false }).order('pin_order', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false });
     const pubVideos = pub ?? [];
@@ -453,19 +483,28 @@ export default function ProfileScreen({ route, navigation }) {
       const { data: priv } = await supabase.from('videos').select('*').eq('user_id', userId).eq('is_private', true).order('created_at', { ascending: false });
       privVideos = priv ?? [];
     }
+    __DEV__ && console.log('[ProfileScreen] loadVideos END. elapsed ms:', Date.now() - __loadVideosStart);
     return { pubVideos, privVideos };
   }
 
   async function loadLivestreams(userId) {
+    const __loadLivestreamsStart = Date.now();
+    __DEV__ && console.log('[ProfileScreen] loadLivestreams START');
     const { data, error } = await supabase
       .from('livestreams')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
+    __DEV__ && console.log('[ProfileScreen] loadLivestreams END. elapsed ms:', Date.now() - __loadLivestreamsStart, 'data present:', !!data, 'error present:', !!error);
     
     if (error) {
     }
-    
+
+    // Guard against a delayed poll for a previously-viewed profile resolving after
+    // the user has since navigated to/switched to a different profile.
+    const currentViewingId = targetUserId ?? (globalUser || cachedUser)?.id;
+    if (userId !== currentViewingId) return;
+
     dispatchVideo({ type: 'SET_LIVESTREAMS', videos: data ?? [] });
   }
 
@@ -500,19 +539,30 @@ export default function ProfileScreen({ route, navigation }) {
   async function handleBlock() {
     if (!currentUser || isOwnProfile) return;
     if (blocked) {
-      await supabase.from('blocks').delete()
+      const { error } = await supabase.from('blocks').delete()
         .eq('blocker_id', currentUser.id)
         .eq('blocked_id', targetUserId);
+      if (error) {
+        setDialog({ visible: true, title: 'Error', message: 'Could not unblock. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+        return;
+      }
       dispatchProfile({ type: 'UNBLOCK' });
     } else {
-      await supabase.from('blocks').insert({
+      const { error: blockError } = await supabase.from('blocks').insert({
         blocker_id: currentUser.id,
         blocked_id: targetUserId,
       });
+      if (blockError) {
+        setDialog({ visible: true, title: 'Error', message: 'Could not block. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+        return;
+      }
       dispatchProfile({ type: 'BLOCK' });
-      await supabase.from('follows').delete()
+      const { error: unfollowError } = await supabase.from('follows').delete()
         .eq('follower_id', currentUser.id)
         .eq('following_id', targetUserId);
+      if (unfollowError) {
+        __DEV__ && console.error('[ProfileScreen] handleBlock unfollow-cleanup error:', unfollowError);
+      }
       blockUser(targetUserId);
       navigation.goBack();
     }
@@ -632,7 +682,8 @@ export default function ProfileScreen({ route, navigation }) {
           { text: 'Unpin', onPress: async () => { 
             setDialog(d => ({ ...d, visible: false }));
             try {
-              await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id); 
+              const { error } = await supabase.from('videos').update({ is_pinned: false, pin_order: null }).eq('id', video.id);
+              if (error) throw error;
                 // Update local state immediately
                 const updatedVideos = publicVideos.map(v => v.id === video.id ? { ...v, is_pinned: false, pin_order: null } : v);
                 const sorted = [
@@ -652,7 +703,8 @@ export default function ProfileScreen({ route, navigation }) {
         ]});
       } else {
         if (pinnedCount >= 3) { setDialog({ visible: true, title: 'Limit Reached', message: 'You can only pin up to 3 videos.', type: 'warning', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
-        await supabase.from('videos').update({ is_pinned: true, pin_order: pinnedCount + 1 }).eq('id', video.id);
+        const { error: pinError } = await supabase.from('videos').update({ is_pinned: true, pin_order: pinnedCount + 1 }).eq('id', video.id);
+        if (pinError) throw pinError;
           // Update local state immediately
           const updatedVideos = publicVideos.map(v => v.id === video.id ? { ...v, is_pinned: true, pin_order: pinnedCount + 1 } : v);
           const sorted = [
@@ -677,9 +729,15 @@ export default function ProfileScreen({ route, navigation }) {
       try {
         const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
         console.log('[DELETE] fast path - table:', table, 'video id:', video.id);
-        const { error } = await supabase.from(table).delete().eq('id', video.id);
-        console.log('[DELETE] fast path - delete result error:', error);
-        if (error) { setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
+        if (table === 'videos') {
+          const { success, error: deleteError } = await deleteVideoOnServer(video.id);
+          console.log('[DELETE] fast path - server delete result:', deleteError);
+          if (!success) { setDialog({ visible: true, title: 'Error', message: deleteError, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
+        } else {
+          const { error } = await supabase.from(table).delete().eq('id', video.id);
+          console.log('[DELETE] fast path - delete result error:', error);
+          if (error) { setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
+        }
         dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
         console.log('[DELETE] fast path - about to set timeout for toast');
         setTimeout(() => {
@@ -706,9 +764,15 @@ export default function ProfileScreen({ route, navigation }) {
     setDeleteModal({ visible: false, video: null });
     try {
       const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
-      const { error } = await supabase.from(table).delete().eq('id', video.id);
-      console.log('[DELETE] supabase delete result - error:', error);
-      if (error) { setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
+      if (table === 'videos') {
+        const { success, error: deleteError } = await deleteVideoOnServer(video.id);
+        console.log('[DELETE] server delete result - error:', deleteError);
+        if (!success) { setDialog({ visible: true, title: 'Error', message: deleteError, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
+      } else {
+        const { error } = await supabase.from(table).delete().eq('id', video.id);
+        console.log('[DELETE] supabase delete result - error:', error);
+        if (error) { setDialog({ visible: true, title: 'Error', message: error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] }); return; }
+      }
       dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
       console.log('[DELETE] dontShowAgain:', dontShowAgain);
       if (dontShowAgain) await AsyncStorage.setItem('skip_delete_alert', 'true');
@@ -766,10 +830,6 @@ export default function ProfileScreen({ route, navigation }) {
       onBlock: !isOwnProfile ? () => {} : null,
     }, currentUser?.id, navigation);
   }, [showVideoOptionsSheet, isOwnProfile, currentUser, navigation, handlePinVideo, handleDeleteVideo, handleDownloadVideo]);
-
-  const handleOpenVideo = useCallback((videos, index) => {
-    openVideo(videos, index);
-  }, [openVideo]);
 
   const handleAvatarPress = useCallback(() => {
     if (isOwnProfile) {
@@ -919,6 +979,8 @@ export default function ProfileScreen({ route, navigation }) {
         isLivestreamItem={isLivestream}
         onPress={() => {
           if (isLivestream) {
+            // Never attempt to play a replay whose processing failed.
+            if (item.video_url === 'failed') return;
             navigation.navigate(ROUTES.VIDEO_DETAIL, {
               video: {
                 id: item.id,
@@ -1214,7 +1276,41 @@ export default function ProfileScreen({ route, navigation }) {
       </View>
     </View>
     );
-  }, [profile, isScholar, scholarData, hasPendingApplication, publicVideos, followersCount, followingCount, totalLikes, isOwnProfile, following, blocked, activeTab, currentUser, targetUserId, navigation, isAdmin, isSuperAdmin, targetIsAdmin, adminCount, addingAdmin, handleAddAdmin]);
+  }, [
+    profile,
+    isScholar,
+    scholarData,
+    hasPendingApplication,
+    publicVideos,
+    followersCount,
+    followingCount,
+    totalLikes,
+    isOwnProfile,
+    following,
+    blocked,
+    activeTab,
+    currentUser,
+    targetUserId,
+    navigation,
+    isAdmin,
+    isSuperAdmin,
+    targetIsAdmin,
+    adminCount,
+    addingAdmin,
+    handleAddAdmin,
+    handleAvatarPress,
+    handleNavigateEditProfile,
+    handleNavigateApplyScholar,
+    handleNavigateFollowers,
+    handleNavigateFollowing,
+    handleFollow,
+    handleBlock,
+    handleTabVideos,
+    handleTabPrivate,
+    handleTabLivestreams,
+    handleTabLiked,
+    handleNavigateSettings,
+  ]);
 
   const activeVideos = activeTab === 'videos' 
     ? publicVideos.filter(v => !v.video_url?.includes('.m3u8'))
@@ -1223,28 +1319,22 @@ export default function ProfileScreen({ route, navigation }) {
       : activeTab === 'livestreams' 
         ? livestreams 
         : likedVideos;
-  
-  // Debug: Log which array is being used for current tab
-
-  // Check for cached user when globalUser is null (offline scenario)
-  const [cachedUser, setCachedUser] = useState(null);
-  const [isOffline, setIsOffline] = useState(false);
-  const [deleteModal, setDeleteModal] = useState({ visible: false, video: null });
-  const [dontShowAgain, setDontShowAgain] = useState(false);
-  const [loadingVideo, setLoadingVideo] = useState(false);
-  const [dialog, setDialog] = useState({ 
-    visible: false, 
-    title: '', 
-    message: '', 
-    type: 'info', 
-    buttons: [] 
-  });
 
   // Fetch signed URL for secure video playback
   const getSignedVideoUrl = async (livestreamId) => {
     try {
       const response = await fetch(`https://balagh-server-production.up.railway.app/api/recording/livestreams/${livestreamId}/play`);
+
+      if (!response.ok) {
+        throw new Error(`Failed to get signed URL: ${response.status}`);
+      }
+
       const data = await response.json();
+
+      if (!data?.signedUrl) {
+        throw new Error('Server returned no signed URL');
+      }
+
       return data.signedUrl;
     } catch (e) {
       console.error('[VIDEO] Failed to get signed URL:', e);
@@ -1253,9 +1343,14 @@ export default function ProfileScreen({ route, navigation }) {
   };
   
   useEffectHook(() => {
+    let active = true;
+
     async function checkCachedUser() {
       if (!userLoading && !globalUser) {
         const cached = await userCache.get();
+
+        if (!active) return;
+
         if (cached) {
           setCachedUser(cached);
           setIsOffline(true);
@@ -1265,8 +1360,13 @@ export default function ProfileScreen({ route, navigation }) {
         }
       }
     }
+
     checkCachedUser();
-  }, [userLoading, globalUser]);
+
+    return () => {
+      active = false;
+    };
+  }, [userLoading, globalUser, navigation]);
 
   // Show loading only on initial load when we have no data at all
   if (userLoading && !globalUser && !cachedUser) return (
@@ -1302,8 +1402,6 @@ export default function ProfileScreen({ route, navigation }) {
         )}
         
         {/* Toast notification */}
-        
-        <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
         
         <View style={{ flex: 1 }} />
         {isOwnProfile && (

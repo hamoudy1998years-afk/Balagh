@@ -9,6 +9,7 @@ export default function CommentList({
   onLike,
   onEdit,
   onDelete,
+  onReport,
   onUserPress,
   onPin,
   currentUserId,
@@ -82,6 +83,7 @@ export default function CommentList({
               onLike={onLike}
               onEdit={onEdit}
               onDelete={onDelete}
+              onReport={onReport}
               onUserPress={onUserPress}
               onPin={onPin}
               currentUserId={currentUserId}
@@ -112,6 +114,7 @@ export default function CommentList({
                 onLike={onLike}
                 onEdit={onEdit}
                 onDelete={onDelete}
+                onReport={onReport}
                 onUserPress={onUserPress}
                 currentUserId={currentUserId}
                 isReply={true}

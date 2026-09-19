@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -36,9 +36,11 @@ const MODES = [
 export default function PlaybackModeDialog({ visible, onSelect, onDismiss }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
+  const [shouldRender, setShouldRender] = useState(visible);
 
   useEffect(() => {
     if (visible) {
+      setShouldRender(true);
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -64,11 +66,11 @@ export default function PlaybackModeDialog({ visible, onSelect, onDismiss }) {
           duration: 150,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]).start(() => setShouldRender(false));
     }
   }, [visible]);
 
-  if (!visible) return null;
+  if (!shouldRender) return null;
 
   return (
     <Modal

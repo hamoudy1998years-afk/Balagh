@@ -4,6 +4,7 @@ import { useUser } from '../context/UserContext';
 
 export function useComments(videoId) {
   const { user: authUser } = useUser();
+
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -12,7 +13,8 @@ export function useComments(videoId) {
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(0);
   const [replyingTo, setReplyingTo] = useState(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // ADDED: refresh trigger state
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
   const PAGE_SIZE = 20;
   const realtimeSubscription = useRef(null);
 
@@ -31,7 +33,10 @@ export function useComments(videoId) {
         .eq('is_deleted', false)
         .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false })
-        .range(pageNum * PAGE_SIZE, (pageNum + 1) * PAGE_SIZE - 1);
+        .range(
+          pageNum * PAGE_SIZE,
+          (pageNum + 1) * PAGE_SIZE - 1
+        );
 
       if (commentsError) throw commentsError;
 
@@ -39,9 +44,16 @@ export function useComments(videoId) {
       setHasMore(hasMoreData);
 
       if (commentsData.length > 0) {
-        const userIds = [...new Set(commentsData.map(c => c.user_id))];
+        const userIds = [
+          ...new Set(
+            commentsData.map(c => c.user_id)
+          ),
+        ];
 
-        const { data: profilesData, error: profilesError } = await supabase
+        const {
+          data: profilesData,
+          error: profilesError,
+        } = await supabase
           .from('profiles')
           .select('id, username, avatar_url')
           .in('id', userIds);
@@ -52,251 +64,548 @@ export function useComments(videoId) {
 
         const commentsWithUsers = commentsData.map(comment => ({
           ...comment,
-          user: profilesData?.find(p => p.id === comment.user_id) || { 
-            username: 'Unknown', 
-            avatar_url: null 
-          },
-          isLiked: comment.comment_likes?.some(like => like.user_id === currentUser?.id),
-          likesCount: comment.comment_likes?.length || 0,
-          repliesCount: 0 // Will be updated separately
+          user:
+            profilesData?.find(
+              p => p.id === comment.user_id
+            ) || {
+              username: 'Unknown',
+              avatar_url: null,
+            },
+
+          isLiked:
+            comment.comment_likes?.some(
+              like =>
+                like.user_id === currentUser?.id
+            ),
+
+          likesCount:
+            comment.comment_likes?.length || 0,
+
+          repliesCount: 0,
         }));
 
         if (isRefresh || pageNum === 0) {
           setComments(commentsWithUsers);
         } else {
-          setComments(prev => [...prev, ...commentsWithUsers]);
+          setComments(prev => [
+            ...prev,
+            ...commentsWithUsers,
+          ]);
         }
       } else if (isRefresh || pageNum === 0) {
         setComments([]);
       }
+
       setError(null);
     } catch (error) {
-      __DEV__ && console.error('Error fetching comments:', error);
-      setError('Failed to load comments. Pull down to retry.');
+      __DEV__ &&
+        console.error(
+          'Error fetching comments:',
+          error
+        );
+
+      setError(
+        'Failed to load comments. Pull down to retry.'
+      );
     }
-  }, [videoId, refreshTrigger]); // ADDED: refreshTrigger to dependencies
+  }, [videoId, refreshTrigger, authUser]);
 
   // Load initial comments
   const loadComments = useCallback(async () => {
     setLoading(true);
     setPage(0);
+
     await fetchComments(0, true);
+
     setLoading(false);
   }, [fetchComments]);
 
-  // Load more (pagination)
+  // Load more
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
+
     setLoadingMore(true);
+
     const nextPage = page + 1;
+
     await fetchComments(nextPage);
+
     setPage(nextPage);
     setLoadingMore(false);
-  }, [fetchComments, page, hasMore, loadingMore]);
+  }, [
+    fetchComments,
+    page,
+    hasMore,
+    loadingMore,
+  ]);
 
   // Post new comment
-  const postComment = useCallback(async (content, parentId = null) => {
+  const postComment = useCallback(async (
+    content,
+    parentId = null
+  ) => {
     if (!content.trim()) return;
+
     setPosting(true);
+
     try {
       const user = authUser;
-      if (!user) throw new Error('Not authenticated');
 
-      const { data: newComment, error: insertError } = await supabase
+      if (!user) {
+        throw new Error(
+          'Not authenticated'
+        );
+      }
+
+      const {
+        data: newComment,
+        error: insertError,
+      } = await supabase
         .from('comments')
-        .insert([{
-          video_id: videoId,
-          user_id: user.id,
-          text: content.trim(),
-          parent_id: parentId,
-          created_at: new Date().toISOString(),
-        }])
+        .insert([
+          {
+            video_id: videoId,
+            user_id: user.id,
+            text: content.trim(),
+            parent_id: parentId,
+            created_at:
+              new Date().toISOString(),
+          },
+        ])
         .select('*')
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        throw insertError;
+      }
 
-      const { data: userProfile } = await supabase
+      const {
+        data: userProfile,
+      } = await supabase
         .from('profiles')
-        .select('id, username, avatar_url')
+        .select(
+          'id, username, avatar_url'
+        )
         .eq('id', user.id)
         .single();
 
       const commentWithUser = {
         ...newComment,
-        user: userProfile || { username: 'Unknown', avatar_url: null },
+
+        user:
+          userProfile || {
+            username: 'Unknown',
+            avatar_url: null,
+          },
+
         isLiked: false,
         likesCount: 0,
-        comment_likes: []
+        comment_likes: [],
       };
 
-      setComments(prev => [commentWithUser, ...prev]);
+      setComments(prev => [
+        commentWithUser,
+        ...prev,
+      ]);
+
       setReplyingTo(null);
+
       return commentWithUser;
     } catch (error) {
-      __DEV__ && console.error('Error posting comment:', error);
+      __DEV__ &&
+        console.error(
+          'Error posting comment:',
+          error
+        );
+
       alert('Failed to post comment');
     } finally {
       setPosting(false);
     }
-  }, [videoId]);
+  }, [videoId, authUser]);
 
   // Edit comment
-  const editComment = useCallback(async (commentId, newText) => {
+  const editComment = useCallback(async (
+    commentId,
+    newText
+  ) => {
     try {
-      const { data, error } = await supabase
-        .from('comments')
-        .update({ 
-          text: newText.trim(),
-          edited_at: new Date().toISOString()
-        })
-        .eq('id', commentId)
-        .select('*')
-        .single();
+      const { data, error } =
+        await supabase
+          .from('comments')
+          .update({
+            text: newText.trim(),
+            edited_at:
+              new Date().toISOString(),
+          })
+          .eq('id', commentId)
+          .select('*')
+          .single();
 
       if (error) throw error;
 
-      setComments(prev => prev.map(c => 
-        c.id === commentId ? { ...c, ...data } : c
-      ));
+      setComments(prev =>
+        prev.map(c =>
+          c.id === commentId
+            ? {
+                ...c,
+                ...data,
+              }
+            : c
+        )
+      );
+
       return data;
     } catch (error) {
-      __DEV__ && console.error('Error editing comment:', error);
+      __DEV__ &&
+        console.error(
+          'Error editing comment:',
+          error
+        );
+
       alert('Failed to edit comment');
     }
   }, []);
 
-  // Delete comment (soft delete)
-  const deleteComment = useCallback(async (commentId) => {
+  // Delete comment
+  const deleteComment = useCallback(async (
+    commentId
+  ) => {
     try {
-      const { error } = await supabase
-        .from('comments')
-        .update({ is_deleted: true })
-        .eq('id', commentId);
+      const { error } =
+        await supabase
+          .from('comments')
+          .update({
+            is_deleted: true,
+          })
+          .eq('id', commentId);
 
       if (error) throw error;
 
-      setComments(prev => prev.filter(c => c.id !== commentId));
+      setComments(prev =>
+        prev.filter(
+          c => c.id !== commentId
+        )
+      );
     } catch (error) {
-      __DEV__ && console.error('Error deleting comment:', error);
+      __DEV__ &&
+        console.error(
+          'Error deleting comment:',
+          error
+        );
+
       alert('Failed to delete comment');
     }
   }, []);
 
-  // Toggle like on comment
-  const toggleLike = useCallback(async (commentId, isCurrentlyLiked) => {
+  // Toggle like
+  const toggleLike = useCallback(async (
+    commentId,
+    isCurrentlyLiked
+  ) => {
     try {
       const user = authUser;
+
       if (!user) {
-        alert('Please sign in to like comments');
+        alert(
+          'Please sign in to like comments'
+        );
+
         return;
       }
 
-      // Optimistic update
-      setComments(prev => prev.map(c => {
-        if (c.id === commentId) {
-          return {
-            ...c,
-            isLiked: !isCurrentlyLiked,
-            likesCount: isCurrentlyLiked ? Math.max(0, c.likesCount - 1) : c.likesCount + 1
-          };
-        }
-        return c;
-      }));
+      setComments(prev =>
+        prev.map(c => {
+          if (c.id === commentId) {
+            return {
+              ...c,
+
+              isLiked:
+                !isCurrentlyLiked,
+
+              likesCount:
+                isCurrentlyLiked
+                  ? Math.max(
+                      0,
+                      c.likesCount - 1
+                    )
+                  : c.likesCount + 1,
+            };
+          }
+
+          return c;
+        })
+      );
 
       if (isCurrentlyLiked) {
-        await supabase
-          .from('comment_likes')
-          .delete()
-          .eq('comment_id', commentId)
-          .eq('user_id', user.id);
+        const { error } =
+          await supabase
+            .from('comment_likes')
+            .delete()
+            .eq(
+              'comment_id',
+              commentId
+            )
+            .eq(
+              'user_id',
+              user.id
+            );
+
+        if (error) throw error;
       } else {
-        await supabase
-          .from('comment_likes')
-          .insert({ comment_id: commentId, user_id: user.id });
+        const { error } =
+          await supabase
+            .from('comment_likes')
+            .insert({
+              comment_id:
+                commentId,
+
+              user_id:
+                user.id,
+            });
+
+        if (error) throw error;
       }
     } catch (error) {
-      __DEV__ && console.error('Error toggling like:', error);
-      // Revert on error
-      setComments(prev => prev.map(c => {
-        if (c.id === commentId) {
-          return {
-            ...c,
-            isLiked: isCurrentlyLiked,
-            likesCount: isCurrentlyLiked ? c.likesCount + 1 : Math.max(0, c.likesCount - 1)
-          };
-        }
-        return c;
-      }));
-    }
-  }, []);
+      __DEV__ &&
+        console.error(
+          'Error toggling like:',
+          error
+        );
 
-  // Pin/unpin comment (creator only)
-  const pinComment = useCallback(async (commentId, shouldPin) => {
+      // Revert optimistic update
+      setComments(prev =>
+        prev.map(c => {
+          if (c.id === commentId) {
+            return {
+              ...c,
+
+              isLiked:
+                isCurrentlyLiked,
+
+              likesCount:
+                isCurrentlyLiked
+                  ? c.likesCount + 1
+                  : Math.max(
+                      0,
+                      c.likesCount - 1
+                    ),
+            };
+          }
+
+          return c;
+        })
+      );
+    }
+  }, [authUser]);
+
+  // Pin/unpin comment
+  const pinComment = useCallback(async (
+    commentId,
+    shouldPin
+  ) => {
     try {
-      // Unpin all others first
       if (shouldPin) {
-        await supabase
-          .from('comments')
-          .update({ is_pinned: false })
-          .eq('video_id', videoId);
+        const { error } =
+          await supabase
+            .from('comments')
+            .update({
+              is_pinned: false,
+            })
+            .eq(
+              'video_id',
+              videoId
+            );
+
+        if (error) throw error;
       }
 
-      const { error } = await supabase
-        .from('comments')
-        .update({ is_pinned: shouldPin })
-        .eq('id', commentId);
+      const { error } =
+        await supabase
+          .from('comments')
+          .update({
+            is_pinned:
+              shouldPin,
+          })
+          .eq('id', commentId);
 
       if (error) throw error;
 
-      setComments(prev => prev.map(c => ({
-        ...c,
-        is_pinned: c.id === commentId ? shouldPin : false
-      })).sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0)));
+      setComments(prev =>
+        prev
+          .map(c => ({
+            ...c,
+
+            is_pinned:
+              c.id === commentId
+                ? shouldPin
+                : false,
+          }))
+          .sort(
+            (a, b) =>
+              (b.is_pinned ? 1 : 0) -
+              (a.is_pinned ? 1 : 0)
+          )
+      );
     } catch (error) {
-      __DEV__ && console.error('Error pinning comment:', error);
+      __DEV__ &&
+        console.error(
+          'Error pinning comment:',
+          error
+        );
     }
   }, [videoId]);
 
-  // ADDED: Manual refresh function
+  // ─────────────────────────────────────────────────────────────
+  // REPORT COMMENT
+  // Uses the existing `reports` table so AdminScreen immediately
+  // receives comment reports without adding another DB table.
+  // ─────────────────────────────────────────────────────────────
+  const reportComment = useCallback(async (
+    comment
+  ) => {
+    const user = authUser;
+
+    if (!user) {
+      throw new Error(
+        'Please sign in to report comments.'
+      );
+    }
+
+    if (!comment?.id) {
+      throw new Error(
+        'Invalid comment.'
+      );
+    }
+
+    if (!comment?.user_id) {
+      throw new Error(
+        'Comment author could not be identified.'
+      );
+    }
+
+    if (!videoId) {
+      throw new Error(
+        'Video could not be identified.'
+      );
+    }
+
+    const safeText =
+      String(comment.text || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 300);
+
+    const reason =
+      `Comment report [${comment.id}]: ${safeText || 'No comment text available'}`;
+
+    const { error } =
+      await supabase
+        .from('reports')
+        .insert({
+          reporter_id:
+            user.id,
+
+          reported_user_id:
+            comment.user_id,
+
+          video_id:
+            videoId,
+
+          reason,
+        });
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
+  }, [authUser, videoId]);
+
+  // Manual refresh
   const refresh = useCallback(() => {
-    setRefreshTrigger(prev => prev + 1);
+    setRefreshTrigger(
+      prev => prev + 1
+    );
   }, []);
 
-  // Setup realtime subscription
+  // Realtime subscription
   useEffect(() => {
     if (!videoId) return;
 
     loadComments();
 
-    // Subscribe to realtime changes
-    realtimeSubscription.current = supabase
-      .channel(`comments:${videoId}`)
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'comments', filter: `video_id=eq.${videoId}` },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            // New comment added
-            fetchComments(0, true);
-          } else if (payload.eventType === 'UPDATE') {
-            // Comment updated
-            setComments(prev => prev.map(c => 
-              c.id === payload.new.id ? { ...c, ...payload.new } : c
-            ));
-          } else if (payload.eventType === 'DELETE') {
-            // Comment deleted
-            setComments(prev => prev.filter(c => c.id !== payload.old.id));
+    realtimeSubscription.current =
+      supabase
+        .channel(
+          `comments:${videoId}`
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'comments',
+            filter:
+              `video_id=eq.${videoId}`,
+          },
+          payload => {
+            if (
+              payload.eventType ===
+              'INSERT'
+            ) {
+              fetchComments(
+                0,
+                true
+              );
+            } else if (
+              payload.eventType ===
+              'UPDATE'
+            ) {
+              setComments(prev =>
+                prev.map(c =>
+                  c.id ===
+                  payload.new.id
+                    ? {
+                        ...c,
+                        ...payload.new,
+                      }
+                    : c
+                )
+              );
+            } else if (
+              payload.eventType ===
+              'DELETE'
+            ) {
+              setComments(prev =>
+                prev.filter(
+                  c =>
+                    c.id !==
+                    payload.old.id
+                )
+              );
+            }
           }
-        }
-      )
-      .subscribe();
+        )
+        .subscribe();
 
     return () => {
-      if (realtimeSubscription.current) {
-        supabase.removeChannel(realtimeSubscription.current);
+      if (
+        realtimeSubscription.current
+      ) {
+        supabase.removeChannel(
+          realtimeSubscription.current
+        );
+
+        realtimeSubscription.current =
+          null;
       }
     };
-  }, [videoId, loadComments, fetchComments]);
+  }, [
+    videoId,
+    loadComments,
+    fetchComments,
+  ]);
 
   return {
     comments,
@@ -314,6 +623,7 @@ export function useComments(videoId) {
     deleteComment,
     toggleLike,
     pinComment,
-    refresh, // ADDED: export refresh function
+    reportComment,
+    refresh,
   };
 }

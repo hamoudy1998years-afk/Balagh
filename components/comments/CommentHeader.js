@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { COLORS } from '../../constants/theme';
 
 export default function CommentHeader({ count, onClose }) {
   return (

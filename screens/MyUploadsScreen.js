@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { ROUTES } from '../constants/routes';
 import ModernDialog from './ModernDialog';
 import AnimatedButton from './AnimatedButton';
 import { SystemBars } from 'react-native-edge-to-edge';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 
 export default function MyUploadsScreen({ navigation }) {
@@ -42,10 +43,15 @@ export default function MyUploadsScreen({ navigation }) {
   const [appealReason, setAppealReason] = useState('');
   const [contactModal, setContactModal] = useState({ visible: false, videoId: null, caption: '' });
   const [contactMessage, setContactMessage] = useState('');
+  const fetchRequestId = useRef(0);
 
   const fetchData = useCallback(async () => {
+    const requestId = ++fetchRequestId.current;
+
     if (!currentUser?.id) {
-      setLoading(false);
+      if (requestId === fetchRequestId.current) {
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
@@ -58,7 +64,9 @@ export default function MyUploadsScreen({ navigation }) {
         .single();
       const isBanned = profileData?.is_banned || false;
       const rejectionCount = profileData?.rejection_count || 0;
-      setProfileStatus({ is_banned: isBanned, rejection_count: rejectionCount });
+      if (requestId === fetchRequestId.current) {
+        setProfileStatus({ is_banned: isBanned, rejection_count: rejectionCount });
+      }
       const { data: videosData, error: videosError } = await supabase
         .from('videos')
         .select('id, caption, category, thumbnail_url, created_at, status, rejection_reason')
@@ -67,7 +75,9 @@ export default function MyUploadsScreen({ navigation }) {
         .order('created_at', { ascending: false });
 
       if (videosError) throw videosError;
-      setVideos(videosData || []);
+      if (requestId === fetchRequestId.current) {
+        setVideos(videosData || []);
+      }
 
       const statuses = ['pending', 'approved', 'rejected'];
       const counts = {};
@@ -81,7 +91,9 @@ export default function MyUploadsScreen({ navigation }) {
           counts[status] = count || 0;
         }
       }));
-      setTabCounts(counts);
+      if (requestId === fetchRequestId.current) {
+        setTabCounts(counts);
+      }
 
       if (activeTab === 'rejected' && videosData && videosData.length > 0) {
         const videoIds = videosData.map((v) => v.id);
@@ -92,28 +104,32 @@ export default function MyUploadsScreen({ navigation }) {
           .eq('user_id', currentUser.id);
 
         if (!appealsError && appealsData) {
-          setAppealedVideoIds(new Set(appealsData.map((a) => a.video_id)));
+          if (requestId === fetchRequestId.current) {
+            setAppealedVideoIds(new Set(appealsData.map((a) => a.video_id)));
+          }
         }
       } else {
-        setAppealedVideoIds(new Set());
+        if (requestId === fetchRequestId.current) {
+          setAppealedVideoIds(new Set());
+        }
       }
     } catch (error) {
       console.error('Error fetching uploads:', error);
-      setDialog({
-        visible: true,
-        title: 'Error',
-        message: 'Failed to load uploads',
-        type: 'error',
-        buttons: [{ text: 'OK', onPress: () => setDialog((d) => ({ ...d, visible: false })) }],
-      });
+      if (requestId === fetchRequestId.current) {
+        setDialog({
+          visible: true,
+          title: 'Error',
+          message: 'Failed to load uploads',
+          type: 'error',
+          buttons: [{ text: 'OK', onPress: () => setDialog((d) => ({ ...d, visible: false })) }],
+        });
+      }
     } finally {
-      setLoading(false);
+      if (requestId === fetchRequestId.current) {
+        setLoading(false);
+      }
     }
   }, [currentUser, activeTab]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   useFocusEffect(
     useCallback(() => {
@@ -187,12 +203,16 @@ export default function MyUploadsScreen({ navigation }) {
       return;
     }
     try {
-      await supabase.from('user_messages').insert({
-        user_id: currentUser.id,
-        subject: 'Video Issue: ' + (contactModal.caption || 'My Video'),
-        message,
-        status: 'pending',
-      });
+      const { error } = await supabase
+        .from('user_messages')
+        .insert({
+          user_id: currentUser.id,
+          subject: 'Video Issue: ' + (contactModal.caption || 'My Video'),
+          message,
+          status: 'pending',
+        });
+
+      if (error) throw error;
       setContactModal({ visible: false, videoId: null, caption: '' });
       setContactMessage('');
       setDialog({ visible: true, title: 'Sent!', message: 'Your message has been sent to admin.', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
@@ -291,7 +311,12 @@ export default function MyUploadsScreen({ navigation }) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.title}>My Uploads</Text>
+      <View style={styles.headerTop}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.textDark} />
+        </TouchableOpacity>
+        <Text style={styles.title}>My Uploads</Text>
+      </View>
 
       {showBannedBanner && (
         <View style={styles.bannedBanner}>
@@ -462,11 +487,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  headerTop: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20 },
+  backBtn: { padding: 8, marginLeft: -8, marginRight: 8 },
   title: {
     fontSize: 24,
     fontWeight: '800',
     color: COLORS.textDark,
-    paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 4,
     letterSpacing: -0.5,

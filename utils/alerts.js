@@ -6,7 +6,7 @@ export function showErrorAlert(message, title = ERROR_TITLES.ERROR) {
   return { title, message, type: 'error', buttons: [{ text: 'OK' }] };
 }
 
-export function showNetworkError(navigation) {
+export function showNetworkError() {
   return {
     title: ERROR_TITLES.NETWORK_ERROR,
     message: ERROR_MESSAGES.NETWORK_ERROR,
@@ -27,7 +27,7 @@ export function showAuthError(navigation) {
   };
 }
 
-export function showPermissionAlert(permissionType, message) {
+export function showPermissionAlert(message) {
   return {
     title: ERROR_TITLES.PERMISSION_DENIED,
     message,

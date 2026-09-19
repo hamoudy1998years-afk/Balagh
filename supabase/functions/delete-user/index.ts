@@ -12,40 +12,112 @@ serve(async (req) => {
   }
 
   try {
-    // 1. Create a regular client to verify the calling user's JWT
+    // 1. Verify the calling user's JWT
     const userClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: req.headers.get("Authorization")! } } }
+      {
+        global: {
+          headers: {
+            Authorization: req.headers.get("Authorization")!,
+          },
+        },
+      }
     );
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    const {
+      data: { user },
+      error: userError,
+    } = await userClient.auth.getUser();
+
     if (userError || !user) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        },
       });
     }
 
     const userId = user.id;
 
-    // 2. Create an admin client with the service role key to delete everything
+    // 2. Create admin client
     const adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // 3. Delete all user data in order (children before parents)
+    // 3. Delete the user's normal-video storage files via the Railway
+    //    API BEFORE touching any database rows. If this fails, the whole
+    //    account stays fully intact so the user can retry.
+    //
+    //    Requires the RAILWAY_SERVER_URL secret (e.g.
+    //    `supabase secrets set RAILWAY_SERVER_URL=https://...`).
+    const railwayBaseUrl = Deno.env.get("RAILWAY_SERVER_URL");
+
+    if (!railwayBaseUrl) {
+      throw new Error("RAILWAY_SERVER_URL is not configured");
+    }
+
+    const cleanupResponse = await fetch(
+      `${railwayBaseUrl}/api/videos/account/${userId}/cleanup-videos`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: req.headers.get("Authorization")!,
+        },
+      }
+    );
+
+    if (!cleanupResponse.ok) {
+      console.error(
+        "Video storage cleanup failed with status:",
+        cleanupResponse.status
+      );
+
+      return new Response(
+        JSON.stringify({
+          error:
+            "Could not remove all video files. Please try again.",
+        }),
+        {
+          status: 502,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+    }
+
+    // 4. Delete user-owned database data.
+    //
+    // Active livestream child tables already use ON DELETE CASCADE.
+    // The separate "livestreams" replay table does NOT have an FK
+    // cascade to profiles, so it must be explicitly deleted here.
     const tablesToClean = [
-      { table: "comments",      column: "user_id" },
-      { table: "likes",         column: "user_id" },
-      { table: "follows",       column: "follower_id" },
-      { table: "follows",       column: "following_id" },
-      { table: "blocks",        column: "blocker_id" },
-      { table: "blocks",        column: "blocked_id" },
-      { table: "live_streams",  column: "user_id" },
-      { table: "videos",        column: "user_id" },
-      { table: "profiles",      column: "id" },          // 'id' matches auth.users.id
+      { table: "comments", column: "user_id" },
+      { table: "likes", column: "user_id" },
+
+      { table: "follows", column: "follower_id" },
+      { table: "follows", column: "following_id" },
+
+      { table: "blocks", column: "blocker_id" },
+      { table: "blocks", column: "blocked_id" },
+
+      // Recorded/replay livestreams
+      { table: "livestreams", column: "user_id" },
+
+      // Active livestreams; child livestream rows cascade automatically
+      { table: "live_streams", column: "user_id" },
+
+      // Normal videos are already cleaned AND deleted row-by-row by the
+      // Railway cleanup call above. Only livestream replay rows may remain
+      // in the videos table here — delete those explicitly below.
+
+      // Keep profile last
+      { table: "profiles", column: "id" },
     ];
 
     for (const { table, column } of tablesToClean) {
@@ -55,37 +127,71 @@ serve(async (req) => {
         .eq(column, userId);
 
       if (error) {
-        console.error(`Error deleting from ${table}:`, error.message);
-        // Log but continue — don't block auth deletion over a missing table
+        console.error(
+          `Error deleting from ${table}.${column}:`,
+          error.message
+        );
+
+        // Do not delete the Auth account if required data cleanup failed.
+        throw new Error(
+          `Account data cleanup failed while deleting ${table}`
+        );
       }
     }
 
-    // 4. Delete videos from Storage bucket (if you store them in Supabase Storage)
-    const { data: videoFiles } = await adminClient
-      .storage
-      .from("videos")                          // 🔁 replace with your bucket name
-      .list(userId);                           // assumes files are stored under userId/
+    // Livestream replay rows in the videos table (the Railway cleanup above
+    // deliberately does not touch them). This preserves the pre-existing
+    // behavior of removing replay rows on account deletion without
+    // re-deleting normal-video rows Railway already handled.
+    const { error: replayError } = await adminClient
+      .from("videos")
+      .delete()
+      .eq("user_id", userId)
+      .eq("type", "livestream");
 
-    if (videoFiles && videoFiles.length > 0) {
-      const filePaths = videoFiles.map((f) => `${userId}/${f.name}`);
-      await adminClient.storage.from("videos").remove(filePaths);
+    if (replayError) {
+      console.error(
+        "Error deleting livestream replay rows:",
+        replayError.message
+      );
+
+      // Do not delete the Auth account if required data cleanup failed.
+      throw new Error(
+        "Account data cleanup failed while deleting livestream replays"
+      );
     }
 
-    // 5. Delete the Supabase Auth user — this is the step only service role can do
-    const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(userId);
+    // 5. Delete Supabase Auth user only after cleanup succeeds
+    const { error: deleteAuthError } =
+      await adminClient.auth.admin.deleteUser(userId);
+
     if (deleteAuthError) {
-      throw new Error(`Auth deletion failed: ${deleteAuthError.message}`);
+      throw new Error(
+        `Auth deletion failed: ${deleteAuthError.message}`
+      );
     }
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+      },
     });
-
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Account deletion failed";
+
+    console.error("Delete account failed:", message);
+
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+      },
     });
   }
 });

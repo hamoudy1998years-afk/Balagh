@@ -28,7 +28,10 @@ export default function AnimatedButton({ children, style, onPress, onLongPress, 
   }
 
   function handlePress() {
-    if (isLongPress.current) return;
+    if (isLongPress.current) {
+      isLongPress.current = false;
+      return;
+    }
     onPress?.();
   }
 

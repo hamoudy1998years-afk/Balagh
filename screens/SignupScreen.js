@@ -1,10 +1,12 @@
 import {
   View, Text, TextInput, StyleSheet,
   TouchableOpacity, Animated,
-  Platform, StatusBar, Linking,
+  Platform, StatusBar,
 } from 'react-native';
+
+import * as WebBrowser from 'expo-web-browser';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
 import AnimatedButton from './AnimatedButton';
@@ -44,6 +46,36 @@ export default function SignupScreen({ navigation }) {
   const confirmPasswordInputRef = useRef(null);
 
   const { saveAccount } = useBiometricAuth();
+
+  const confirmOpenPolicy = (url, label, verb) => {
+    setDialog({
+      visible: true,
+      title: `Open ${label}?`,
+      message: `The ${label} ${verb} hosted on Bushrann's website and will open in a web page.`,
+      type: 'info',
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: async () => {
+            try {
+              await WebBrowser.openBrowserAsync(url);
+            } catch (e) {
+              __DEV__ && console.warn(`[SignupScreen] ${label} link error:`, e);
+
+              setDialog({
+                visible: true,
+                title: 'Unable to Open Policy',
+                message: `The ${label} webpage could not be opened. Please try again.`,
+                type: 'error',
+                buttons: [{ text: 'OK' }],
+              });
+            }
+          },
+        },
+      ],
+    });
+  };
 
   const getFriendlyErrorMessage = (message) => {
     const msg = (message || '').toLowerCase();
@@ -255,10 +287,6 @@ export default function SignupScreen({ navigation }) {
       ]
     });
   }
-
-  const handleNavigateLogin = useCallback(() => {
-    navigation.navigate(ROUTES.LOGIN);
-  }, [navigation]);
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bgDark }}>
@@ -475,31 +503,17 @@ export default function SignupScreen({ navigation }) {
               {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
             </TouchableOpacity>
             <Text style={styles.termsText}>
-              I agree to the{' '}
+              I agree to the following web policies:{' '}
               <Text 
                 style={styles.termsLink}
-                onPress={async () => {
-                  try {
-                    const supported = await Linking.canOpenURL(CONFIG.TERMS_URL);
-                    if (supported) await Linking.openURL(CONFIG.TERMS_URL);
-                  } catch (e) {
-                    __DEV__ && console.warn('[SignupScreen] Terms link error:', e);
-                  }
-                }}
+                onPress={() => confirmOpenPolicy(CONFIG.TERMS_URL, 'Terms of Service', 'are')}
               >
                 Terms of Service
               </Text>
               {' '}and{' '}
               <Text 
                 style={styles.termsLink}
-                onPress={async () => {
-                  try {
-                    const supported = await Linking.canOpenURL(CONFIG.CONTENT_POLICY_URL);
-                    if (supported) await Linking.openURL(CONFIG.CONTENT_POLICY_URL);
-                  } catch (e) {
-                    __DEV__ && console.warn('[SignupScreen] Content Policy link error:', e);
-                  }
-                }}
+                onPress={() => confirmOpenPolicy(CONFIG.CONTENT_POLICY_URL, 'Content Policy', 'is')}
               >
                 Content Policy
               </Text>
@@ -514,21 +528,6 @@ export default function SignupScreen({ navigation }) {
           >
             <Text style={styles.buttonText}>
               {loading ? 'Creating account...' : 'Create Account'}
-            </Text>
-          </AnimatedButton>
-
-          {/* Divider */}
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Login Link */}
-          <AnimatedButton onPress={handleNavigateLogin} style={styles.loginLinkContainer}>
-            <Text style={styles.link}>
-              Already have an account?{' '}
-              <Text style={styles.linkBold}>Login</Text>
             </Text>
           </AnimatedButton>
 
@@ -663,37 +662,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Divider
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  dividerText: {
-    color: '#8B92A8',
-    fontSize: 13,
-    marginHorizontal: 12,
-  },
-
-  // Login link
-  loginLinkContainer: {
-    alignItems: 'center',
-    paddingBottom: 10,
-  },
-  link: {
-    color: '#8B92A8',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  linkBold: {
-    color: COLORS.gold,
-    fontWeight: '700',
-  },
   termsRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',

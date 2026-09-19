@@ -26,7 +26,25 @@ class VideoCache {
       a = ((a << 5) - a) + b.charCodeAt(0);
       return a & a;
     }, 0);
-    return CACHE_DIR + Math.abs(hash) + '.mp4';
+
+    // Preserve the real video/container extension.
+    // Do not rename MOV/WebM/M4V bytes to .mp4 without transcoding them.
+    const cleanUrl = url.split('?')[0].split('#')[0];
+    const match = cleanUrl.match(/\.([a-zA-Z0-9]{2,5})$/);
+    const ext = match?.[1]?.toLowerCase();
+
+    const allowedExtensions = new Set([
+      'mp4',
+      'mov',
+      'm4v',
+      'webm',
+      '3gp',
+      'mkv',
+    ]);
+
+    const safeExt = allowedExtensions.has(ext) ? ext : 'mp4';
+
+    return `${CACHE_DIR}${Math.abs(hash)}.${safeExt}`;
   }
 
   async getCachedVideo(url) {

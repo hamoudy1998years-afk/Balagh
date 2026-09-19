@@ -19,72 +19,90 @@ export default function VideoDetailScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [signedUrlReady, setSignedUrlReady] = useState(false);
   const [error, setError] = useState(false);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
+    const requestId = ++requestIdRef.current;
+
     console.log('[VIDEO_DETAIL] Received params:', route.params);
     console.log('[VIDEO_DETAIL] Video object:', route.params?.video);
     console.log('[VIDEO_DETAIL] Video URI:', route.params?.video?.video_url);
-    
+
     if (videoId && !route.params?.video) {
-      fetchVideoById(videoId);
+      fetchVideoById(videoId, requestId);
     } else if (route.params?.video) {
       const videoData = route.params.video;
+      setError(false);
       setVideo(videoData);
       setSignedUrlReady(true);
       setLoading(false);
     }
+
+    return () => {
+      // Invalidate this request so any in-flight async work that resolves
+      // after navigation/unmount or after a newer videoId is ignored.
+      requestIdRef.current += 1;
+    };
   }, [videoId]);
 
-  async function getSignedUrl(videoData) {
+  async function getSignedUrl(videoData, requestId) {
     try {
-      setLoading(true);
       const response = await fetch(
         `${process.env.EXPO_PUBLIC_SERVER_URL}/api/recording/livestreams/${videoData.id}/play`
       );
       const data = await response.json();
       console.log('[SIGNED URL] Response:', JSON.stringify(data));
+      if (requestIdRef.current !== requestId) return;
       if (data.signedUrl) {
         // Replace the video_url with signed URL BEFORE setting video
-        const videoWithSignedUrl = { 
-          ...videoData, 
+        const videoWithSignedUrl = {
+          ...videoData,
           video_url: data.signedUrl,
           video_uri: data.signedUrl  // also set video_uri just in case
         };
         setVideo(videoWithSignedUrl);
-        setSignedUrlReady(true);
       } else {
         setVideo(videoData);
       }
+      setSignedUrlReady(true);
     } catch (e) {
       console.error('[VideoDetail] Signed URL error:', e);
+      if (requestIdRef.current !== requestId) return;
       setVideo(videoData);
+      setSignedUrlReady(true);
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }
 
-  async function fetchVideoById(id) {
+  async function fetchVideoById(id, requestId) {
     try {
       setLoading(true);
-      
+      setError(false);
+
       // Fetch video WITHOUT broken foreign key join
       const { data: videoData, error: videoError } = await supabase
         .from('videos')
         .select('*')
         .eq('id', id)
         .maybeSingle();
-      
+
+      if (requestIdRef.current !== requestId) return;
+
       if (videoError) {
         console.error('[VideoDetail] Supabase error:', videoError.message);
         throw videoError;
       }
-      
+
       if (!videoData) {
         setVideo(null);
+        setError(true);
         setLoading(false);
         return;
       }
-      
+
       // Fetch profile separately (no FK join)
       let profileData = null;
       if (videoData.user_id) {
@@ -93,24 +111,39 @@ export default function VideoDetailScreen({ navigation }) {
           .select('id, username, avatar_url, is_scholar, trusted_user')
           .eq('id', videoData.user_id)
           .single();
-          
+
+        if (requestIdRef.current !== requestId) return;
+
         if (!profileError && profile) {
           profileData = profile;
         }
       }
-      
+
       // Combine them
       const combined = {
         ...videoData,
         profiles: profileData || { username: 'Unknown' }
       };
-      
-      setVideo(combined);
-      
+
+      if (requestIdRef.current !== requestId) return;
+
+      if (combined.type === 'livestream') {
+        // Livestreams need a signed playback URL before they're playable.
+        // getSignedUrl() controls the loading state from here.
+        setVideo(combined);
+        setSignedUrlReady(false);
+        getSignedUrl(combined, requestId);
+      } else {
+        setVideo(combined);
+        setSignedUrlReady(true);
+        setLoading(false);
+      }
+
     } catch (error) {
       console.error('[VideoDetail] Fetch error:', error.message);
+      if (requestIdRef.current !== requestId) return;
       setVideo(null);
-    } finally {
+      setError(true);
       setLoading(false);
     }
   }

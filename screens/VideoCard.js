@@ -54,7 +54,8 @@ function VideoCard({
   const insets = useSafeAreaInsets();
   const safeBottom = insets?.bottom ?? 0;
   const { showVideoOptionsSheet, showTikTokShare } = useDownload();
-  const { blockedUsers } = useUser();
+  const { user: authUser, loading: authLoading, blockedUsers } = useUser();
+  const currentUserId = authUser?.id ?? null;
 
   const [liked, setLiked] = useState(initialLiked);
   const [likeCount, setLikeCount] = useState(item.likes_count ?? 0);
@@ -70,20 +71,42 @@ function VideoCard({
   const [isReady, setIsReady] = useState(false);
   const [isLoadingSignedUrl, setIsLoadingSignedUrl] = useState(false);
 
+  const isVideoReadyRef = useRef(false);
+  const currentItemIdRef = useRef(item.id);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    currentItemIdRef.current = item.id;
+  }, [item.id]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   // Upgrade to cached local file silently — never set to null
   useEffect(() => {
+    let cancelled = false;
+
+    // Sync immediately so a recycled card never keeps showing a previous
+    // item's video while the cache lookup below is still in flight.
+    setVideoUri(item.video_url ?? null);
+
     const loadVideoUri = async () => {
       if (item.video_url?.includes('?')) return;
       if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) return;
 
       const cachedUri = await videoCache.getCachedVideo(item.video_url);
+      if (cancelled) return;
       if (cachedUri) {
         const fileInfo = await FileSystem.getInfoAsync(cachedUri);
+        if (cancelled) return;
         if (fileInfo.exists) {
           setVideoUri(cachedUri);
           return;
         }
         await videoCache.removeCachedVideo(item.video_url);
+        if (cancelled) return;
         setVideoUri(item.video_url);
       }
       videoCache.cacheVideo(item.video_url);
@@ -92,9 +115,21 @@ function VideoCard({
     if (item.id && item.video_url) {
       loadVideoUri();
     }
-  }, [item.id]);
+
+    return () => { cancelled = true; };
+  }, [item.id, item.video_url, item.type]);
+
+  const previousVideoUriRef = useRef(videoUri);
+  useEffect(() => {
+    if (previousVideoUriRef.current !== videoUri) {
+      previousVideoUriRef.current = videoUri;
+      isVideoReadyRef.current = false;
+      setIsReady(false);
+    }
+  }, [videoUri]);
 
   useEffect(() => {
+    let cancelled = false;
     async function checkBlocked() {
       if (!currentUserId || !item.user_id) return;
       const { data } = await supabase
@@ -103,13 +138,12 @@ function VideoCard({
         .eq('blocker_id', currentUserId)
         .eq('blocked_id', item.user_id)
         .maybeSingle();
-      setIsBlocked(!!data);
+      if (!cancelled) setIsBlocked(!!data);
     }
     checkBlocked();
+    return () => { cancelled = true; };
   }, [currentUserId, item.user_id]);
 
-  const { user: authUser, loading: authLoading } = useUser();
-  const currentUserId = authUser?.id ?? null;
   const [paused, setPaused] = useState(false);
   const [showHeart, setShowHeart] = useState(false);
   const [showPauseIcon, setShowPauseIcon] = useState(false);
@@ -120,7 +154,6 @@ function VideoCard({
   const [isDownloading, setIsDownloading] = useState(false);
   const durationRef = useRef(0);
   const playerRef = useRef(null);
-  const isVideoReadyRef = useRef(false);
   const isSeeking = useRef(false);
   const progressBarRef = useRef(null);
   const lastSeekTime = useRef(0);
@@ -131,6 +164,7 @@ function VideoCard({
   const [showReportSheet, setShowReportSheet] = useState(false);
   const [showFullCaption, setShowFullCaption] = useState(false);
   const manualPauseRef = useRef(false);
+  const isFollowLoading = useRef(false);
 
   const isUserBlocked = blockedUsers?.has(item.user_id);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -156,6 +190,7 @@ function VideoCard({
   }, [isActive]);
 
   useEffect(() => {
+    __DEV__ && console.log('[LEAK DEBUG] VideoCard isTabActive changed:', isTabActive, 'item:', item.id, 'isActive:', isActive);
     if (isTabActive) {
       if (isActive) {
         manualPauseRef.current = false;
@@ -212,8 +247,14 @@ function VideoCard({
   const isScholar = isScholarProp ?? item.profiles?.is_scholar ?? false;
   const isTrusted = isTrustedProp ?? item.profiles?.trusted_user ?? false;
 
-  useEffect(() => { setLiked(initialLiked); }, [initialLiked]);
-  useEffect(() => { setFollowed(initialFollowed); }, [item.user_id]);
+  useEffect(() => { setLiked(initialLiked); }, [item.id, initialLiked]);
+  useEffect(() => { setLikeCount(item.likes_count ?? 0); }, [item.id]);
+  useEffect(() => { setFollowed(initialFollowed); }, [item.id, initialFollowed]);
+  useEffect(() => { setHasDownloaded(false); }, [item.id]);
+  useEffect(() => {
+    setDuration(0);
+    durationRef.current = 0;
+  }, [item.id]);
   useEffect(() => { durationRef.current = duration; }, [duration]);
   useEffect(() => {
     if (player?.current) {
@@ -291,6 +332,7 @@ function VideoCard({
       },
 
       onPanResponderMove: (evt) => {
+        if (!(progressBarWidth.current > 0)) return;
         const delta = (evt.nativeEvent.pageX - dragStartPageX.current) / progressBarWidth.current;
         const newPct = Math.max(0, Math.min(1, dragStartPct.current + delta * 1.0));
         updateProgressBarUI(newPct);
@@ -302,6 +344,13 @@ function VideoCard({
       },
 
       onPanResponderRelease: (evt) => {
+        if (!(progressBarWidth.current > 0)) {
+          isSeeking.current = false;
+          manualPauseRef.current = false;
+          setPaused(false);
+          setIsDragging(false);
+          return;
+        }
         const delta = (evt.nativeEvent.pageX - dragStartPageX.current) / progressBarWidth.current;
         const newPct = Math.max(0, Math.min(1, dragStartPct.current + delta * 1.0));
         updateProgressBarUI(newPct);
@@ -372,16 +421,29 @@ function VideoCard({
   }, [liked, item, requireAuth, currentUserId, isLiking]);
 
   const handleFollow = useCallback(async () => {
-    if (!requireAuth() || !currentUserId || currentUserId === item.user_id) return;
+    if (!requireAuth() || !currentUserId || currentUserId === item.user_id || isFollowLoading.current) return;
+    isFollowLoading.current = true;
+    const previousFollowed = followed;
     const newFollowed = !followed;
     setFollowed(newFollowed);
     if (onFollowChange) onFollowChange(item.user_id, newFollowed);
     const { DeviceEventEmitter } = require('react-native');
     DeviceEventEmitter.emit('followChanged', { userId: item.user_id, isFollowing: newFollowed });
-    if (followed) {
-      await supabase.from('follows').delete().eq('follower_id', currentUserId).eq('following_id', item.user_id);
-    } else {
-      await supabase.from('follows').insert({ follower_id: currentUserId, following_id: item.user_id });
+    try {
+      if (previousFollowed) {
+        const { error } = await supabase.from('follows').delete().eq('follower_id', currentUserId).eq('following_id', item.user_id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('follows').insert({ follower_id: currentUserId, following_id: item.user_id });
+        if (error) throw error;
+      }
+    } catch (error) {
+      __DEV__ && console.log('Follow error:', error);
+      setFollowed(previousFollowed);
+      if (onFollowChange) onFollowChange(item.user_id, previousFollowed);
+      DeviceEventEmitter.emit('followChanged', { userId: item.user_id, isFollowing: previousFollowed });
+    } finally {
+      isFollowLoading.current = false;
     }
   }, [followed, item, currentUserId, onFollowChange, requireAuth]);
 
@@ -411,6 +473,85 @@ function VideoCard({
     }
   }, [handleLike]);
 
+  const handleDownloadVideo = useCallback(async () => {
+    if (hasDownloaded) return;
+    const downloadItemId = item.id;
+    const downloadVideoUrl = item.video_url;
+    const isStillRelevant = () => isMountedRef.current && currentItemIdRef.current === downloadItemId;
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        if (isStillRelevant()) {
+          setDialog({
+            visible: true, title: 'Permission Required',
+            message: 'Please allow access to your media library to download videos.',
+            type: 'warning',
+            buttons: [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings(), style: 'destructive' },
+            ]
+          });
+        }
+        return;
+      }
+      if (isStillRelevant()) {
+        setIsDownloading(true);
+        setDownloadProgress(0);
+      }
+      const fileUri = FileSystem.documentDirectory + `balagh_${downloadItemId}.mp4`;
+      const downloadResumable = FileSystem.createDownloadResumable(
+        downloadVideoUrl, fileUri, {},
+        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+          if (totalBytesExpectedToWrite > 0 && isStillRelevant()) {
+            setDownloadProgress(totalBytesWritten / totalBytesExpectedToWrite);
+          }
+        }
+      );
+      const result = await downloadResumable.downloadAsync();
+      if (!result?.uri) throw new Error('Download failed');
+      await MediaLibrary.saveToLibraryAsync(result.uri);
+      await FileSystem.deleteAsync(result.uri, { idempotent: true });
+      if (isStillRelevant()) {
+        setIsDownloading(false);
+        setHasDownloaded(true);
+        setDialog({ visible: true, title: 'Downloaded ✅', message: 'Video saved to your gallery!', type: 'success', buttons: [{ text: 'OK' }] });
+      }
+    } catch (e) {
+      if (isStillRelevant()) {
+        setIsDownloading(false);
+        setDialog({ visible: true, title: 'Error', message: 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+      }
+      __DEV__ && console.error('Download error:', e);
+    }
+  }, [item, hasDownloaded]);
+
+  const handleReport = useCallback(async (reason) => {
+    if (!currentUserId) return;
+    try {
+      const { error } = await supabase.from('reports').insert({ reporter_id: currentUserId, reported_user_id: item.user_id, video_id: item.id, reason });
+      if (error) throw error;
+      setShowReportSheet(false);
+      setDialog({ visible: true, title: 'Report Submitted ✅', message: 'Thanks for reporting. We will review this video.', type: 'success', buttons: [{ text: 'OK' }] });
+    } catch (error) {
+      __DEV__ && console.log('Report error:', error);
+      setShowReportSheet(false);
+      setDialog({ visible: true, title: 'Error', message: 'Could not submit report. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+    }
+  }, [currentUserId, item]);
+
+  const handleBlockUser = useCallback(async () => {
+    if (!currentUserId || !item.user_id) return;
+    try {
+      const { error } = await supabase.from('blocks').insert({ blocker_id: currentUserId, blocked_id: item.user_id });
+      if (error) throw error;
+      setIsBlocked(true);
+      setDialog({ visible: true, title: 'Blocked 🚫', message: 'You have blocked this user. Their content will no longer appear in your feed.', type: 'success', buttons: [{ text: 'OK', onPress: () => onBlocked?.(index) }] });
+    } catch (error) {
+      console.error('Block error:', error);
+      setDialog({ visible: true, title: 'Error', message: 'Could not block user. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+    }
+  }, [currentUserId, item.user_id, index, onBlocked]);
+
   const handleLongPress = useCallback(() => {
     if (!showVideoOptionsSheet) return;
     showVideoOptionsSheet(item, false, hasDownloaded, {
@@ -419,65 +560,15 @@ function VideoCard({
       onDelete: null,
       onBlock: handleBlockUser,
     }, currentUserId, navigation);
-  }, [showVideoOptionsSheet, item, hasDownloaded, handleBlockUser, currentUserId, navigation]);
-
-  const handleDownloadVideo = useCallback(async () => {
-    if (hasDownloaded) return;
-    try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        setDialog({
-          visible: true, title: 'Permission Required',
-          message: 'Please allow access to your media library to download videos.',
-          type: 'warning',
-          buttons: [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings(), style: 'destructive' },
-          ]
-        });
-        return;
-      }
-      setIsDownloading(true);
-      setDownloadProgress(0);
-      const fileUri = FileSystem.documentDirectory + `balagh_${item.id}.mp4`;
-      const downloadResumable = FileSystem.createDownloadResumable(
-        item.video_url, fileUri, {},
-        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          if (totalBytesExpectedToWrite > 0) setDownloadProgress(totalBytesWritten / totalBytesExpectedToWrite);
-        }
-      );
-      const result = await downloadResumable.downloadAsync();
-      if (!result?.uri) throw new Error('Download failed');
-      await MediaLibrary.saveToLibraryAsync(result.uri);
-      await FileSystem.deleteAsync(result.uri, { idempotent: true });
-      setIsDownloading(false);
-      setHasDownloaded(true);
-      setDialog({ visible: true, title: 'Downloaded ✅', message: 'Video saved to your gallery!', type: 'success', buttons: [{ text: 'OK' }] });
-    } catch (e) {
-      setIsDownloading(false);
-      setDialog({ visible: true, title: 'Error', message: 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
-      __DEV__ && console.error('Download error:', e);
-    }
-  }, [item, hasDownloaded]);
-
-  const handleReport = useCallback(async (reason) => {
-    if (!currentUserId) return;
-    await supabase.from('reports').insert({ reporter_id: currentUserId, reported_user_id: item.user_id, video_id: item.id, reason });
-    setShowReportSheet(false);
-    setDialog({ visible: true, title: 'Report Submitted ✅', message: 'Thanks for reporting. We will review this video.', type: 'success', buttons: [{ text: 'OK' }] });
-  }, [currentUserId, item]);
-
-  const handleBlockUser = useCallback(async () => {
-    if (!currentUserId || !item.user_id) return;
-    try {
-      await supabase.from('blocks').insert({ blocker_id: currentUserId, blocked_id: item.user_id });
-      setIsBlocked(true);
-      setDialog({ visible: true, title: 'Blocked 🚫', message: 'You have blocked this user. Their content will no longer appear in your feed.', type: 'success', buttons: [{ text: 'OK', onPress: () => onBlocked?.(index) }] });
-    } catch (error) {
-      console.error('Block error:', error);
-      setDialog({ visible: true, title: 'Error', message: 'Could not block user. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
-    }
-  }, [currentUserId, item.user_id]);
+  }, [
+    showVideoOptionsSheet,
+    item,
+    hasDownloaded,
+    handleDownloadVideo,
+    handleBlockUser,
+    currentUserId,
+    navigation,
+  ]);
 
   const handleNavigateUserProfile = useCallback(() => {
     navigation.navigate(ROUTES.USER_PROFILE, { profileUserId: item.user_id });
@@ -529,9 +620,10 @@ function VideoCard({
           }}
           onError={(e) => {
             __DEV__ && console.log('Video error:', e);
-            setIsReady(true);
+            isVideoReadyRef.current = false;
           }}
           onLoad={(data) => {
+
             if (data?.duration && data.duration > 0 && data.duration < 86400) {
               setDuration(data.duration);
               durationRef.current = data.duration;
@@ -541,10 +633,47 @@ function VideoCard({
             }
           }}
           onProgress={(data) => {
+          
             if (isSeeking.current) return;
-            if (data?.currentTime != null && data?.seekableDuration > 0) {
-              setCurrentTime(data.currentTime);
-              const progress = data.currentTime / data.seekableDuration;
+
+            const current = Number(data?.currentTime);
+            const seekableDuration = Number(data?.seekableDuration);
+            let effectiveDuration = durationRef.current;
+
+            // Some Android/video-container combinations can report an inaccurate
+            // onLoad duration. Once playback exposes a valid seekableDuration,
+            // allow it to correct a clearly inconsistent duration.
+            if (
+              Number.isFinite(seekableDuration) &&
+              seekableDuration > 0 &&
+              seekableDuration < 86400
+            ) {
+              const currentDuration = durationRef.current;
+
+              const shouldCorrectDuration =
+                currentDuration <= 0 ||
+                Math.abs(seekableDuration - currentDuration) >
+                  Math.max(2, currentDuration * 0.05);
+
+              if (shouldCorrectDuration) {
+                durationRef.current = seekableDuration;
+                setDuration(seekableDuration);
+                effectiveDuration = seekableDuration;
+              }
+            }
+
+            if (
+              Number.isFinite(current) &&
+              current >= 0 &&
+              effectiveDuration > 0
+            ) {
+              setCurrentTime(current);
+
+              const progress = Math.max(
+                0,
+                Math.min(1, current / effectiveDuration)
+              );
+
               progressAnim.setValue(progress);
             }
           }}
@@ -718,7 +847,7 @@ function VideoCard({
         style={[
           styles.progressContainer,
           {
-            bottom: Math.max(safeBottom, 16) + s(45),
+            bottom: safeBottom + s(65),
             zIndex: 10,
             height: s(40),
             justifyContent: 'center',
@@ -839,7 +968,9 @@ function areEqual(prevProps, nextProps) {
     prevProps.isActive === nextProps.isActive &&
     prevProps.isVisible === nextProps.isVisible &&
     prevProps.isTabActive === nextProps.isTabActive &&
-    prevProps.player === nextProps.player
+    prevProps.player === nextProps.player &&
+    prevProps.index === nextProps.index &&
+    prevProps.onBlocked === nextProps.onBlocked
   );
 }
 

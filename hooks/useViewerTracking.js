@@ -1,23 +1,49 @@
 import { useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
-export const useViewerTracking = (streamId, isStreamer = false, user, retryCount = 0) => {
+export const useViewerTracking = (streamId, isStreamer = false, user, retryCount = 0, enabled = true) => {
   const heartbeatInterval = useRef(null);
+  const activeTokens = useRef({});
+  const userId = user?.id;
 
   useEffect(() => {
-    __DEV__ && console.log('🔍 useViewerTracking called:', { streamId, isStreamer, hasUser: !!user, userId: user?.id });
-    
-    if (!streamId || !user || isStreamer) {
-      __DEV__ && console.log('⚠️ Early return - missing:', { streamId: !!streamId, user: !!user, isStreamer });
+    console.log('🔍 useViewerTracking called:', { streamId, isStreamer, hasUser: !!userId, userId, enabled });
+
+    if (!streamId || !userId || isStreamer || !enabled) {
+      console.log('⚠️ Early return - missing:', { streamId: !!streamId, userId: !!userId, isStreamer, enabled });
       return;
     }
 
-    const userId = user.id;
-    __DEV__ && console.log('✅ Starting viewer tracking for user:', userId);
+    const key = `${streamId}:${userId}`;
+    activeTokens.current[key] = (activeTokens.current[key] || 0) + 1;
+    const myToken = activeTokens.current[key];
+    let stopped = false;
 
-    // Join stream
+    console.log('✅ Starting viewer tracking for user:', userId);
+
+    const stopTracking = () => {
+      if (stopped) return;
+      stopped = true;
+      if (heartbeatInterval.current) {
+        clearInterval(heartbeatInterval.current);
+        heartbeatInterval.current = null;
+      }
+    };
+
+    // 23503 (FK violation on stream_id) means the parent live_streams row
+    // no longer exists. That is the authoritative, race-proof stream-ended
+    // signal — never keep writing against a dead stream.
+    const handleWriteError = (error, context) => {
+      if (error?.code === '23503') {
+        console.log(`[VIEWER TRACKING] Stream ${streamId} no longer exists (${context}); stopping tracking`);
+        stopTracking();
+        return true;
+      }
+      return false;
+    };
+
     const joinStream = async () => {
-      __DEV__ && console.log('📝 Attempting to join stream_viewers table...');
+      console.log('📝 Attempting to join stream_viewers table...');
       try {
         const { data, error } = await supabase
           .from('stream_viewers')
@@ -26,51 +52,83 @@ export const useViewerTracking = (streamId, isStreamer = false, user, retryCount
             user_id: userId,
             joined_at: new Date().toISOString(),
             last_seen_at: new Date().toISOString()
-          }, { 
-            onConflict: 'stream_id,user_id' 
+          }, {
+            onConflict: 'stream_id,user_id'
           });
-        
+
+        if (stopped) return;
+
         if (error) {
-          __DEV__ && console.error('❌ Error joining stream:', error);
+          if (handleWriteError(error, 'join')) return;
+          console.error('❌ Error joining stream:', error);
         } else {
-          __DEV__ && console.log('✅ Successfully joined stream_viewers:', data);
+          console.log('✅ Successfully joined stream_viewers:', data);
         }
       } catch (e) {
-        __DEV__ && console.error('❌ Exception in joinStream:', e);
+        console.error('❌ Exception in joinStream:', e);
       }
     };
 
-    // Heartbeat to show we're still watching
     const heartbeat = async () => {
-      __DEV__ && console.log('💓 Heartbeat...');
-      await supabase
-        .from('stream_viewers')
-        .update({ last_seen_at: new Date().toISOString() })
-        .eq('stream_id', streamId)
-        .eq('user_id', userId);
+      console.log('💓 Heartbeat...');
+      try {
+        // Upsert (not UPDATE): if the (stream_id, user_id) row disappeared
+        // while the viewer was connected (another device leaving, a delete
+        // race), an UPDATE would silently match zero rows forever. The
+        // upsert recreates the row via the existing UNIQUE(stream_id,user_id)
+        // and always refreshes last_seen_at.
+        const { error } = await supabase
+          .from('stream_viewers')
+          .upsert({
+            stream_id: streamId,
+            user_id: userId,
+            last_seen_at: new Date().toISOString()
+          }, {
+            onConflict: 'stream_id,user_id'
+          });
+
+        if (stopped) return;
+
+        if (error) {
+          if (handleWriteError(error, 'heartbeat')) return;
+          console.error('❌ Error in heartbeat:', error);
+        }
+      } catch (e) {
+        console.error('❌ Exception in heartbeat:', e);
+      }
     };
 
-    // Leave stream
     const leaveStream = async () => {
-      __DEV__ && console.log('👋 Leaving stream...');
-      await supabase
-        .from('stream_viewers')
-        .delete()
-        .eq('stream_id', streamId)
-        .eq('user_id', userId);
+      console.log('👋 Leaving stream...');
+      try {
+        await supabase
+          .from('stream_viewers')
+          .delete()
+          .eq('stream_id', streamId)
+          .eq('user_id', userId);
+      } catch (e) {
+        console.error('❌ Exception in leaveStream:', e);
+      }
     };
 
-    // Join immediately
-    joinStream();
+    const joinPromise = joinStream();
 
-    // Heartbeat every 30 seconds
-    heartbeatInterval.current = setInterval(heartbeat, 30000);
+    // If the join already discovered the stream is gone (23503), never start
+    // the heartbeat.
+    if (!stopped) {
+      heartbeatInterval.current = setInterval(heartbeat, 30000);
+    }
 
-    // Cleanup on unmount
     return () => {
-      __DEV__ && console.log('🧹 Cleanup called');
-      clearInterval(heartbeatInterval.current);
-      leaveStream();
+      console.log('🧹 Cleanup called');
+      stopTracking();
+      joinPromise.then(() => {
+        if (stopped) return;
+        // Only leave if no newer instance has re-claimed this same stream+user key
+        if (activeTokens.current[key] === myToken) {
+          leaveStream();
+        }
+      });
     };
-  }, [streamId, user, isStreamer]);
+  }, [streamId, userId, isStreamer, retryCount, enabled]);
 };

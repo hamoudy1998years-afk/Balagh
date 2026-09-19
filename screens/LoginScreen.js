@@ -92,9 +92,12 @@ export default function LoginScreen({ navigation }) {
     saveGoogleCredentials,
     saveAccount,
     loginWithBiometrics,
+    loginGoogleAccount,
+    loginWithPin,
     hasQuickPin,
-    validateQuickPin,
     saveQuickPin,
+    reconcileAccountEmail,
+    backfillAccountId,
   } = useBiometricAuth();
 
   useEffect(() => {
@@ -172,12 +175,23 @@ export default function LoginScreen({ navigation }) {
 
     try {
       if (account.provider === 'email') {
+        const resolvedEmail = account.id
+          ? await reconcileAccountEmail(account)
+          : account.email;
+
+        const resolvedAccount =
+          resolvedEmail && resolvedEmail !== account.email
+            ? { ...account, email: resolvedEmail }
+            : account;
+
+        setSelectedAccount(resolvedAccount);
+
         const available = await isBiometricAvailable();
-        const hasCreds = await hasCredentials(account.email);
+        const hasCreds = await hasCredentials(resolvedAccount.email);
 
         if (available && hasCreds) {
           try {
-            await loginWithBiometrics(account.email);
+            await loginWithBiometrics(resolvedAccount);
             navigation.navigate(ROUTES.MAIN);
             return;
           } catch (e) {
@@ -188,18 +202,62 @@ export default function LoginScreen({ navigation }) {
           }
         }
 
-        setIdentifier(account.email);
+        setIdentifier(resolvedAccount.email);
         setLoading(false);
         return;
       }
 
       if (account.provider === 'google') {
+        // Resolve to the account's CURRENT email via its stable Supabase id
+        // (if we have one) before doing anything else — avoids knowingly
+        // attempting sign-in with a stale email after an email change.
+        if (account.id) {
+          const resolvedEmail = await reconcileAccountEmail(account);
+          if (resolvedEmail && resolvedEmail !== account.email) {
+            account = { ...account, email: resolvedEmail };
+          }
+        }
+        setSelectedAccount(account);
+
         const hasPin = await hasQuickPin(account.email);
-        const credKey = getCredentialKey(account.email);
-        const savedRaw = await SecureStore.getItemAsync(credKey);
 
         if (!hasPin) {
-          __DEV__ && console.log('[LOGIN] No PIN yet - showing create PIN modal');
+          __DEV__ && console.log('[LOGIN] No PIN yet - verifying identity before allowing PIN setup');
+
+          // A saved Google account with no PIN yet must not let PIN creation
+          // happen without proving the person selecting it is actually the
+          // account owner. Establish/verify a real session first — same
+          // appPassword + account-ID guarantees as every other Google path —
+          // before ever showing the PIN creation modal.
+          const bioAvailableForSetup = await isBiometricAvailable();
+
+          if (bioAvailableForSetup) {
+            const bioResult = await LocalAuthentication.authenticateAsync({
+              promptMessage: 'Verify to set up quick login',
+              cancelLabel: 'Cancel',
+            });
+
+            if (!bioResult.success) {
+              setLoading(false);
+              return;
+            }
+          }
+
+          try {
+            await loginGoogleAccount(account);
+          } catch (sessionErr) {
+            __DEV__ && console.log('[LOGIN] PIN setup verification failed:', sessionErr.message);
+            setLoading(false);
+            setDialog({
+              visible: true,
+              title: 'Account Verification Failed',
+              message: 'Please sign in with Google again to set up quick login.',
+              type: 'error',
+              buttons: [{ text: 'OK' }],
+            });
+            return;
+          }
+
           setLoading(false);
           setPinModalVisible(true);
           setIsCreatingPin(true);
@@ -223,28 +281,36 @@ export default function LoginScreen({ navigation }) {
           if (bioResult.success) {
             __DEV__ && console.log('[LOGIN] Biometric success - creating session with appPassword...');
 
-            if (!savedRaw) {
-              __DEV__ && console.log('[LOGIN] No saved credentials found');
-              setLoading(false);
-              setDialog({
-                visible: true,
-                title: 'Account Not Found',
-                message: 'Saved login info is missing for this account. Please sign in with Google again.',
-                type: 'error',
-                buttons: [{ text: 'OK' }],
-              });
-              return;
-            }
+            let data;
+            try {
+              data = await loginGoogleAccount(account);
+            } catch (sessionErr) {
+              __DEV__ && console.log('[LOGIN] Session failed:', sessionErr.message);
 
-            const creds = JSON.parse(savedRaw);
+              if (sessionErr.message === 'NO_CREDENTIALS' || sessionErr.message === 'NO_APP_PASSWORD') {
+                setLoading(false);
+                setDialog({
+                  visible: true,
+                  title: 'Account Not Found',
+                  message: 'Saved login info is missing for this account. Please sign in with Google again.',
+                  type: 'error',
+                  buttons: [{ text: 'OK' }],
+                });
+                return;
+              }
 
-            const { data, error } = await supabase.auth.signInWithPassword({
-              email: account.email,
-              password: creds.appPassword,
-            });
+              if (sessionErr.message === 'ACCOUNT_MISMATCH') {
+                setLoading(false);
+                setDialog({
+                  visible: true,
+                  title: 'Account Verification Failed',
+                  message: 'Please sign in with Google again.',
+                  type: 'error',
+                  buttons: [{ text: 'OK' }],
+                });
+                return;
+              }
 
-            if (error) {
-              __DEV__ && console.log('[LOGIN] Session failed:', error.message);
               setLoading(false);
               setPinModalVisible(true);
               setIsCreatingPin(false);
@@ -407,6 +473,7 @@ const resolveEmail = async (raw) => {
       await userCache.clear();
       await userCache.set(data.user);
       await refreshUser();
+      await backfillAccountId(email, data.user.id);
     }
 
     const bioAvailable = await isBiometricAvailable();
@@ -425,7 +492,7 @@ const resolveEmail = async (raw) => {
               style: 'cancel',
               onPress: async () => {
                 try {
-                  await saveAccount(identifier.trim(), email, 'email');
+                  await saveAccount(identifier.trim(), email, 'email', data?.user?.id ?? null);
                   await refreshAccountsList();
                   navigation.navigate(ROUTES.MAIN);
                 } catch (e) {
@@ -438,7 +505,7 @@ const resolveEmail = async (raw) => {
               text: 'Enable',
               onPress: async () => {
                 try {
-                  await saveCredentials(identifier.trim(), email, password);
+                  await saveCredentials(identifier.trim(), email, password, data?.user?.id ?? null);
                   await refreshAccountsList();
                   navigation.navigate(ROUTES.MAIN);
                 } catch (e) {
@@ -459,7 +526,7 @@ const resolveEmail = async (raw) => {
       }
     } else {
       try {
-        await saveAccount(identifier.trim(), email, 'email');
+        await saveAccount(identifier.trim(), email, 'email', data?.user?.id ?? null);
         await refreshAccountsList();
       } catch (e) {
         __DEV__ && console.error('[LoginScreen] saveAccount error:', e);
@@ -469,6 +536,7 @@ const resolveEmail = async (raw) => {
   }
 
   async function handleGoogleLogin() {
+    __DEV__ && console.log('[GoogleLogin] START');
     setGoogleLoading(true);
 
     const redirectUrl = makeRedirectUri({ native: 'bushrann://auth/callback' });
@@ -477,6 +545,7 @@ const resolveEmail = async (raw) => {
       provider: 'google',
       options: { redirectTo: redirectUrl, skipBrowserRedirect: true },
     });
+    __DEV__ && console.log('[GoogleLogin] signInWithOAuth done. error present:', !!error, 'url present:', !!data?.url);
 
     if (error) {
       setGoogleLoading(false);
@@ -491,7 +560,26 @@ const resolveEmail = async (raw) => {
       return;
     }
 
-    const result = await WebBrowser.openAuthSessionAsync(data?.url, redirectUrl);
+    let result;
+    try {
+      __DEV__ && console.log('[GoogleLogin] opening WebBrowser session...');
+      result = await WebBrowser.openAuthSessionAsync(data?.url, redirectUrl);
+      __DEV__ && console.log('[GoogleLogin] WebBrowser session resolved. result.type:', result?.type);
+    } catch (e) {
+      __DEV__ && console.error('[LoginScreen] openAuthSessionAsync error:', e);
+      setGoogleLoading(false);
+      silentReAuth.current = false;
+      setDialog({
+        visible: true,
+        title: 'Google Login Failed',
+        message: 'Could not open the sign-in window. Please try again.',
+        type: 'error',
+        buttons: [{ text: 'OK' }],
+      });
+      return;
+    }
+
+    let expectedEmail = null;
 
     if (result.type === 'success') {
       try {
@@ -518,11 +606,19 @@ const resolveEmail = async (raw) => {
           return;
         }
 
+        __DEV__ && console.log('[GoogleLogin] setSession START');
         await supabase.auth.setSession({ access_token, refresh_token });
+        __DEV__ && console.log('[GoogleLogin] setSession DONE');
 
         const { data: sessionData } = await supabase.auth.getSession();
+        __DEV__ && console.log('[GoogleLogin] getSession DONE. session present:', !!sessionData?.session);
         const userEmail = sessionData?.session?.user?.email;
         const userMeta = sessionData?.session?.user?.user_metadata;
+
+        // Remember the identity we're actually trying to authenticate as,
+        // so the outer catch can verify (not assume) a recovered session
+        // belongs to this same account before ever navigating on it.
+        expectedEmail = userEmail;
 
         if (userEmail) {
           try {
@@ -534,28 +630,38 @@ const resolveEmail = async (raw) => {
               const randomBytes = await Crypto.getRandomBytesAsync(32);
               const appPassword = Array.from(randomBytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
 
+              const { error: passwordError } = await supabase.auth.updateUser({ password: appPassword });
+
+              if (passwordError) {
+                throw passwordError;
+              }
+
+              await supabase.auth.setSession({ access_token, refresh_token });
+
               await SecureStore.setItemAsync(credKey, JSON.stringify({
                 type: 'google',
                 email: userEmail,
                 appPassword,
                 hasPin: false,
               }));
-
-              await supabase.auth.updateUser({ password: appPassword });
-              await supabase.auth.setSession({ access_token, refresh_token });
             }
 
             const displayName = userMeta?.full_name || userMeta?.name || userEmail;
-            await saveGoogleCredentials(displayName, userEmail, refresh_token);
+            __DEV__ && console.log('[GoogleLogin] saveGoogleCredentials START');
+            await saveGoogleCredentials(displayName, userEmail, refresh_token, sessionData?.session?.user?.id ?? null);
+            __DEV__ && console.log('[GoogleLogin] saveGoogleCredentials DONE');
             await refreshAccountsList();
+            __DEV__ && console.log('[GoogleLogin] refreshAccountsList DONE');
 
             const { data: { user } } = await supabase.auth.getUser();
+            __DEV__ && console.log('[GoogleLogin] getUser DONE. user present:', !!user);
             if (user) {
               const { data: profile } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('id', user.id)
                 .single();
+              __DEV__ && console.log('[GoogleLogin] profiles query DONE');
 
               const userWithProfile = {
                 ...user,
@@ -569,6 +675,7 @@ const resolveEmail = async (raw) => {
             }
 
             const hasPin = await hasQuickPin(userEmail);
+            __DEV__ && console.log('[GoogleLogin] hasQuickPin DONE. hasPin:', hasPin);
 
             if (!hasPin) {
               setTimeout(() => {
@@ -582,7 +689,11 @@ const resolveEmail = async (raw) => {
                     {
                       text: 'Set Up Now',
                       onPress: () => {
-                        setSelectedAccount({ email: userEmail, provider: 'google' });
+                        setSelectedAccount({
+                          email: userEmail,
+                          provider: 'google',
+                          id: sessionData?.session?.user?.id ?? null,
+                        });
                         setPinModalVisible(true);
                         setIsCreatingPin(true);
                         setPinStep('create');
@@ -602,12 +713,61 @@ const resolveEmail = async (raw) => {
             }
           } catch (e) {
             __DEV__ && console.error('[LoginScreen] Google login post-processing error:', e);
+            // Post-processing (credential save, profile merge, PIN check)
+            // didn't complete — don't leave an authenticated session behind
+            // that the app hasn't actually finished setting up. Fail closed.
+            try {
+              await supabase.auth.signOut();
+            } catch (signOutErr) {
+              __DEV__ && console.error('[LoginScreen] signOut after failed post-processing error:', signOutErr);
+            }
+            setGoogleLoading(false);
+            setDialog({
+              visible: true,
+              title: 'Google Login Error',
+              message: 'Something went wrong finishing setup. Please sign in again.',
+              type: 'error',
+              buttons: [{ text: 'OK' }],
+            });
+            return;
           }
         }
       } catch (e) {
         __DEV__ && console.error('[LoginScreen] Google login error:', e);
         setGoogleLoading(false);
         silentReAuth.current = false;
+
+        // A session may already be live even though something after
+        // setSession() failed. Only treat this as a recovered success if
+        // the live session's email matches the account we were actually
+        // authenticating — never navigate purely because *some* session
+        // exists. If we never learned expectedEmail (failure happened
+        // before we could), we can't safely verify, so we fail rather
+        // than guess.
+        let recoveredEmail = null;
+        try {
+          const { data: recoveryCheck } = await supabase.auth.getSession();
+          recoveredEmail = recoveryCheck?.session?.user?.email;
+
+          if (recoveredEmail && expectedEmail && recoveredEmail === expectedEmail) {
+            navigation.navigate(ROUTES.MAIN);
+            return;
+          }
+        } catch (recoveryError) {
+          __DEV__ && console.error('[LoginScreen] Recovery check failed:', recoveryError);
+        }
+
+        if (recoveredEmail) {
+          // A session exists but we couldn't verify it belongs to the
+          // account this attempt was authenticating — fail closed rather
+          // than leave an unverified session active.
+          try {
+            await supabase.auth.signOut();
+          } catch (signOutErr) {
+            __DEV__ && console.error('[LoginScreen] signOut after unverifiable recovery:', signOutErr);
+          }
+        }
+
         setDialog({
           visible: true,
           title: 'Google Login Error',
@@ -618,9 +778,32 @@ const resolveEmail = async (raw) => {
         return;
       }
 
+      if (!expectedEmail) {
+        // A session was technically created but we never established an
+        // identity to verify or run post-processing against — don't
+        // navigate on an unverified login.
+        __DEV__ && console.error('[LoginScreen] Google login succeeded but userEmail was never resolved');
+        try {
+          await supabase.auth.signOut();
+        } catch (signOutErr) {
+          __DEV__ && console.error('[LoginScreen] signOut after missing userEmail:', signOutErr);
+        }
+        setGoogleLoading(false);
+        setDialog({
+          visible: true,
+          title: 'Google Login Failed',
+          message: 'Could not verify your account. Please try again.',
+          type: 'error',
+          buttons: [{ text: 'OK' }],
+        });
+        return;
+      }
+
+      __DEV__ && console.log('[GoogleLogin] reaching final navigate (hasPin path)');
       setGoogleLoading(false);
       navigation.navigate(ROUTES.MAIN);
     } else {
+      __DEV__ && console.log('[GoogleLogin] result.type was not success:', result?.type);
       setGoogleLoading(false);
     }
 
@@ -740,32 +923,19 @@ const resolveEmail = async (raw) => {
         setPinLoading(true);
         try {
           __DEV__ && console.log('[PIN] Validating PIN...');
-          await validateQuickPin(selectedAccount.email, enteredPin);
-          __DEV__ && console.log('[PIN] PIN valid - creating session...');
-
-          const credKey = getCredentialKey(selectedAccount.email);
-          const savedRaw = await SecureStore.getItemAsync(credKey);
-
-          if (!savedRaw) {
-            setPinError('Account not found');
-            setEnteredPin('');
-            return;
+          // selectedAccount.email is normally already current — handleAccountSelect
+          // reconciles it before this modal opens. Reconcile again defensively
+          // in case selectedAccount was set some other way and id is available.
+          let pinAccount = selectedAccount;
+          if (pinAccount?.id) {
+            const resolved = await reconcileAccountEmail(pinAccount);
+            if (resolved && resolved !== pinAccount.email) {
+              pinAccount = { ...pinAccount, email: resolved };
+              setSelectedAccount(pinAccount);
+            }
           }
 
-          const creds = JSON.parse(savedRaw);
-
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email: selectedAccount.email,
-            password: creds.appPassword,
-          });
-
-          if (error) {
-            __DEV__ && console.log('[PIN] Session failed:', error.message);
-            setPinError('Login failed. Please try again.');
-            setEnteredPin('');
-            return;
-          }
-
+          const data = await loginWithPin(pinAccount, enteredPin);
           __DEV__ && console.log('[PIN] Session created successfully');
           if (data?.user) {
             const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
@@ -779,13 +949,22 @@ const resolveEmail = async (raw) => {
           setPinError('');
           navigation.navigate(ROUTES.MAIN);
         } catch (e) {
-          __DEV__ && console.log('[PIN] Invalid PIN:', e.message);
-          if (e.message === 'INVALID_PIN') {
+          __DEV__ && console.log('[PIN] Login error:', e.message);
+          if (e.message === 'PIN_LOCKED') {
+            const seconds = Math.ceil((e.retryAfterMs || 0) / 1000);
+            setPinError(`Too many attempts. Try again in ${seconds}s`);
+          } else if (e.message === 'INVALID_PIN') {
             setPinError('Wrong PIN');
-            setEnteredPin('');
+          } else if (e.message === 'NO_PIN') {
+            setPinError('No PIN set up for this account');
+          } else if (e.message === 'NO_CREDENTIALS' || e.message === 'NO_APP_PASSWORD') {
+            setPinError('Account not found. Please sign in with Google again.');
+          } else if (e.message === 'ACCOUNT_MISMATCH') {
+            setPinError('Account verification failed. Please sign in again.');
           } else {
-            setPinError('Error validating PIN');
+            setPinError('Login failed. Please try again.');
           }
+          setEnteredPin('');
         } finally {
           setPinLoading(false);
         }
@@ -919,7 +1098,8 @@ const resolveEmail = async (raw) => {
                     <TouchableOpacity
                       key={idx}
                       style={[styles.dropdownItem, idx < filteredAccounts.length - 1 && styles.dropdownItemBorder]}
-                      onPress={() => { closeDropdown(); handleAccountSelect(account); }}
+                      onPress={() => { if (loading) return; closeDropdown(); handleAccountSelect(account); }}
+                      disabled={loading}
                       activeOpacity={0.7}
                       accessibilityLabel={`Account ${account.identifier || account.email}`}
                       accessibilityRole="button"

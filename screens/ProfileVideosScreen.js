@@ -2,7 +2,7 @@ import { View, StyleSheet, FlatList, Text, useWindowDimensions, Animated } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayerPool } from '../components/VideoPlayerPool';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { SystemBars } from 'react-native-edge-to-edge';
 import VideoCard from './VideoCard';
 import AnimatedButton from './AnimatedButton';
@@ -12,10 +12,22 @@ export default function ProfileVideosScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const { videos: videosParam, startIndex } = route.params ?? {};
   const videos = videosParam || []; // Ensure videos is always an array
-  const [activeIndex, setActiveIndex] = useState(startIndex ?? 0);
+  const safeStartIndex = videos.length === 0
+    ? 0
+    : Math.min(Math.max(startIndex ?? 0, 0), videos.length - 1);
+  const [activeIndex, setActiveIndex] = useState(safeStartIndex);
   const playerPool = useVideoPlayerPool();
+  const isFocused = useIsFocused();
   const [showSwipeHint, setShowSwipeHint] = useState(true);
   const swipeHintOpacity = useRef(new Animated.Value(1));
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (videos.length === 0) return;
@@ -25,8 +37,10 @@ export default function ProfileVideosScreen({ route, navigation }) {
     if (current) playerPool.loadVideo('current', current.video_url);
     if (next) playerPool.loadVideo('next', next.video_url);
     if (prev) playerPool.loadVideo('prev', prev.video_url);
-    playerPool.playCurrent();
-  }, [activeIndex, videos]);
+    if (isFocused) {
+      playerPool.playCurrent();
+    }
+  }, [activeIndex, videos, isFocused]);
 
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (viewableItems?.length > 0) {
@@ -43,14 +57,22 @@ export default function ProfileVideosScreen({ route, navigation }) {
 
   useEffect(() => {
     if (videos.length <= 1) return;
+    const animation = Animated.timing(swipeHintOpacity.current, {
+      toValue: 0,
+      duration: 800,
+      useNativeDriver: true,
+    });
     const timer = setTimeout(() => {
-      Animated.timing(swipeHintOpacity.current, {
-        toValue: 0,
-        duration: 800,
-        useNativeDriver: true,
-      }).start(() => setShowSwipeHint(false));
+      animation.start(() => {
+        if (isMountedRef.current) {
+          setShowSwipeHint(false);
+        }
+      });
     }, 2000);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      animation.stop();
+    };
   }, []);
 
   if (videos.length === 0) {
@@ -124,7 +146,7 @@ export default function ProfileVideosScreen({ route, navigation }) {
                 index === activeIndex + 1 ? playerPool.getPlayerRef('next') : null
               }
               isActive={index === activeIndex}
-              isTabActive={true}
+              isTabActive={isFocused}
               isVisible={true}
               cardHeight={height}
               navigation={navigation}
@@ -139,7 +161,7 @@ export default function ProfileVideosScreen({ route, navigation }) {
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}
-        initialScrollIndex={startIndex ?? 0}
+        initialScrollIndex={safeStartIndex}
         getItemLayout={(_, index) => ({
           length: height,
           offset: height * index,

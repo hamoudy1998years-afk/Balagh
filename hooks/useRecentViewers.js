@@ -7,6 +7,8 @@ export const useRecentViewers = (streamId, limit = 20) => {
   useEffect(() => {
     if (!streamId) return;
 
+    let isActive = true;
+
     // Fetch recent viewers with profile info
     const fetchRecentViewers = async () => {
       const { data, error } = await supabase
@@ -19,6 +21,8 @@ export const useRecentViewers = (streamId, limit = 20) => {
         .eq('stream_id', streamId)
         .order('joined_at', { ascending: false })
         .limit(limit);
+
+      if (!isActive) return;
 
       if (error) {
         __DEV__ && console.error('Error fetching recent viewers:', error);
@@ -56,6 +60,8 @@ export const useRecentViewers = (streamId, limit = 20) => {
             .eq('id', payload.new.user_id)
             .single();
 
+          if (!isActive) return;
+
           const newViewer = {
             userId: payload.new.user_id,
             username: profile?.username || 'Anonymous',
@@ -73,7 +79,8 @@ export const useRecentViewers = (streamId, limit = 20) => {
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      isActive = false;
+      supabase.removeChannel(subscription);
     };
   }, [streamId, limit]);
 

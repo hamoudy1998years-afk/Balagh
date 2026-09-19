@@ -39,7 +39,63 @@ export default function EditProfileScreen({ navigation }) {
   );
 
   useEffect(() => {
+    let isActive = true;
+
+    async function loadProfile() {
+      const user = authUser;
+      if (!user) return;
+
+      const { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+
+      if (!isActive) return;
+
+      if (profileError && profileError.code !== 'PGRST116') {
+        // PGRST116 = no row found, which is a legitimate "no profile yet" case.
+        // Any other error is a real failure and should not fall through to fallback data.
+        setLoading(false);
+        setDialog({ visible: true, title: 'Error', message: 'Failed to load your profile. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+        return;
+      }
+
+      if (profile) {
+        const usernameFromProfile = profile.username ?? authUser?.user_metadata?.username ?? '';
+        setUsername(usernameFromProfile);
+        setFullName(profile.full_name ?? '');
+        setBio(profile.bio ?? '');
+        setIsScholar(profile.is_scholar === true);
+      } else {
+        const fallbackUsername = authUser?.user_metadata?.username || '';
+        setUsername(fallbackUsername);
+      }
+
+      if (profile?.is_scholar) {
+        const { data: scholarData, error: scholarError } = await supabase
+          .from('scholar_applications')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('submitted_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!isActive) return;
+
+        if (scholarError) {
+          setDialog({ visible: true, title: 'Error', message: 'Failed to load your scholar details. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+        } else if (scholarData) {
+          setScholarId(scholarData.id);
+          setRealName(scholarData.full_name ?? '');
+          setAge(scholarData.age?.toString() ?? '');
+          setLocation(scholarData.location ?? '');
+          setEducation(scholarData.education ?? '');
+          setExpertise(scholarData.expertise ?? '');
+        }
+      }
+
+      setLoading(false);
+    }
+
     loadProfile();
+
     const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
       setExtraPadding(e.endCoordinates.height);
     });
@@ -47,46 +103,13 @@ export default function EditProfileScreen({ navigation }) {
       setExtraPadding(0);
       scrollRef.current?.scrollTo({ y: 0, animated: true });
     });
-    return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
 
-  async function loadProfile() {
-    const user = authUser;
-    if (!user) return;
-    const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-    // Profile loaded
-    if (profile) {
-      // Profile exists but username might be null - use fallback if needed
-      const usernameFromProfile = profile.username ?? authUser?.user_metadata?.username ?? '';
-      setUsername(usernameFromProfile);
-      setFullName(profile.full_name ?? '');
-      setBio(profile.bio ?? '');
-      setIsScholar(profile.is_scholar === true);
-    } else {
-      // No profile yet - use username from signup metadata
-      const fallbackUsername = authUser?.user_metadata?.username || '';
-      // Using fallback username
-      setUsername(fallbackUsername);
-    }
-    if (profile?.is_scholar) {
-      const { data: scholarData } = await supabase
-        .from('scholar_applications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('submitted_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (scholarData) {
-        setScholarId(scholarData.id);
-        setRealName(scholarData.full_name ?? '');
-        setAge(scholarData.age?.toString() ?? '');
-        setLocation(scholarData.location ?? '');
-        setEducation(scholarData.education ?? '');
-        setExpertise(scholarData.expertise ?? '');
-      }
-    }
-    setLoading(false);
-  }
+    return () => {
+      isActive = false;
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [authUser]);
 
   async function handleSave() {
     const trimmedUsername = username.trim();
@@ -101,6 +124,38 @@ export default function EditProfileScreen({ navigation }) {
     if (!/^[a-zA-Z0-9._]+$/.test(trimmedUsername)) {
       setDialog({ visible: true, title: 'Invalid Username', message: 'No spaces allowed! Use letters, numbers, dots (.) or underscores (_) only.', type: 'warning', buttons: [{ text: 'OK' }] });
       return;
+    }
+
+    if (isScholar) {
+      const trimmedRealName = realName.trim();
+      const trimmedLocation = location.trim();
+      const trimmedEducation = education.trim();
+      const trimmedExpertise = expertise.trim();
+      const trimmedAge = age.trim();
+
+      if (!trimmedRealName || trimmedRealName.length < 3) {
+        setDialog({ visible: true, title: 'Invalid Name', message: 'Real name must be at least 3 characters.', type: 'warning', buttons: [{ text: 'OK' }] });
+        return;
+      }
+      if (!trimmedLocation || trimmedLocation.length < 2) {
+        setDialog({ visible: true, title: 'Invalid Location', message: 'Please enter a valid location.', type: 'warning', buttons: [{ text: 'OK' }] });
+        return;
+      }
+      if (!trimmedEducation || trimmedEducation.length < 20) {
+        setDialog({ visible: true, title: 'Invalid Education', message: 'Education must be at least 20 characters.', type: 'warning', buttons: [{ text: 'OK' }] });
+        return;
+      }
+      if (!trimmedExpertise || trimmedExpertise.length < 3) {
+        setDialog({ visible: true, title: 'Invalid Expertise', message: 'Expertise must be at least 3 characters.', type: 'warning', buttons: [{ text: 'OK' }] });
+        return;
+      }
+      if (trimmedAge) {
+        const ageNum = parseInt(trimmedAge, 10);
+        if (isNaN(ageNum) || !/^\d+$/.test(trimmedAge) || ageNum < 18 || ageNum > 100) {
+          setDialog({ visible: true, title: 'Invalid Age', message: 'Please enter a valid age between 18 and 100.', type: 'warning', buttons: [{ text: 'OK' }] });
+          return;
+        }
+      }
     }
 
     setSaving(true);
@@ -135,7 +190,11 @@ export default function EditProfileScreen({ navigation }) {
       }
       setDialog({ visible: true, title: 'Success! 🎉', message: 'Profile updated!', type: 'success', buttons: [{ text: 'OK', onPress: () => navigation.goBack() }] });
     } catch (e) {
-      setDialog({ visible: true, title: 'Error', message: e.message, type: 'error', buttons: [{ text: 'OK' }] });
+      if (e.code === '23505') {
+        setDialog({ visible: true, title: 'Username Taken', message: 'That username is already in use. Please choose another.', type: 'warning', buttons: [{ text: 'OK' }] });
+      } else {
+        setDialog({ visible: true, title: 'Error', message: e.message, type: 'error', buttons: [{ text: 'OK' }] });
+      }
     } finally {
       setSaving(false);
     }
@@ -205,6 +264,7 @@ export default function EditProfileScreen({ navigation }) {
               onChangeText={setRealName}
               placeholderTextColor="#4b5563"
               placeholder="Your real full name"
+              maxLength={80}
               onFocus={() => scrollToField(0)}
             />
 
@@ -227,6 +287,7 @@ export default function EditProfileScreen({ navigation }) {
               onChangeText={setLocation}
               placeholderTextColor="#4b5563"
               placeholder="e.g. Davao City, Davao del Sur"
+              maxLength={100}
               onFocus={() => scrollToField(85)}
             />
 
@@ -237,6 +298,7 @@ export default function EditProfileScreen({ navigation }) {
               onChangeText={setEducation}
               placeholderTextColor="#4b5563"
               placeholder="e.g. Bachelor of Islamic Studies"
+              maxLength={500}
               onFocus={() => scrollToField(170)}
             />
 
@@ -248,6 +310,7 @@ export default function EditProfileScreen({ navigation }) {
               placeholderTextColor="#4b5563"
               placeholder="e.g. Fiqh, Hadith, Quran Tafsir"
               multiline
+              maxLength={150}
               onFocus={() => scrollToField(285)}
             />
           </>
@@ -280,10 +343,6 @@ export default function EditProfileScreen({ navigation }) {
 
         <AnimatedButton style={epStyles.saveBtn} onPress={handleSave} disabled={saving}>
           <Text style={epStyles.saveBtnText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
-        </AnimatedButton>
-
-        <AnimatedButton style={epStyles.cancelBtn} onPress={navigation.goBack}>
-          <Text style={epStyles.cancelBtnText}>Cancel</Text>
         </AnimatedButton>
 
         <ModernDialog
@@ -398,20 +457,5 @@ const epStyles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
-  },
-  cancelBtn: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
-    marginBottom: 20,
-    backgroundColor: '#f8fafc',
-  },
-  cancelBtnText: {
-    color: '#94a3b8',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

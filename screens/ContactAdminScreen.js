@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -57,23 +57,80 @@ export default function ContactAdminScreen({ navigation }) {
     buttons: [],
   });
 
+  const isMountedRef = useRef(true);
+  const requestIdRef = useRef(0);
+  const currentUserIdRef = useRef(currentUser?.id);
+  const submittingRef = useRef(false);
+
+  currentUserIdRef.current = currentUser?.id;
+
   const loadMessages = useCallback(async () => {
-    if (!currentUser?.id) return;
-    setLoading(true);
+    const requestId = ++requestIdRef.current;
+    const requestedUserId = currentUser?.id;
+
+    if (!requestedUserId) {
+      if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+        setMessages([]);
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+      setLoading(true);
+    }
+
     const { data, error } = await supabase
       .from('user_messages')
       .select('*')
-      .eq('user_id', currentUser.id)
+      .eq('user_id', requestedUserId)
       .order('created_at', { ascending: false });
-    if (!error && data) {
-      setMessages(data);
+
+    if (isMountedRef.current && requestId === requestIdRef.current && currentUserIdRef.current === requestedUserId) {
+      if (!error && data) {
+        setMessages(data);
+      } else if (error) {
+        setDialog({
+          visible: true,
+          title: 'Error',
+          message: 'Failed to load your messages. Please try again.',
+          type: 'error',
+          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
+        });
+      }
+      setLoading(false);
     }
-    setLoading(false);
   }, [currentUser?.id]);
 
+  // Mount/unmount lifecycle guard only
   useEffect(() => {
-    loadMessages();
-  }, [loadMessages]);
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  // Clear stale state on account change
+  useEffect(() => {
+    requestIdRef.current += 1;
+
+    if (isMountedRef.current) {
+      setMessages([]);
+      setLoading(true);
+      submittingRef.current = false;
+      setSubmitting(false);
+      setMessageBody('');
+      setSubject(SUBJECTS[0]);
+      setShowSubjectDropdown(false);
+      setDialog({
+        visible: false,
+        title: '',
+        message: '',
+        type: 'info',
+        buttons: [],
+      });
+    }
+  }, [currentUser?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -91,6 +148,7 @@ export default function ContactAdminScreen({ navigation }) {
   }, []);
 
   const handleSubmit = useCallback(async () => {
+    if (submittingRef.current) return;
     if (!currentUser?.id) return;
     if (!messageBody.trim()) {
       setDialog({
@@ -102,14 +160,29 @@ export default function ContactAdminScreen({ navigation }) {
       });
       return;
     }
+
+    const userIdAtStart = currentUser.id;
+    submittingRef.current = true;
     setSubmitting(true);
+
     const { error } = await supabase.from('user_messages').insert({
-      user_id: currentUser.id,
+      user_id: userIdAtStart,
       subject,
       message: messageBody.trim(),
       status: 'open',
     });
-    setSubmitting(false);
+
+    const stillValid =
+      isMountedRef.current &&
+      currentUserIdRef.current === userIdAtStart;
+
+    if (stillValid) {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+
+    if (!stillValid) return;
+
     if (error) {
       setDialog({
         visible: true,
@@ -120,10 +193,19 @@ export default function ContactAdminScreen({ navigation }) {
       });
       return;
     }
+
     setMessageBody('');
     setSubject(SUBJECTS[0]);
     setShowSubjectDropdown(false);
     await loadMessages();
+
+    if (
+      !isMountedRef.current ||
+      currentUserIdRef.current !== userIdAtStart
+    ) {
+      return;
+    }
+
     setDialog({
       visible: true,
       title: 'Success',
@@ -131,7 +213,7 @@ export default function ContactAdminScreen({ navigation }) {
       type: 'success',
       buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
     });
-  }, [currentUser?.id, subject, messageBody, loadMessages]);
+  }, [currentUser?.id, subject, messageBody, loadMessages, submitting]);
 
   const renderMessageItem = useCallback(({ item }) => {
     const statusColor = STATUS_COLORS[item.status] || STATUS_COLORS.open;
@@ -174,7 +256,7 @@ export default function ContactAdminScreen({ navigation }) {
   return (
     <KeyboardAvoidingView
       style={[styles.container, { paddingTop: insets.top }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <View style={styles.header}>
@@ -187,7 +269,7 @@ export default function ContactAdminScreen({ navigation }) {
 
       <FlatList
         data={messages}
-        keyExtractor={item => item.id?.toString() || Math.random().toString()}
+        keyExtractor={item => item.id?.toString() || `${item.created_at || 'unknown'}-${item.subject || ''}`}
         renderItem={renderMessageItem}
         contentContainerStyle={[
           styles.listContent,
@@ -243,7 +325,7 @@ export default function ContactAdminScreen({ navigation }) {
         />
         <Text style={styles.charCount}>{messageBody.length}/500</Text>
 
-        <AnimatedButton style={styles.submitBtn} onPress={handleSubmit}>
+        <AnimatedButton style={styles.submitBtn} onPress={handleSubmit} disabled={submitting}>
           <View style={styles.submitBtnInner}>
             {submitting ? (
               <ActivityIndicator color="#fff" size="small" />

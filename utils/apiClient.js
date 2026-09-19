@@ -15,29 +15,54 @@ export function handleSupabaseError(error, defaultMessage = ERROR_MESSAGES.SOMET
 
 // Fetch with timeout
 export async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+  const { signal: callerSignal, ...restOptions } = options;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  
+  let timedOut = false;
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  // Merge the caller's signal (if any) into our internal controller,
+  // without letting it be silently overwritten.
+  const onCallerAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      callerSignal.addEventListener('abort', onCallerAbort);
+    }
+  }
+
   try {
     const response = await fetch(url, {
-      ...options,
+      ...restOptions,
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
     return response;
   } catch (error) {
-    clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      throw new Error(ERROR_MESSAGES.TIMEOUT_ERROR);
+      // Only rewrite the error as a timeout if our timeout actually fired.
+      // A caller-initiated abort should surface as a normal AbortError.
+      if (timedOut) {
+        throw new Error(ERROR_MESSAGES.TIMEOUT_ERROR);
+      }
+      throw error;
     }
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    if (callerSignal) {
+      callerSignal.removeEventListener('abort', onCallerAbort);
+    }
   }
 }
 
 // Token server API
 export async function fetchStreamToken(channelName, role = 'publisher') {
   try {
-    const url = `${API_BASE_URLS.TOKEN_SERVER}${ENDPOINTS.TOKEN}?channelName=${encodeURIComponent(channelName)}&role=${role}`;
+    const url = `${API_BASE_URLS.TOKEN_SERVER}${ENDPOINTS.TOKEN}?channelName=${encodeURIComponent(channelName)}&role=${encodeURIComponent(role)}`;
     const response = await fetchWithTimeout(url);
     
     if (!response.ok) {
@@ -52,6 +77,50 @@ export async function fetchStreamToken(channelName, role = 'publisher') {
       console.error('Token fetch error:', error);
     }
     return { token: null, error: error.message || ERROR_MESSAGES.TOKEN_ERROR };
+  }
+}
+
+// Delete a normal uploaded video via the token server
+// (DELETE /api/videos/:videoId). The server removes the storage objects
+// and the videos row (child rows cascade). Requires an active session.
+export async function deleteVideoOnServer(videoId) {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return { success: false, error: 'Session expired. Please log in again.' };
+    }
+
+    const response = await fetchWithTimeout(
+      `${API_BASE_URLS.TOKEN_SERVER}/api/videos/${videoId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
+      30000
+    );
+
+    if (!response.ok) {
+      let message = ERROR_MESSAGES.SOMETHING_WENT_WRONG;
+      try {
+        const data = await response.json();
+        if (data?.error) message = data.error;
+      } catch (parseError) {
+        // Keep the generic message.
+      }
+      return { success: false, error: message };
+    }
+
+    return { success: true, error: null };
+  } catch (error) {
+    if (__DEV__) {
+      console.error('Delete video error:', error);
+    }
+    return { success: false, error: error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG };
   }
 }
 
