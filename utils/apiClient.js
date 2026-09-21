@@ -124,6 +124,72 @@ export async function deleteVideoOnServer(videoId) {
   }
 }
 
+// Request a watermarked version of a public video for external sharing
+// (POST /api/videos/:videoId/watermark). Guest-accessible: no session is
+// required, but an active session token is attached when available.
+// Uses a dedicated long timeout because server-side FFmpeg work can take
+// much longer than the default 30-second fetch timeout.
+export async function requestWatermarkedVideo(videoId) {
+  const WATERMARK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+  try {
+    let headers = {};
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session?.access_token) {
+        headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    } catch (sessionError) {
+      // Guests share without a session; continue unauthenticated.
+    }
+
+    const response = await fetchWithTimeout(
+      `${API_BASE_URLS.TOKEN_SERVER}/api/videos/${videoId}/watermark`,
+      {
+        method: 'POST',
+        headers,
+      },
+      WATERMARK_TIMEOUT_MS
+    );
+
+    if (!response.ok) {
+      let message = 'Failed to prepare video for sharing.';
+      try {
+        const data = await response.json();
+        if (data?.error) message = data.error;
+      } catch (parseError) {
+        // Keep the generic message.
+      }
+      return { success: false, watermarkedUrl: null, error: message };
+    }
+
+    const data = await response.json();
+
+    if (!data?.success || !data?.watermarkedUrl) {
+      return {
+        success: false,
+        watermarkedUrl: null,
+        error: 'Failed to prepare video for sharing.',
+      };
+    }
+
+    return { success: true, watermarkedUrl: data.watermarkedUrl, error: null };
+  } catch (error) {
+    if (__DEV__) {
+      console.error('Watermark request error:', error);
+    }
+    return {
+      success: false,
+      watermarkedUrl: null,
+      error: error.message || ERROR_MESSAGES.SOMETHING_WENT_WRONG,
+    };
+  }
+}
+
 // Supabase query helpers
 export async function fetchProfile(userId) {
   try {

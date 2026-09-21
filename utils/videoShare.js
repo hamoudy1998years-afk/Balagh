@@ -1,6 +1,7 @@
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { videoCache } from './VideoCache';
+import { requestWatermarkedVideo } from './apiClient';
 
 const SHARE_CACHE_DIR = FileSystem.cacheDirectory + 'video-shares/';
 const STALE_FILE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -76,12 +77,15 @@ async function cleanupStaleShareFiles(currentPath) {
 }
 
 /**
- * Prepares and shares a video file.
+ * Prepares and shares a watermarked video file.
  *
  * For HLS/livestreams, calls onError immediately with the livestream message.
- * For normal MP4s, copies from the validated video cache if available,
- * otherwise downloads directly to a unique temporary file, then opens the
- * system share sheet. Guests can use this without logging in.
+ * For normal MP4s, requests the server's permanently watermarked version
+ * using the video ID, downloads it into a unique temporary file, then opens
+ * the system share sheet. Guests can use this without logging in.
+ *
+ * CRITICAL: if the watermark request or download fails, sharing fails —
+ * the clean video is NEVER shared as a fallback.
  *
  * callbacks: { onStart, onComplete, onError }
  */
@@ -99,6 +103,11 @@ export async function shareVideoFile(video, callbacks = {}) {
     return;
   }
 
+  if (!video?.id) {
+    onError?.('Video ID is missing.');
+    return;
+  }
+
   onStart?.();
 
   let sharePath = null;
@@ -107,22 +116,23 @@ export async function shareVideoFile(video, callbacks = {}) {
     await ensureShareDir();
     sharePath = getUniqueShareFileName(video.id);
 
-    const cachedPath = await videoCache.getCachedVideo(videoUrl);
+    const { success, watermarkedUrl, error } =
+      await requestWatermarkedVideo(video.id);
 
-    if (cachedPath) {
-      const valid = await validateFile(cachedPath);
-      if (!valid) {
-        throw new Error('Cached video file is invalid.');
-      }
-      await FileSystem.copyAsync({ from: cachedPath, to: sharePath });
-    } else {
-      const result = await FileSystem.downloadAsync(videoUrl, sharePath, {
+    if (!success || !watermarkedUrl) {
+      throw new Error(error || 'Failed to prepare video for sharing.');
+    }
+
+    const result = await FileSystem.downloadAsync(
+      watermarkedUrl,
+      sharePath,
+      {
         headers: { Accept: 'video/mp4,video/*' },
-      });
-
-      if (result.status !== 200) {
-        throw new Error(`Download failed with status ${result.status}.`);
       }
+    );
+
+    if (result.status !== 200) {
+      throw new Error(`Download failed with status ${result.status}.`);
     }
 
     const valid = await validateFile(sharePath);
