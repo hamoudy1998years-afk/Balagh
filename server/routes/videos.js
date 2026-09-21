@@ -157,6 +157,52 @@ async function probeVideoDuration(filePath) {
   return duration;
 }
 
+// TEMPORARY diagnostic helper — logs every stream of the probed file.
+async function debugProbeStreams(tag, filePath) {
+  try {
+    const { stdout } = await runProcess(ffprobePath, [
+      '-v',
+      'error',
+      '-print_format',
+      'json',
+      '-show_format',
+      '-show_streams',
+      filePath,
+    ]);
+
+    const data = JSON.parse(stdout);
+
+    const streams = (data?.streams ?? []).map(stream => ({
+      codec_type: stream.codec_type,
+      codec_name: stream.codec_name,
+      width: stream.width ?? null,
+      height: stream.height ?? null,
+      duration: stream.duration ?? null,
+      nb_frames: stream.nb_frames ?? null,
+    }));
+
+    let size = null;
+
+    try {
+      size = (await fs.promises.stat(filePath)).size;
+    } catch (error) {
+      // Keep size null when the file is absent.
+    }
+
+    console.log('[WATERMARK DEBUG]', tag, {
+      filePath,
+      size,
+      duration: data?.format?.duration ?? null,
+      streams,
+    });
+  } catch (error) {
+    console.log('[WATERMARK DEBUG]', tag, {
+      filePath,
+      probeError: error?.message || String(error),
+    });
+  }
+}
+
 async function downloadToDisk(url, destinationPath) {
   const allowedPrefix =
     `${process.env.SUPABASE_URL}` +
@@ -323,10 +369,24 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
 
     await downloadToDisk(sourceUrl, sourcePath);
 
-    await runProcess(
-      ffmpegPath,
-      buildWatermarkArgs(sourcePath, WATERMARK_PATH, outputPath)
+    const watermarkArgs = buildWatermarkArgs(
+      sourcePath,
+      WATERMARK_PATH,
+      outputPath
     );
+
+    console.log('[WATERMARK DEBUG] first-pass args', {
+      videoId,
+      sourcePath,
+      outputPath,
+      args: watermarkArgs,
+    });
+
+    await debugProbeStreams('source before watermark', sourcePath);
+
+    await runProcess(ffmpegPath, watermarkArgs);
+
+    await debugProbeStreams('output after first pass', outputPath);
 
     let stats = await fs.promises.stat(outputPath);
 
@@ -344,14 +404,26 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
         'watermarked-compressed.mp4'
       );
 
-      await runProcess(
-        ffmpegPath,
-        buildBitrateLimitedWatermarkArgs(
-          sourcePath,
-          WATERMARK_PATH,
-          compressedPath,
-          duration
-        )
+      const fallbackArgs = buildBitrateLimitedWatermarkArgs(
+        sourcePath,
+        WATERMARK_PATH,
+        compressedPath,
+        duration
+      );
+
+      console.log('[WATERMARK DEBUG] bitrate fallback args', {
+        videoId,
+        sourcePath,
+        compressedPath,
+        duration,
+        args: fallbackArgs,
+      });
+
+      await runProcess(ffmpegPath, fallbackArgs);
+
+      await debugProbeStreams(
+        'output after bitrate fallback',
+        compressedPath
       );
 
       const compressedStats = await fs.promises.stat(compressedPath);
@@ -370,6 +442,8 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
 
       stats = compressedStats;
     }
+
+    await debugProbeStreams('final output before upload', outputPath);
 
     const storageKey = getWatermarkStorageKey(videoId);
 
