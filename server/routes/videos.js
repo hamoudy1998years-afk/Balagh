@@ -42,7 +42,7 @@ const WATERMARK_PATH = path.join(
 
 // In-memory job dedupe: simultaneous requests for the same video share
 // one FFmpeg job. Cross-instance duplicates are harmless because the
-// storage key is deterministic (watermarked/v2/<videoId>.mp4).
+// storage key is deterministic (watermarked/v3/<videoId>.mp4).
 const watermarkJobs = new Map();
 
 // ─────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ function getPublicVideoUrl(key) {
 }
 
 function getWatermarkStorageKey(videoId) {
-  return `watermarked/v2/${videoId}.mp4`;
+  return `watermarked/v3/${videoId}.mp4`;
 }
 
 function runProcess(command, args) {
@@ -300,9 +300,44 @@ async function downloadToDisk(url, destinationPath) {
   }
 }
 
-// Burns the Bushrann PNG watermark into the bottom-right corner.
-// The watermark width is computed in JS from the source video width
-// (~25%, aspect preserved); the base video is never resized.
+// Four-position movement cycle (20 s): bottom-right, top-left,
+// bottom-left, top-right — 4% horizontal / 12% vertical safe margins,
+// switching instantly every 5 seconds and repeating via mod(t,20).
+// Shared by BOTH watermark builders so the layers can never diverge.
+// NOTE: commas inside the filter expressions are escaped as "\," — ffmpeg's
+// filtergraph parser requires this even when args are passed via spawn
+// (no shell involved); unescaped commas break the filter description.
+const WATERMARK_POS_X =
+  'if(lt(mod(t\\,20)\\,5)\\,W-w-main_w*0.04\\,' +
+  'if(lt(mod(t\\,20)\\,10)\\,main_w*0.04\\,' +
+  'if(lt(mod(t\\,20)\\,15)\\,main_w*0.04\\,W-w-main_w*0.04)))';
+
+const WATERMARK_POS_Y =
+  'if(lt(mod(t\\,20)\\,5)\\,H-h-main_h*0.12\\,' +
+  'if(lt(mod(t\\,20)\\,10)\\,main_h*0.12\\,' +
+  'if(lt(mod(t\\,20)\\,15)\\,H-h-main_h*0.12\\,main_h*0.12)))';
+
+// Layered watermark: sharp [wm] always on top, soft glow [gloww] always
+// on underneath, stronger glow [glows] stepped on/off on a 2-second cycle
+// (enable between(mod(t,2),0.5,1.5)). The watermark is stationary within
+// each 5-second position; only the glow intensity changes.
+function buildWatermarkFilterComplex(watermarkWidthPx) {
+  return (
+    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,split=3[base][gb1][gb2];` +
+    '[base]colorchannelmixer=aa=1.00[wm];' +
+    '[gb1]gblur=sigma=12,colorchannelmixer=aa=0.55[gloww];' +
+    '[gb2]gblur=sigma=28,colorchannelmixer=aa=0.55[glows];' +
+    `[0:v][glows]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}` +
+    ":enable='between(mod(t\\,2)\\,0.5\\,1.5)'[v0];" +
+    `[v0][gloww]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[v1];` +
+    `[v1][wm]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[vout]`
+  );
+}
+
+// Burns the Bushrann PNG watermark into the video, moving between four
+// corners every 5 seconds with a soft stepped glow. The watermark width
+// is computed in JS from the source video width (~25%, aspect preserved);
+// the base video is never resized.
 function buildWatermarkArgs(
   inputPath,
   watermarkFilePath,
@@ -316,9 +351,7 @@ function buildWatermarkArgs(
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
-      'colorchannelmixer=aa=1.00[wm];' +
-      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.12[vout]',
+    buildWatermarkFilterComplex(watermarkWidthPx),
     '-map',
     '[vout]',
     '-map',
@@ -372,9 +405,7 @@ function buildBitrateLimitedWatermarkArgs(
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
-      'colorchannelmixer=aa=1.00[wm];' +
-      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.12[vout]',
+    buildWatermarkFilterComplex(watermarkWidthPx),
     '-map',
     '[vout]',
     '-map',
@@ -690,7 +721,7 @@ async function requireAuth(req, res, next) {
 // Guest-accessible for eligible public videos only. The client sends
 // ONLY the video ID; the server loads the row via the service client,
 // validates it, burns the Bushrann watermark PNG in with FFmpeg, and
-// stores the result at the deterministic key watermarked/v2/<id>.mp4.
+// stores the result at the deterministic key watermarked/v3/<id>.mp4.
 // ─────────────────────────────────────────────────────────────
 
 router.post('/:videoId/watermark', async (req, res) => {
