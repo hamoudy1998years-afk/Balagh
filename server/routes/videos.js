@@ -302,7 +302,7 @@ async function downloadToDisk(url, destinationPath) {
 
 // Burns the Bushrann PNG watermark into the bottom-right corner.
 // The watermark width is computed in JS from the source video width
-// (~11%, aspect preserved); the base video is never resized.
+// (~25%, aspect preserved); the base video is never resized.
 function buildWatermarkArgs(
   inputPath,
   watermarkFilePath,
@@ -424,7 +424,7 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
 
     const watermarkWidthPx = Math.max(
       2,
-      Math.round(sourceProbe.width * 0.11)
+      Math.round(sourceProbe.width * 0.25)
     );
 
     console.log(
