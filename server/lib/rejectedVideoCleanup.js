@@ -3,7 +3,8 @@
 // Race-safe claim protocol. For each candidate row:
 //   1. Atomically claim the row: UPDATE rejected -> cleanup, conditioned on
 //      id + status='rejected' + reviewed_at older than the 30-day cutoff +
-//      non-livestream type, returning the row. Only the successful claimant
+//      non-livestream-bucket video_url, returning the row. Only the
+//      successful claimant
 //      proceeds; zero returned rows means the video was restored or changed
 //      — Storage is NEVER touched in that case.
 //   2. Delete its storage objects via the shared, strict cleanupVideoStorage
@@ -56,7 +57,7 @@ async function sweepRejectedVideos() {
     )
     .eq('status', 'rejected')
     .lt('reviewed_at', cutoff)
-    .or('type.is.null,type.neq.livestream')
+    .not('video_url', 'like', '%/object/public/livestreams/%')
     .order('reviewed_at', { ascending: true })
     .range(0, BATCH_SIZE - 1);
 
@@ -74,8 +75,8 @@ async function sweepRejectedVideos() {
   for (const row of rows ?? []) {
     // 1. Claim exclusive cleanup ownership: rejected -> cleanup. The claim
     //    only succeeds when the row STILL satisfies every eligibility
-    //    condition at claim time (id, status, age, non-livestream type).
-    //    An appeal restore or any other status change makes this match
+    //    condition at claim time (id, status, age, non-livestream-bucket
+    //    video_url). An appeal restore or any other status change makes this match
     //    zero rows — then we skip WITHOUT touching Storage.
     const { data: claimed, error: claimError } = await supabase
       .from('videos')
@@ -83,7 +84,7 @@ async function sweepRejectedVideos() {
       .eq('id', row.id)
       .eq('status', 'rejected')
       .lt('reviewed_at', cutoff)
-      .or('type.is.null,type.neq.livestream')
+      .not('video_url', 'like', '%/object/public/livestreams/%')
       .select('id');
 
     if (claimError) {

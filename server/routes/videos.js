@@ -552,7 +552,6 @@ router.post('/:videoId/watermark', async (req, res) => {
           'original_video_url',
           'is_private',
           'status',
-          'type',
           'processing_status',
         ].join(',')
       )
@@ -573,11 +572,8 @@ router.post('/:videoId/watermark', async (req, res) => {
       return res.status(404).json({ error: 'Video not found' });
     }
 
-    if (video.type === 'livestream') {
-      return res.status(400).json({
-        error: 'Livestream videos do not support watermarking',
-      });
-    }
+    // Livestream replays live in the `livestreams` bucket; the trusted
+    // source URL validation below (videos bucket only) already rejects them.
 
     if (video.is_private) {
       return res.status(403).json({
@@ -738,7 +734,7 @@ router.post('/account/:userId/cleanup-videos', requireAuth, async (req, res) => 
       .select('id, user_id, video_url, original_video_url, thumbnail_url')
       .eq('user_id', userId)
       // Livestream replays live in the livestreams bucket — never touch them.
-      .or('type.is.null,type.neq.livestream')
+      .not('video_url', 'like', '%/object/public/livestreams/%')
       .range(0, BATCH_SIZE - 1);
 
     if (fetchError) {
