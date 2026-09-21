@@ -220,10 +220,10 @@ function buildWatermarkArgs(inputPath, watermarkFilePath, outputPath) {
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    '[0:v][1:v]scale2ref=w=iw*0.18:h=ow/mdar[video][wm];' +
-      '[video][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04',
+    '[0:v][1:v]scale2ref=w=iw*0.18:h=ow/mdar[base][wm];' +
+      '[base][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
     '-map',
-    '[video]',
+    '[vout]',
     '-map',
     '0:a?',
     '-c:v',
@@ -274,10 +274,10 @@ function buildBitrateLimitedWatermarkArgs(
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    '[0:v][1:v]scale2ref=w=iw*0.18:h=ow/mdar[video][wm];' +
-      '[video][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04',
+    '[0:v][1:v]scale2ref=w=iw*0.18:h=ow/mdar[base][wm];' +
+      '[base][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
     '-map',
-    '[video]',
+    '[vout]',
     '-map',
     '0:a?',
     '-c:v',
