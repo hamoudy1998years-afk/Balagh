@@ -318,7 +318,7 @@ function buildWatermarkArgs(
     '-filter_complex',
     `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
       'colorchannelmixer=aa=1.00[wm];' +
-      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
+      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.12[vout]',
     '-map',
     '[vout]',
     '-map',
@@ -374,7 +374,7 @@ function buildBitrateLimitedWatermarkArgs(
     '-filter_complex',
     `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
       'colorchannelmixer=aa=1.00[wm];' +
-      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
+      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.12[vout]',
     '-map',
     '[vout]',
     '-map',
