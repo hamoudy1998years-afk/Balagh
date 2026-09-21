@@ -42,7 +42,7 @@ const WATERMARK_PATH = path.join(
 
 // In-memory job dedupe: simultaneous requests for the same video share
 // one FFmpeg job. Cross-instance duplicates are harmless because the
-// storage key is deterministic (watermarked/v1/<videoId>.mp4).
+// storage key is deterministic (watermarked/v2/<videoId>.mp4).
 const watermarkJobs = new Map();
 
 // ─────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ function getPublicVideoUrl(key) {
 }
 
 function getWatermarkStorageKey(videoId) {
-  return `watermarked/v1/${videoId}.mp4`;
+  return `watermarked/v2/${videoId}.mp4`;
 }
 
 function runProcess(command, args) {
@@ -128,13 +128,14 @@ function runProcess(command, args) {
   });
 }
 
-async function probeVideoDuration(filePath) {
+async function probeSourceVideo(filePath) {
   const { stdout } = await runProcess(ffprobePath, [
     '-v',
     'error',
     '-print_format',
     'json',
     '-show_format',
+    '-show_streams',
     filePath,
   ]);
 
@@ -154,7 +155,51 @@ async function probeVideoDuration(filePath) {
     );
   }
 
-  return duration;
+  const videoStream = (data?.streams ?? []).find(
+    stream => stream.codec_type === 'video'
+  );
+
+  const width = Number(videoStream?.width);
+  const height = Number(videoStream?.height);
+
+  if (!Number.isFinite(width) || width <= 0 ||
+      !Number.isFinite(height) || height <= 0) {
+    throw new Error('Source video has no valid video stream dimensions');
+  }
+
+  return { duration, width, height };
+}
+
+// Mandatory pre-upload validation: the watermarked output MUST contain a
+// video stream with real dimensions. Prevents audio-only uploads.
+async function assertWatermarkedOutputValid(filePath) {
+  const { stdout } = await runProcess(ffprobePath, [
+    '-v',
+    'error',
+    '-print_format',
+    'json',
+    '-show_streams',
+    filePath,
+  ]);
+
+  let data;
+
+  try {
+    data = JSON.parse(stdout);
+  } catch (error) {
+    throw new Error('FFprobe returned invalid JSON');
+  }
+
+  const hasValidVideo = (data?.streams ?? []).some(
+    stream =>
+      stream.codec_type === 'video' &&
+      Number(stream.width) > 0 &&
+      Number(stream.height) > 0
+  );
+
+  if (!hasValidVideo) {
+    throw new Error('Watermarked output has no video stream');
+  }
 }
 
 // TEMPORARY diagnostic helper — logs every stream of the probed file.
@@ -256,9 +301,14 @@ async function downloadToDisk(url, destinationPath) {
 }
 
 // Burns the Bushrann PNG watermark into the bottom-right corner.
-// The overlay scales relative to the video width (18%) preserving its
-// aspect ratio, with proportional padding from the edges.
-function buildWatermarkArgs(inputPath, watermarkFilePath, outputPath) {
+// The watermark width is computed in JS from the source video width
+// (~11%, aspect preserved); the base video is never resized.
+function buildWatermarkArgs(
+  inputPath,
+  watermarkFilePath,
+  outputPath,
+  watermarkWidthPx
+) {
   return [
     '-y',
     '-i',
@@ -266,9 +316,9 @@ function buildWatermarkArgs(inputPath, watermarkFilePath, outputPath) {
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    '[1:v][0:v]scale2ref=w=iw*0.11:h=ow/mdar[wm][base];' +
-      '[wm]format=rgba,colorchannelmixer=aa=0.72[wmalpha];' +
-      '[base][wmalpha]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
+    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
+      'colorchannelmixer=aa=0.72[wm];' +
+      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
     '-map',
     '[vout]',
     '-map',
@@ -298,7 +348,8 @@ function buildBitrateLimitedWatermarkArgs(
   inputPath,
   watermarkFilePath,
   outputPath,
-  duration
+  duration,
+  watermarkWidthPx
 ) {
   const safeDuration =
     Number.isFinite(duration) && duration > 0 ? duration : 300;
@@ -321,9 +372,9 @@ function buildBitrateLimitedWatermarkArgs(
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    '[1:v][0:v]scale2ref=w=iw*0.11:h=ow/mdar[wm][base];' +
-      '[wm]format=rgba,colorchannelmixer=aa=0.72[wmalpha];' +
-      '[base][wmalpha]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
+    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
+      'colorchannelmixer=aa=0.72[wm];' +
+      '[0:v][wm]overlay=W-w-main_w*0.04:H-h-main_h*0.04[vout]',
     '-map',
     '[vout]',
     '-map',
@@ -369,10 +420,25 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
 
     await downloadToDisk(sourceUrl, sourcePath);
 
+    const sourceProbe = await probeSourceVideo(sourcePath);
+
+    const watermarkWidthPx = Math.max(
+      2,
+      Math.round(sourceProbe.width * 0.11)
+    );
+
+    console.log(
+      '[WATERMARK] Source probe:',
+      videoId,
+      sourceProbe,
+      `watermarkWidth=${watermarkWidthPx}px`
+    );
+
     const watermarkArgs = buildWatermarkArgs(
       sourcePath,
       WATERMARK_PATH,
-      outputPath
+      outputPath,
+      watermarkWidthPx
     );
 
     try {
@@ -409,7 +475,7 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
         `${(stats.size / 1024 / 1024).toFixed(2)} MB`
       );
 
-      const duration = await probeVideoDuration(sourcePath);
+      const duration = sourceProbe.duration;
 
       const compressedPath = path.join(
         tempDirectory,
@@ -420,7 +486,8 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
         sourcePath,
         WATERMARK_PATH,
         compressedPath,
-        duration
+        duration,
+        watermarkWidthPx
       );
 
       console.log(
@@ -459,6 +526,9 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
     }
 
     await debugProbeStreams('final output before upload', outputPath);
+
+    // Mandatory: never upload an output that has no video stream.
+    await assertWatermarkedOutputValid(outputPath);
 
     const storageKey = getWatermarkStorageKey(videoId);
 
@@ -620,7 +690,7 @@ async function requireAuth(req, res, next) {
 // Guest-accessible for eligible public videos only. The client sends
 // ONLY the video ID; the server loads the row via the service client,
 // validates it, burns the Bushrann watermark PNG in with FFmpeg, and
-// stores the result at the deterministic key watermarked/v1/<id>.mp4.
+// stores the result at the deterministic key watermarked/v2/<id>.mp4.
 // ─────────────────────────────────────────────────────────────
 
 router.post('/:videoId/watermark', async (req, res) => {
