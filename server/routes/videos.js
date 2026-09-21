@@ -375,12 +375,24 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
       outputPath
     );
 
-    console.log('[WATERMARK DEBUG] first-pass args', {
-      videoId,
-      sourcePath,
-      outputPath,
-      args: watermarkArgs,
-    });
+    try {
+      const { stdout } = await runProcess(ffmpegPath, ['-version']);
+
+      console.log(
+        '[WATERMARK DEBUG] ffmpeg version',
+        JSON.stringify(stdout.split('\n').slice(0, 3))
+      );
+    } catch (error) {
+      console.log(
+        '[WATERMARK DEBUG] ffmpeg version probe failed:',
+        error?.message
+      );
+    }
+
+    console.log(
+      '[WATERMARK DEBUG] first-pass args JSON:',
+      JSON.stringify({ videoId, sourcePath, outputPath, args: watermarkArgs })
+    );
 
     await debugProbeStreams('source before watermark', sourcePath);
 
@@ -411,13 +423,16 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
         duration
       );
 
-      console.log('[WATERMARK DEBUG] bitrate fallback args', {
-        videoId,
-        sourcePath,
-        compressedPath,
-        duration,
-        args: fallbackArgs,
-      });
+      console.log(
+        '[WATERMARK DEBUG] bitrate fallback args JSON:',
+        JSON.stringify({
+          videoId,
+          sourcePath,
+          compressedPath,
+          duration,
+          args: fallbackArgs,
+        })
+      );
 
       await runProcess(ffmpegPath, fallbackArgs);
 
