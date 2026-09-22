@@ -40,9 +40,30 @@ const WATERMARK_PATH = path.join(
   'bushrann-watermark.png'
 );
 
+// Bundled variable font (official Roboto release, SIL OFL — see
+// assets/fonts/Roboto-OFL.txt). Used via drawtext fontfile= so Railway
+// needs no system fonts or fontconfig setup.
+const WATERMARK_FONT_PATH = path.join(
+  __dirname,
+  '..',
+  'assets',
+  'fonts',
+  'Roboto.ttf'
+);
+
+// Forward-slash form for FFmpeg filtergraph options (backslashes would be
+// read as escapes; FFmpeg accepts "/" on Windows too).
+const WATERMARK_FONTFILE = WATERMARK_FONT_PATH.replace(/\\/g, '/');
+
+// Pixel dimensions of assets/bushrann-watermark.png (1536x1024, 3:2).
+// Used to derive the scaled logo height so the text canvas below it can
+// be sized before the FFmpeg run.
+const WATERMARK_PNG_WIDTH = 1536;
+const WATERMARK_PNG_HEIGHT = 1024;
+
 // In-memory job dedupe: simultaneous requests for the same video share
 // one FFmpeg job. Cross-instance duplicates are harmless because the
-// storage key is deterministic (watermarked/v3/<videoId>.mp4).
+// storage key is deterministic (watermarked/v4/<videoId>.mp4).
 const watermarkJobs = new Map();
 
 // ─────────────────────────────────────────────────────────────
@@ -91,7 +112,7 @@ function getPublicVideoUrl(key) {
 }
 
 function getWatermarkStorageKey(videoId) {
-  return `watermarked/v3/${videoId}.mp4`;
+  return `watermarked/v4/${videoId}.mp4`;
 }
 
 function runProcess(command, args) {
@@ -301,48 +322,138 @@ async function downloadToDisk(url, destinationPath) {
 }
 
 // Four-position movement cycle (20 s): bottom-right, top-left,
-// bottom-left, top-right — 4% horizontal / 12% vertical safe margins,
+// bottom-left, top-right — 2.5% horizontal / 8% vertical safe margins,
 // switching instantly every 5 seconds and repeating via mod(t,20).
 // Shared by BOTH watermark builders so the layers can never diverge.
 // NOTE: commas inside the filter expressions are escaped as "\," — ffmpeg's
 // filtergraph parser requires this even when args are passed via spawn
 // (no shell involved); unescaped commas break the filter description.
 const WATERMARK_POS_X =
-  'if(lt(mod(t\\,20)\\,5)\\,W-w-main_w*0.04\\,' +
-  'if(lt(mod(t\\,20)\\,10)\\,main_w*0.04\\,' +
-  'if(lt(mod(t\\,20)\\,15)\\,main_w*0.04\\,W-w-main_w*0.04)))';
+  'if(lt(mod(t\\,20)\\,5)\\,W-w-main_w*0.025\\,' +
+  'if(lt(mod(t\\,20)\\,10)\\,main_w*0.025\\,' +
+  'if(lt(mod(t\\,20)\\,15)\\,main_w*0.025\\,W-w-main_w*0.025)))';
 
 const WATERMARK_POS_Y =
-  'if(lt(mod(t\\,20)\\,5)\\,H-h-main_h*0.12\\,' +
-  'if(lt(mod(t\\,20)\\,10)\\,main_h*0.12\\,' +
-  'if(lt(mod(t\\,20)\\,15)\\,H-h-main_h*0.12\\,main_h*0.12)))';
+  'if(lt(mod(t\\,20)\\,5)\\,H-h-main_h*0.08\\,' +
+  'if(lt(mod(t\\,20)\\,10)\\,main_h*0.08\\,' +
+  'if(lt(mod(t\\,20)\\,15)\\,H-h-main_h*0.08\\,main_h*0.08)))';
 
-// Layered watermark: sharp [wm] always on top, soft glow [gloww] always
-// on underneath, stronger glow [glows] stepped on/off on a 2-second cycle
-// (enable between(mod(t,2),0.5,1.5)). The watermark is stationary within
-// each 5-second position; only the glow intensity changes.
-function buildWatermarkFilterComplex(watermarkWidthPx) {
+// Maximum visible length of the "@username" text (including "@").
+const USERNAME_MAX_DISPLAY_LENGTH = 30;
+
+// Builds the single grouped watermark stream: the Bushrann PNG scaled to
+// 25% of the source width, on a transparent canvas padded tall enough for
+// the owner's "@username" centered beneath the logo. Logo and text move as
+// ONE unit because there is a single overlay of the combined [grp] stream.
+// Text length tiers shrink the font so full usernames stay distinguishable
+// without truncation (validated: 0.62 x fontsize average glyph width).
+function buildGroupWatermarkChain(watermarkWidthPx, logoHeightPx, username) {
+  if (!username) {
+    return `[1:v]scale=${watermarkWidthPx}:-2[grp]`;
+  }
+
+  const text = `@${username}`;
+
+  const tier =
+    text.length <= 15
+      ? 0.2
+      : text.length <= 24
+        ? 0.15
+        : 0.11;
+
+  const fontsize = Math.max(6, Math.round(logoHeightPx * tier));
+  const gap = Math.round(fontsize * 0.35);
+  const canvasWidth = Math.max(
+    watermarkWidthPx,
+    Math.ceil(text.length * 0.62 * fontsize) + 12
+  );
+  const canvasHeight = logoHeightPx + gap + Math.ceil(fontsize * 1.3);
+
   return (
-    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,split=3[base][gb1][gb2];` +
-    '[base]colorchannelmixer=aa=1.00[wm];' +
-    '[gb1]gblur=sigma=12,colorchannelmixer=aa=0.55[gloww];' +
-    '[gb2]gblur=sigma=28,colorchannelmixer=aa=0.55[glows];' +
-    `[0:v][glows]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}` +
-    ":enable='between(mod(t\\,2)\\,0.5\\,1.5)'[v0];" +
-    `[v0][gloww]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[v1];` +
-    `[v1][wm]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[vout]`
+    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
+    `pad=${canvasWidth}:${canvasHeight}:0:0:color=black@0,` +
+    `drawtext=fontfile=${WATERMARK_FONTFILE}:text='${text}'` +
+    `:fontsize=${fontsize}:fontcolor=white:borderw=2:bordercolor=black` +
+    `:x=(w-text_w)/2:y=${logoHeightPx}+${gap}[grp]`
   );
 }
 
-// Burns the Bushrann PNG watermark into the video, moving between four
-// corners every 5 seconds with a soft stepped glow. The watermark width
-// is computed in JS from the source video width (~25%, aspect preserved);
-// the base video is never resized.
+// Single-overlay grouped watermark: no glow, no pulse, no blur. The whole
+// group (logo + @username) jumps between the four corners as one unit and
+// is stationary within each 5-second phase.
+function buildWatermarkFilterComplex(
+  watermarkWidthPx,
+  logoHeightPx,
+  username
+) {
+  return (
+    `${buildGroupWatermarkChain(watermarkWidthPx, logoHeightPx, username)};` +
+    `[0:v][grp]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[vout]`
+  );
+}
+
+// Sanitizes a raw profiles.username for FFmpeg drawtext display:
+// strips control characters, keeps only [A-Za-z0-9._], caps the visible
+// "@username" length, and returns null when nothing usable remains so the
+// caller falls back to a logo-only watermark. The result can only contain
+// filter-safe characters, so it can never inject filter syntax.
+function sanitizeWatermarkUsername(rawUsername) {
+  if (typeof rawUsername !== 'string') {
+    return null;
+  }
+
+  const cleaned = rawUsername
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .replace(/[^A-Za-z0-9._]/g, '')
+    .slice(0, USERNAME_MAX_DISPLAY_LENGTH - 1);
+
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+// Authoritative owner lookup: videos.user_id -> profiles.id -> username.
+async function getVideoOwnerUsername(userId) {
+  if (typeof userId !== 'string' || userId.length === 0) {
+    return null;
+  }
+
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn(
+        '[WATERMARK] Owner profile lookup failed; using logo-only:',
+        error.message
+      );
+
+      return null;
+    }
+
+    return sanitizeWatermarkUsername(profile?.username);
+  } catch (error) {
+    console.warn(
+      '[WATERMARK] Owner profile lookup failed; using logo-only:',
+      error?.message
+    );
+
+    return null;
+  }
+}
+
+// Burns the Bushrann PNG watermark (plus the owner's @username when
+// available) into the video, moving between four corners every 5 seconds.
+// The watermark width is computed in JS from the source video width
+// (~25%, aspect preserved); the base video is never resized.
 function buildWatermarkArgs(
   inputPath,
   watermarkFilePath,
   outputPath,
-  watermarkWidthPx
+  watermarkWidthPx,
+  logoHeightPx,
+  username
 ) {
   return [
     '-y',
@@ -351,7 +462,11 @@ function buildWatermarkArgs(
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    buildWatermarkFilterComplex(watermarkWidthPx),
+    buildWatermarkFilterComplex(
+      watermarkWidthPx,
+      logoHeightPx,
+      username
+    ),
     '-map',
     '[vout]',
     '-map',
@@ -382,7 +497,9 @@ function buildBitrateLimitedWatermarkArgs(
   watermarkFilePath,
   outputPath,
   duration,
-  watermarkWidthPx
+  watermarkWidthPx,
+  logoHeightPx,
+  username
 ) {
   const safeDuration =
     Number.isFinite(duration) && duration > 0 ? duration : 300;
@@ -405,7 +522,11 @@ function buildBitrateLimitedWatermarkArgs(
     '-i',
     watermarkFilePath,
     '-filter_complex',
-    buildWatermarkFilterComplex(watermarkWidthPx),
+    buildWatermarkFilterComplex(
+      watermarkWidthPx,
+      logoHeightPx,
+      username
+    ),
     '-map',
     '[vout]',
     '-map',
@@ -432,11 +553,12 @@ function buildBitrateLimitedWatermarkArgs(
   ];
 }
 
-async function generateWatermarkedVideo(videoId, sourceUrl) {
+async function generateWatermarkedVideo(videoId, sourceUrl, username) {
   let tempDirectory = null;
 
   try {
     await fs.promises.access(WATERMARK_PATH, fs.constants.R_OK);
+    await fs.promises.access(WATERMARK_FONT_PATH, fs.constants.R_OK);
   } catch (error) {
     throw new Error('Watermark asset is missing on the server');
   }
@@ -458,18 +580,33 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
       Math.round(sourceProbe.width * 0.25)
     );
 
+    // Scaled logo height (matches FFmpeg scale=W:-2, which rounds the
+    // height to the nearest even number).
+    const logoHeightPx = Math.max(
+      2,
+      Math.round(
+        Math.round(
+          (watermarkWidthPx * WATERMARK_PNG_HEIGHT) / WATERMARK_PNG_WIDTH
+        ) / 2
+      ) * 2
+    );
+
     console.log(
       '[WATERMARK] Source probe:',
       videoId,
       sourceProbe,
-      `watermarkWidth=${watermarkWidthPx}px`
+      `watermarkWidth=${watermarkWidthPx}px`,
+      `logoHeight=${logoHeightPx}px`,
+      `username=${username ? '@' + username : '(logo only)'}`
     );
 
     const watermarkArgs = buildWatermarkArgs(
       sourcePath,
       WATERMARK_PATH,
       outputPath,
-      watermarkWidthPx
+      watermarkWidthPx,
+      logoHeightPx,
+      username
     );
 
     try {
@@ -518,7 +655,9 @@ async function generateWatermarkedVideo(videoId, sourceUrl) {
         WATERMARK_PATH,
         compressedPath,
         duration,
-        watermarkWidthPx
+        watermarkWidthPx,
+        logoHeightPx,
+        username
       );
 
       console.log(
@@ -619,7 +758,7 @@ async function deleteWatermarkedObject(videoId) {
   }
 }
 
-async function getOrCreateWatermarkJob(videoId, sourceUrl) {
+async function getOrCreateWatermarkJob(videoId, sourceUrl, username) {
   const existing = watermarkJobs.get(videoId);
 
   if (existing) {
@@ -663,7 +802,7 @@ async function getOrCreateWatermarkJob(videoId, sourceUrl) {
       }
     }
 
-    return generateWatermarkedVideo(videoId, sourceUrl);
+    return generateWatermarkedVideo(videoId, sourceUrl, username);
   })();
 
   watermarkJobs.set(videoId, job);
@@ -720,8 +859,10 @@ async function requireAuth(req, res, next) {
 // POST /api/videos/:videoId/watermark
 // Guest-accessible for eligible public videos only. The client sends
 // ONLY the video ID; the server loads the row via the service client,
-// validates it, burns the Bushrann watermark PNG in with FFmpeg, and
-// stores the result at the deterministic key watermarked/v3/<id>.mp4.
+// validates it, resolves the owner's username authoritatively
+// (videos.user_id -> profiles.id -> profiles.username), burns the
+// Bushrann watermark PNG (plus "@username" beneath it) in with FFmpeg,
+// and stores the result at the deterministic key watermarked/v4/<id>.mp4.
 // ─────────────────────────────────────────────────────────────
 
 router.post('/:videoId/watermark', async (req, res) => {
@@ -740,6 +881,7 @@ router.post('/:videoId/watermark', async (req, res) => {
       .select(
         [
           'id',
+          'user_id',
           'video_url',
           'original_video_url',
           'is_private',
@@ -801,9 +943,14 @@ router.post('/:videoId/watermark', async (req, res) => {
       });
     }
 
+    // Authoritative owner username (never taken from the client).
+    // Falls back to a logo-only watermark when missing/invalid.
+    const username = await getVideoOwnerUsername(video.user_id);
+
     const watermarkedUrl = await getOrCreateWatermarkJob(
       videoId,
-      sourceUrl
+      sourceUrl,
+      username
     );
 
     return res.status(200).json({
