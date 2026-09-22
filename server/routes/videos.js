@@ -62,7 +62,7 @@ const WATERMARK_PNG_HEIGHT = 1024;
 
 // In-memory job dedupe: simultaneous requests for the same video share
 // one FFmpeg job. Cross-instance duplicates are harmless because the
-// storage key is deterministic (watermarked/v6/<videoId>.mp4).
+// storage key is deterministic (watermarked/v7/<videoId>.mp4).
 const watermarkJobs = new Map();
 
 // ─────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ function getPublicVideoUrl(key) {
 }
 
 function getWatermarkStorageKey(videoId) {
-  return `watermarked/v6/${videoId}.mp4`;
+  return `watermarked/v7/${videoId}.mp4`;
 }
 
 function runProcess(command, args) {
@@ -399,34 +399,38 @@ async function downloadToDisk(url, destinationPath) {
 // Two-position movement: MIDDLE-LEFT EDGE for the first 7 seconds, then
 // BOTTOM-RIGHT EDGE for the rest of the video. One instantaneous switch
 // at t=7 — no repeat, no travel animation. All terms are proportional to
-// the source frame (main_w/main_h) and the group size (w/h), so placement
-// adapts to any resolution or aspect ratio. 1.5% horizontal edge margin,
-// 1.5% vertical bottom margin, exact vertical centering for middle-left.
-// Shared by BOTH watermark builders so the layers can never diverge.
+// the source frame (main_w/main_h), so placement adapts to any resolution
+// or aspect ratio. 1.5% horizontal edge margin, 1.5% vertical bottom
+// margin, exact vertical centering for middle-left.
+//
+// PHASE-DEPENDENT HORIZONTAL ALIGNMENT (the logo and username are overlaid
+// as separate layers so their internal offset can switch with the phase):
+//   0 ≤ t < 7  (middle-left): the VISIBLE LEFT EDGE of the cropped logo and
+//     the VISIBLE LEFT EDGE of the trimmed @username both sit exactly at
+//     main_w*0.015.
+//   t ≥ 7      (bottom-right): the VISIBLE RIGHT EDGE of the cropped logo
+//     and the VISIBLE RIGHT EDGE of the trimmed @username both sit exactly
+//     at W-main_w*0.015 (i.e. 1.5% from the right edge).
+// Vertical placement still treats logo+gap+username as one group of height
+// groupH: centered for t<7, 1.5% above the bottom for t≥7.
 // NOTE: commas inside the filter expressions are escaped as "\," — ffmpeg's
 // filtergraph parser requires this even when args are passed via spawn
 // (no shell involved); unescaped commas break the filter description.
-const WATERMARK_POS_X =
-  'if(lt(t\\,7)\\,main_w*0.015\\,W-w-main_w*0.015)';
-
-const WATERMARK_POS_Y =
-  'if(lt(t\\,7)\\,(H-h)/2\\,H-h-main_h*0.015)';
 
 // Maximum visible length of the "@username" text (including "@").
 const USERNAME_MAX_DISPLAY_LENGTH = 30;
 
-// Builds the single grouped watermark filter chain. The Bushrann PNG is
-// scaled to 25% of the source width and cropped to its VISIBLE content
-// (the source PNG has large transparent paddings), so the @username can
-// sit directly beneath the visible logo with only a small gap. When a
-// username image is present it is overlaid centered on a transparent
-// canvas below the visible logo. Logo and text move as ONE unit because
-// there is a single overlay of the combined [grp] stream.
-function buildGroupWatermarkChain(
-  watermarkWidthPx,
-  logoHeightPx,
-  usernameImage
-) {
+// Builds the cropped-logo filter chain AND returns the cropped (visible)
+// height. The Bushrann PNG is scaled to 25% of the source width and
+// cropped to its VISIBLE content (the source PNG has large transparent
+// paddings). The crop removes the transparent padding only VERTICALLY
+// (top offset); the horizontal padding stays in the layer, so the VISIBLE
+// logo bounds inside the layer are [visibleLeft, visibleLeft+visibleWidth]
+// measured from the layer's left edge. buildWatermarkFilterComplex adds
+// these offsets to the layer coordinates to align the visible edges
+// exactly, and uses cropHeight (not the full-canvas scaled height) for the
+// vertical layout so the logo-to-username gap is unchanged from v6.
+function buildLogoChain(watermarkWidthPx) {
   const scale = watermarkWidthPx / WATERMARK_PNG_WIDTH;
   const cropTop = Math.round(watermarkContent.top * scale);
   const cropHeight = Math.max(
@@ -434,39 +438,73 @@ function buildGroupWatermarkChain(
     Math.round(watermarkContent.height * scale)
   );
 
-  const logoChain =
+  const chain =
     `[1:v]scale=${watermarkWidthPx}:-2,` +
-    `crop=${watermarkWidthPx}:${cropHeight}:0:${cropTop},format=rgba`;
+    `crop=${watermarkWidthPx}:${cropHeight}:0:${cropTop},format=rgba[logo]`;
 
-  if (!usernameImage) {
-    return `${logoChain}[grp]`;
-  }
-
-  const gap = usernameImage.gap;
-  const canvasWidth = Math.max(
-    watermarkWidthPx,
-    usernameImage.width + 12
-  );
-  const canvasHeight = cropHeight + gap + usernameImage.height;
-
-  return (
-    `${logoChain},pad=${canvasWidth}:${canvasHeight}:0:0:color=black@0[cnv];` +
-    `[cnv][2:v]overlay=x=(main_w-w)/2:y=${cropHeight}+${gap}[grp]`
-  );
+  return { chain, cropHeight };
 }
 
-// Single-overlay grouped watermark: no glow, no pulse, no blur, and no
+// Separate-layer watermark overlay: no glow, no pulse, no blur, and no
 // drawtext (production FFmpeg lacks it — the @username is pre-rendered to
-// a transparent PNG by sharp). The whole group sits at middle-left for
-// the first 7 seconds, then instantly moves to bottom-right as one unit.
+// a transparent PNG by sharp). For 0–7s both layers' visible left edges
+// sit at 1.5% from the left; for t≥7 both layers' visible right edges sit
+// at 1.5% from the right. Vertically the logo+gap+username block is
+// treated as one group of height groupH: centered for t<7, 1.5% above the
+// bottom for t≥7. Without a username image only the logo layer is used.
 function buildWatermarkFilterComplex(
   watermarkWidthPx,
   logoHeightPx,
   usernameImage
 ) {
+  const logoWidth = watermarkWidthPx;
+
+  const { chain: logoChain, cropHeight: logoHeight } =
+    buildLogoChain(watermarkWidthPx);
+
+  // Visible-content offsets inside the cropped logo layer (the source PNG
+  // keeps its horizontal transparent padding after the crop). The trimmed
+  // @username PNG, by contrast, IS its visible bounds.
+  const layerScale = logoWidth / WATERMARK_PNG_WIDTH;
+  const visibleLeft = Math.round(watermarkContent.left * layerScale);
+  const visibleWidth = Math.round(watermarkContent.width * layerScale);
+
+  const groupHeight = usernameImage
+    ? logoHeight + usernameImage.gap + usernameImage.height
+    : logoHeight;
+
+  const logoPosX =
+    `if(lt(t\\,7)\\,main_w*0.015\\,` +
+    `W-${logoWidth}-main_w*0.015)`;
+
+  const logoPosY =
+    `if(lt(t\\,7)\\,(H-${groupHeight})/2\\,` +
+    `H-${groupHeight}-main_h*0.015)`;
+
+  if (!usernameImage) {
+    return (
+      `${logoChain};` +
+      `[0:v][logo]overlay=x=${logoPosX}:y=${logoPosY}[vout]`
+    );
+  }
+
+  // t<7: username's VISIBLE left edge exactly at the logo's VISIBLE left
+  // edge (1.5% from frame left). t≥7: username's VISIBLE right edge exactly
+  // at the logo's VISIBLE right edge (1.5% from frame right).
+  const usernamePosX =
+    `if(lt(t\\,7)\\,main_w*0.015+${visibleLeft}\\,` +
+    `W-${logoWidth}-main_w*0.015+${visibleLeft}+` +
+    `${visibleWidth}-${usernameImage.width})`;
+
+  const usernamePosY =
+    `if(lt(t\\,7)\\,` +
+    `(H-${groupHeight})/2+${logoHeight}+${usernameImage.gap}\\,` +
+    `H-${groupHeight}-main_h*0.015+${logoHeight}+${usernameImage.gap})`;
+
   return (
-    `${buildGroupWatermarkChain(watermarkWidthPx, logoHeightPx, usernameImage)};` +
-    `[0:v][grp]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[vout]`
+    `${logoChain};` +
+    `[0:v][logo]overlay=x=${logoPosX}:y=${logoPosY}[wm1];` +
+    `[wm1][2:v]overlay=x=${usernamePosX}:y=${usernamePosY}[vout]`
   );
 }
 
@@ -1027,7 +1065,7 @@ async function requireAuth(req, res, next) {
 // validates it, resolves the owner's username authoritatively
 // (videos.user_id -> profiles.id -> profiles.username), burns the
 // Bushrann watermark PNG (plus "@username" beneath it) in with FFmpeg,
-// and stores the result at the deterministic key watermarked/v6/<id>.mp4.
+// and stores the result at the deterministic key watermarked/v7/<id>.mp4.
 // ─────────────────────────────────────────────────────────────
 
 router.post('/:videoId/watermark', async (req, res) => {
