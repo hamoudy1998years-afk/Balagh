@@ -18,6 +18,7 @@ const {
 
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static').path;
+const sharp = require('sharp');
 
 const { cleanupVideoStorage } = require('../lib/videoStorageCleanup');
 
@@ -41,8 +42,9 @@ const WATERMARK_PATH = path.join(
 );
 
 // Bundled variable font (official Roboto release, SIL OFL — see
-// assets/fonts/Roboto-OFL.txt). Used via drawtext fontfile= so Railway
-// needs no system fonts or fontconfig setup.
+// assets/fonts/Roboto-OFL.txt). Referenced from a server-built SVG via a
+// file:// @font-face so Node (sharp) rasterizes the @username text;
+// production FFmpeg has no drawtext filter and needs no system fonts.
 const WATERMARK_FONT_PATH = path.join(
   __dirname,
   '..',
@@ -51,9 +53,11 @@ const WATERMARK_FONT_PATH = path.join(
   'Roboto.ttf'
 );
 
-// Forward-slash form for FFmpeg filtergraph options (backslashes would be
-// read as escapes; FFmpeg accepts "/" on Windows too).
-const WATERMARK_FONTFILE = WATERMARK_FONT_PATH.replace(/\\/g, '/');
+// file:// URL form for the SVG @font-face (forward slashes, one leading
+// slash on POSIX; on Windows the drive form file:///C:/... is accepted by
+// libvips/librsvg).
+const WATERMARK_FONT_URL =
+  'file://' + WATERMARK_FONT_PATH.replace(/\\/g, '/');
 
 // Pixel dimensions of assets/bushrann-watermark.png (1536x1024, 3:2).
 // Used to derive the scaled logo height so the text canvas below it can
@@ -341,17 +345,68 @@ const WATERMARK_POS_Y =
 // Maximum visible length of the "@username" text (including "@").
 const USERNAME_MAX_DISPLAY_LENGTH = 30;
 
-// Builds the single grouped watermark stream: the Bushrann PNG scaled to
-// 25% of the source width, on a transparent canvas padded tall enough for
-// the owner's "@username" centered beneath the logo. Logo and text move as
-// ONE unit because there is a single overlay of the combined [grp] stream.
-// Text length tiers shrink the font so full usernames stay distinguishable
-// without truncation (validated: 0.62 x fontsize average glyph width).
-function buildGroupWatermarkChain(watermarkWidthPx, logoHeightPx, username) {
-  if (!username) {
+// Builds the single grouped watermark filter chain. The Bushrann PNG is
+// scaled to 25% of the source width and, when a username image is present,
+// padded onto a transparent canvas with the text PNG overlaid centered
+// beneath the logo. Logo and text move as ONE unit because there is a
+// single overlay of the combined [grp] stream.
+function buildGroupWatermarkChain(
+  watermarkWidthPx,
+  logoHeightPx,
+  usernameImage
+) {
+  if (!usernameImage) {
     return `[1:v]scale=${watermarkWidthPx}:-2[grp]`;
   }
 
+  const gap = usernameImage.gap;
+  const canvasWidth = Math.max(
+    watermarkWidthPx,
+    usernameImage.width + 12
+  );
+  const canvasHeight =
+    logoHeightPx + gap + usernameImage.height;
+
+  return (
+    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
+    `pad=${canvasWidth}:${canvasHeight}:0:0:color=black@0[cnv];` +
+    `[cnv][2:v]overlay=x=(main_w-w)/2:y=${logoHeightPx}+${gap}[grp]`
+  );
+}
+
+// Single-overlay grouped watermark: no glow, no pulse, no blur, and no
+// drawtext (production FFmpeg lacks it — the @username is pre-rendered to
+// a transparent PNG by sharp). The whole group jumps between the four
+// corners as one unit and is stationary within each 5-second phase.
+function buildWatermarkFilterComplex(
+  watermarkWidthPx,
+  logoHeightPx,
+  usernameImage
+) {
+  return (
+    `${buildGroupWatermarkChain(watermarkWidthPx, logoHeightPx, usernameImage)};` +
+    `[0:v][grp]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[vout]`
+  );
+}
+
+// XML-escapes the text node content as defense in depth. The sanitization
+// whitelist already strips everything but [A-Za-z0-9._], so this should
+// never change anything.
+function escapeSvgText(value) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// Renders the "@username" text to a small transparent PNG (white text,
+// black stroke, bundled Roboto via a server-derived file:// @font-face).
+// Returns { filePath, width, height, gap } or null on any failure, so the
+// caller can fall back to a logo-only watermark. The SVG contains a single
+// <text> element and no external references; only the font file the server
+// itself points at is loaded. The PNG is written into the per-video temp
+// directory and removed by the existing recursive cleanup.
+async function renderUsernameImage(tempDirectory, username, logoHeightPx) {
   const text = `@${username}`;
 
   const tier =
@@ -363,40 +418,52 @@ function buildGroupWatermarkChain(watermarkWidthPx, logoHeightPx, username) {
 
   const fontsize = Math.max(6, Math.round(logoHeightPx * tier));
   const gap = Math.round(fontsize * 0.35);
-  const canvasWidth = Math.max(
-    watermarkWidthPx,
-    Math.ceil(text.length * 0.62 * fontsize) + 12
-  );
-  const canvasHeight = logoHeightPx + gap + Math.ceil(fontsize * 1.3);
+  const strokeWidth = Math.max(2, Math.round(fontsize * 0.09));
 
-  return (
-    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
-    `pad=${canvasWidth}:${canvasHeight}:0:0:color=black@0,` +
-    `drawtext=fontfile=${WATERMARK_FONTFILE}:text='${text}'` +
-    `:fontsize=${fontsize}:fontcolor=white:borderw=2:bordercolor=black` +
-    `:x=(w-text_w)/2:y=${logoHeightPx}+${gap}[grp]`
-  );
+  const svgWidth = Math.ceil(text.length * fontsize * 0.9) + 60;
+  const svgHeight = Math.ceil(fontsize * 2);
+
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">` +
+    `<defs><style>@font-face { font-family: 'WmFont'; ` +
+    `src: url('${WATERMARK_FONT_URL}'); }</style></defs>` +
+    `<text x="${svgWidth / 2}" y="${svgHeight / 2}" font-family="WmFont" ` +
+    `font-size="${fontsize}" font-weight="bold" fill="white" ` +
+    `text-anchor="middle" dominant-baseline="central" stroke="black" ` +
+    `stroke-width="${strokeWidth}" paint-order="stroke" ` +
+    `stroke-linejoin="round">${escapeSvgText(text)}</text></svg>`;
+
+  try {
+    const rendered = await sharp(Buffer.from(svg)).png().toBuffer();
+    const trimmed = await sharp(rendered)
+      .trim({ threshold: 10 })
+      .png()
+      .toBuffer();
+    const meta = await sharp(trimmed).metadata();
+
+    if (!meta.width || !meta.height) {
+      throw new Error('trimmed username image has no dimensions');
+    }
+
+    const filePath = path.join(tempDirectory, 'username.png');
+    await fs.promises.writeFile(filePath, trimmed);
+
+    return { filePath, width: meta.width, height: meta.height, gap };
+  } catch (error) {
+    console.warn(
+      '[WATERMARK] Username image render failed; using logo-only:',
+      error?.message
+    );
+
+    return null;
+  }
 }
 
-// Single-overlay grouped watermark: no glow, no pulse, no blur. The whole
-// group (logo + @username) jumps between the four corners as one unit and
-// is stationary within each 5-second phase.
-function buildWatermarkFilterComplex(
-  watermarkWidthPx,
-  logoHeightPx,
-  username
-) {
-  return (
-    `${buildGroupWatermarkChain(watermarkWidthPx, logoHeightPx, username)};` +
-    `[0:v][grp]overlay=x=${WATERMARK_POS_X}:y=${WATERMARK_POS_Y}[vout]`
-  );
-}
-
-// Sanitizes a raw profiles.username for FFmpeg drawtext display:
-// strips control characters, keeps only [A-Za-z0-9._], caps the visible
-// "@username" length, and returns null when nothing usable remains so the
-// caller falls back to a logo-only watermark. The result can only contain
-// filter-safe characters, so it can never inject filter syntax.
+// Sanitizes a raw profiles.username for watermark display: strips control
+// characters, keeps only [A-Za-z0-9._], caps the visible "@username"
+// length, and returns null when nothing usable remains so the caller falls
+// back to a logo-only watermark. The result can only contain filter- and
+// XML-safe characters, so it can never inject filter syntax or SVG markup.
 function sanitizeWatermarkUsername(rawUsername) {
   if (typeof rawUsername !== 'string') {
     return null;
@@ -443,7 +510,7 @@ async function getVideoOwnerUsername(userId) {
   }
 }
 
-// Burns the Bushrann PNG watermark (plus the owner's @username when
+// Burns the Bushrann PNG watermark (plus the owner's @username image when
 // available) into the video, moving between four corners every 5 seconds.
 // The watermark width is computed in JS from the source video width
 // (~25%, aspect preserved); the base video is never resized.
@@ -453,19 +520,20 @@ function buildWatermarkArgs(
   outputPath,
   watermarkWidthPx,
   logoHeightPx,
-  username
+  usernameImage
 ) {
+  const inputArgs = usernameImage
+    ? ['-i', inputPath, '-i', watermarkFilePath, '-i', usernameImage.filePath]
+    : ['-i', inputPath, '-i', watermarkFilePath];
+
   return [
     '-y',
-    '-i',
-    inputPath,
-    '-i',
-    watermarkFilePath,
+    ...inputArgs,
     '-filter_complex',
     buildWatermarkFilterComplex(
       watermarkWidthPx,
       logoHeightPx,
-      username
+      usernameImage
     ),
     '-map',
     '[vout]',
@@ -499,7 +567,7 @@ function buildBitrateLimitedWatermarkArgs(
   duration,
   watermarkWidthPx,
   logoHeightPx,
-  username
+  usernameImage
 ) {
   const safeDuration =
     Number.isFinite(duration) && duration > 0 ? duration : 300;
@@ -515,17 +583,18 @@ function buildBitrateLimitedWatermarkArgs(
     totalBitrateKbps - audioBitrateKbps
   );
 
+  const inputArgs = usernameImage
+    ? ['-i', inputPath, '-i', watermarkFilePath, '-i', usernameImage.filePath]
+    : ['-i', inputPath, '-i', watermarkFilePath];
+
   return [
     '-y',
-    '-i',
-    inputPath,
-    '-i',
-    watermarkFilePath,
+    ...inputArgs,
     '-filter_complex',
     buildWatermarkFilterComplex(
       watermarkWidthPx,
       logoHeightPx,
-      username
+      usernameImage
     ),
     '-map',
     '[vout]',
@@ -558,7 +627,6 @@ async function generateWatermarkedVideo(videoId, sourceUrl, username) {
 
   try {
     await fs.promises.access(WATERMARK_PATH, fs.constants.R_OK);
-    await fs.promises.access(WATERMARK_FONT_PATH, fs.constants.R_OK);
   } catch (error) {
     throw new Error('Watermark asset is missing on the server');
   }
@@ -600,13 +668,25 @@ async function generateWatermarkedVideo(videoId, sourceUrl, username) {
       `username=${username ? '@' + username : '(logo only)'}`
     );
 
+    // Pre-render the owner's @username to a transparent PNG (bundled
+    // Roboto). Any render failure returns null → logo-only watermark, so
+    // sharing always works. The PNG lives in the per-video temp directory
+    // and is removed by the existing recursive cleanup.
+    const usernameImage = username
+      ? await renderUsernameImage(tempDirectory, username, logoHeightPx)
+      : null;
+
+    if (username && !usernameImage) {
+      console.log('[WATERMARK] Falling back to logo-only watermark:', videoId);
+    }
+
     const watermarkArgs = buildWatermarkArgs(
       sourcePath,
       WATERMARK_PATH,
       outputPath,
       watermarkWidthPx,
       logoHeightPx,
-      username
+      usernameImage
     );
 
     try {
@@ -657,7 +737,7 @@ async function generateWatermarkedVideo(videoId, sourceUrl, username) {
         duration,
         watermarkWidthPx,
         logoHeightPx,
-        username
+        usernameImage
       );
 
       console.log(
