@@ -6,6 +6,7 @@ import { useDownload } from '../context/DownloadContext';
 import { useUser } from '../context/UserContext';
 import { useFocusEffect } from '@react-navigation/native';
 import { videoCache } from '../utils/VideoCache';
+import { downloadWatermarkedVideoToGallery } from '../utils/videoDownload';
 import {
   View, Text, StyleSheet, TouchableOpacity, Share,
   useWindowDimensions, Image, PanResponder, Animated, Linking,
@@ -21,13 +22,13 @@ import { ROUTES } from '../constants/routes';
 import { COLORS } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 
-const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress }) {
+const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress, preparing }) {
   if (!visible) return null;
   const pct = Math.round(progress * 100);
   return (
     <View style={styles.dlOverlay} pointerEvents="none">
       <View style={styles.dlBox}>
-        <Text style={styles.dlTitle}>⬇️ Downloading...</Text>
+        <Text style={styles.dlTitle}>{preparing ? '⏳ Preparing video...' : '⬇️ Downloading...'}</Text>
         <View style={styles.dlBarBg}>
           <View style={[styles.dlBarFill, { width: `${pct}%` }]} />
         </View>
@@ -160,6 +161,7 @@ function VideoCard({
   const dragStartPageX = useRef(0);
   const dragStartPct = useRef(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadPreparing, setDownloadPreparing] = useState(false);
   const [hasDownloaded, setHasDownloaded] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
   const [showFullCaption, setShowFullCaption] = useState(false);
@@ -476,7 +478,6 @@ function VideoCard({
   const handleDownloadVideo = useCallback(async () => {
     if (hasDownloaded) return;
     const downloadItemId = item.id;
-    const downloadVideoUrl = item.video_url;
     const isStillRelevant = () => isMountedRef.current && currentItemIdRef.current === downloadItemId;
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
@@ -498,28 +499,25 @@ function VideoCard({
         setIsDownloading(true);
         setDownloadProgress(0);
       }
-      const fileUri = FileSystem.documentDirectory + `balagh_${downloadItemId}.mp4`;
-      const downloadResumable = FileSystem.createDownloadResumable(
-        downloadVideoUrl, fileUri, {},
-        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          if (totalBytesExpectedToWrite > 0 && isStillRelevant()) {
-            setDownloadProgress(totalBytesWritten / totalBytesExpectedToWrite);
-          }
-        }
-      );
-      const result = await downloadResumable.downloadAsync();
-      if (!result?.uri) throw new Error('Download failed');
-      await MediaLibrary.saveToLibraryAsync(result.uri);
-      await FileSystem.deleteAsync(result.uri, { idempotent: true });
+      await downloadWatermarkedVideoToGallery(item, {
+        onProgress: (progress) => {
+          if (isStillRelevant()) setDownloadProgress(progress);
+        },
+        onPreparingChange: (preparing) => {
+          if (isStillRelevant()) setDownloadPreparing(preparing);
+        },
+      });
       if (isStillRelevant()) {
         setIsDownloading(false);
+        setDownloadPreparing(false);
         setHasDownloaded(true);
         setDialog({ visible: true, title: 'Downloaded ✅', message: 'Video saved to your gallery!', type: 'success', buttons: [{ text: 'OK' }] });
       }
     } catch (e) {
       if (isStillRelevant()) {
         setIsDownloading(false);
-        setDialog({ visible: true, title: 'Error', message: 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
+        setDownloadPreparing(false);
+        setDialog({ visible: true, title: 'Error', message: e?.message || 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK' }] });
       }
       __DEV__ && console.error('Download error:', e);
     }
@@ -832,7 +830,7 @@ function VideoCard({
         isCreator={currentUserId === item.user_id}
       />
 
-      <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
+      <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} preparing={downloadPreparing} />
 
       <ModernDialog
         visible={dialog.visible}

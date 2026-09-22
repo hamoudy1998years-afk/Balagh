@@ -13,7 +13,6 @@ import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system';
 
 import AnimatedButton from './AnimatedButton';
 import { useDownload } from '../context/DownloadContext';
@@ -26,6 +25,7 @@ import { useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { deleteVideoOnServer } from '../utils/apiClient';
+import { downloadWatermarkedVideoToGallery } from '../utils/videoDownload';
 
 const useDownloadedVideos = () => {
   const downloadedRef = useRef(new Set());
@@ -101,6 +101,7 @@ const initialUIState = {
   enlargeAvatar: false,
   isDownloading: false,
   downloadProgress: 0,
+  downloadPreparing: false,
   toast: null,
 };
 
@@ -110,7 +111,7 @@ function uiReducer(state, action) {
     case 'SET_REFRESHING': return { ...state, refreshing: action.refreshing };
     case 'SET_AVATAR_MODAL': return { ...state, avatarModal: action.open };
     case 'SET_ENLARGE_AVATAR': return { ...state, enlargeAvatar: action.open };
-    case 'SET_DOWNLOADING': return { ...state, isDownloading: action.isDownloading, downloadProgress: action.progress ?? state.downloadProgress };
+    case 'SET_DOWNLOADING': return { ...state, isDownloading: action.isDownloading, downloadProgress: action.progress ?? state.downloadProgress, downloadPreparing: action.preparing ?? false };
     case 'SET_DOWNLOAD_PROGRESS': return { ...state, downloadProgress: action.progress };
     case 'SET_TOAST': 
       console.log('[TOAST REDUCER] SET_TOAST called with:', JSON.stringify(action.toast));
@@ -171,13 +172,13 @@ const VideoGridItem = React.memo(function VideoGridItem({ item, onPress, onLongP
   );
 });
 
-function DownloadProgressOverlay({ visible, progress }) {
+function DownloadProgressOverlay({ visible, progress, preparing }) {
   if (!visible) return null;
   const pct = Math.round(progress * 100);
   return (
     <View style={styles.dlOverlay} pointerEvents="none">
       <View style={styles.dlBox}>
-        <Text style={styles.dlTitle}>⬇️ Downloading...</Text>
+        <Text style={styles.dlTitle}>{preparing ? '⏳ Preparing video...' : '⬇️ Downloading...'}</Text>
         <View style={styles.dlBarBg}><View style={[styles.dlBarFill, { width: `${pct}%` }]} /></View>
         <Text style={styles.dlPercent}>{pct}%</Text>
       </View>
@@ -214,7 +215,7 @@ export default function ProfileScreen({ route, navigation }) {
 
   const { profile, currentUser, isOwnProfile, following, blocked, followersCount, followingCount, isScholar, scholarData, hasPendingApplication } = profileState;
   const { publicVideos, privateVideos, likedVideos, livestreams, totalLikes, activeTab } = videoState;
-  const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress, toast } = uiState;
+  const { loading, refreshing, avatarModal, enlargeAvatar, isDownloading, downloadProgress, downloadPreparing, toast } = uiState;
 
   useEffectHook(() => {
     const { DeviceEventEmitter } = require('react-native');
@@ -799,24 +800,17 @@ export default function ProfileScreen({ route, navigation }) {
         setDialog({ visible: true, title: 'Permission Denied', message: 'Please allow access to your media library.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
         return;
       }
-      dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: true, progress: 0 });
-      const fileUri = FileSystem.documentDirectory + `balagh_${video.id}.mp4`;
-      const downloadResumable = FileSystem.createDownloadResumable(
-        video.video_url, fileUri, {},
-        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-          if (totalBytesExpectedToWrite > 0) dispatchUI({ type: 'SET_DOWNLOAD_PROGRESS', progress: totalBytesWritten / totalBytesExpectedToWrite });
-        }
-      );
-      const result = await downloadResumable.downloadAsync();
-      if (!result?.uri) throw new Error('Download failed');
-      await MediaLibrary.saveToLibraryAsync(result.uri);
-      await FileSystem.deleteAsync(result.uri, { idempotent: true });
+      dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: true, progress: 0, preparing: true });
+      await downloadWatermarkedVideoToGallery(video, {
+        onProgress: (progress) => dispatchUI({ type: 'SET_DOWNLOAD_PROGRESS', progress }),
+        onPreparingChange: (preparing) => dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: true, preparing }),
+      });
       dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: false, progress: 0 });
       downloadedVideoIds.add(video.id);
       setDialog({ visible: true, title: 'Downloaded ✅', message: 'Video saved to your gallery!', type: 'success', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     } catch (e) {
       dispatchUI({ type: 'SET_DOWNLOADING', isDownloading: false, progress: 0 });
-      setDialog({ visible: true, title: 'Error', message: 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      setDialog({ visible: true, title: 'Error', message: e?.message || 'Could not download the video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
     }
   }
 
@@ -954,15 +948,12 @@ export default function ProfileScreen({ route, navigation }) {
         thumbnail_uri: v.thumbnail_uri || v.thumbnail_url || null,
         thumbnail: v.thumbnail_url || v.thumbnail_uri || null,  // ADD THIS for compatibility
         thumbnailUrl: v.thumbnail_url || v.thumbnail_uri || null,  // ADD THIS for compatibility
-        // Mark type for UI display
-        type: v.video_url && !v.video_uri ? 'livestream' : 'video'
+        // openVideo only ever receives normal videos-table rows (the
+        // livestreams tab navigates directly to VIDEO_DETAIL), so always
+        // classify them as normal videos.
+        type: 'video'
       };
-      
-      // Log livestream mapping
-      if (v.video_url && !v.video_uri) {
-        console.log('[PROFILE] Mapping livestream:', v.id, 'thumbnail:', v.thumbnail_url, '-> thumbnail_uri:', normalized.thumbnail_uri);
-      }
-      
+
       return normalized;
     });
     
@@ -1432,7 +1423,7 @@ export default function ProfileScreen({ route, navigation }) {
         showsVerticalScrollIndicator={false}
       />
 
-      <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} />
+      <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} preparing={downloadPreparing} />
 
         {toast && (
           <View style={[
