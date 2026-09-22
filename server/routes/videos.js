@@ -41,38 +41,109 @@ const WATERMARK_PATH = path.join(
   'bushrann-watermark.png'
 );
 
-// Bundled variable font (official Roboto release, SIL OFL — see
-// assets/fonts/Roboto-OFL.txt). Referenced from a server-built SVG via a
-// file:// @font-face so Node (sharp) rasterizes the @username text;
-// production FFmpeg has no drawtext filter and needs no system fonts.
-const WATERMARK_FONT_PATH = path.join(
+// Bundled font directory (Roboto.ttf, SIL OFL — see Roboto-OFL.txt).
+// Registered with Fontconfig (see below) so sharp/libvips SVG text
+// rendering resolves font-family="Roboto" WITHOUT @font-face, system
+// fonts, or fontconfig defaults. Production FFmpeg has no drawtext, so
+// Node (sharp) rasterizes the @username text instead.
+const WATERMARK_FONT_DIR = path.join(
   __dirname,
   '..',
   'assets',
-  'fonts',
-  'Roboto.ttf'
+  'fonts'
 );
 
-// file:// URL form for the SVG @font-face (forward slashes, one leading
-// slash on POSIX; on Windows the drive form file:///C:/... is accepted by
-// libvips/librsvg).
-const WATERMARK_FONT_URL =
-  'file://' + WATERMARK_FONT_PATH.replace(/\\/g, '/');
-
 // Pixel dimensions of assets/bushrann-watermark.png (1536x1024, 3:2).
-// Used to derive the scaled logo height so the text canvas below it can
-// be sized before the FFmpeg run.
+// The visible logo content is smaller than the canvas (transparent
+// padding); WATERMARK_CONTENT_* are measured from the actual PNG at
+// startup (see measureWatermarkContent below).
 const WATERMARK_PNG_WIDTH = 1536;
 const WATERMARK_PNG_HEIGHT = 1024;
 
 // In-memory job dedupe: simultaneous requests for the same video share
 // one FFmpeg job. Cross-instance duplicates are harmless because the
-// storage key is deterministic (watermarked/v4/<videoId>.mp4).
+// storage key is deterministic (watermarked/v5/<videoId>.mp4).
 const watermarkJobs = new Map();
 
 // ─────────────────────────────────────────────────────────────
 // WATERMARK HELPERS
 // ─────────────────────────────────────────────────────────────
+
+// Points Fontconfig at the bundled font directory so SVG text rendered
+// by sharp resolves "Roboto" deterministically on any host (including
+// Railway, which has no system fonts). Must run BEFORE the first sharp
+// SVG text render. Values are server-derived only — no user input.
+let watermarkContent = {
+  top: 0,
+  left: 0,
+  width: WATERMARK_PNG_WIDTH,
+  height: WATERMARK_PNG_HEIGHT,
+};
+
+function setupWatermarkFontconfig() {
+  try {
+    const cacheDir = path.join(os.tmpdir(), 'bushrann-fontconfig-cache');
+
+    fs.mkdirSync(cacheDir, { recursive: true });
+
+    const configPath = path.join(cacheDir, 'fonts.conf');
+
+    const fontDir = WATERMARK_FONT_DIR.split(path.sep).join('/');
+
+    const configXml =
+      `<?xml version="1.0"?>\n` +
+      `<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n` +
+      `<fontconfig>\n` +
+      `  <dir>${fontDir}</dir>\n` +
+      `  <cachedir>${cacheDir.split(path.sep).join('/')}</cachedir>\n` +
+      `</fontconfig>\n`;
+
+    fs.writeFileSync(configPath, configXml);
+
+    // Only set when absent so ops can override via real env vars.
+    if (!process.env.FONTCONFIG_FILE) {
+      process.env.FONTCONFIG_FILE = configPath;
+    }
+
+    if (!process.env.FONTCONFIG_PATH) {
+      process.env.FONTCONFIG_PATH = cacheDir;
+    }
+  } catch (error) {
+    // Non-fatal: worst case the username text renders with a fallback
+    // (or fails and we degrade to a logo-only watermark).
+    console.warn(
+      '[WATERMARK] Fontconfig setup failed:',
+      error?.message
+    );
+  }
+}
+
+// Measures the visible (non-transparent) content bounds of the watermark
+// PNG once, so the FFmpeg graph can crop away the transparent padding and
+// place the username directly beneath the visible logo. libvips reports
+// negative trim offsets in this version, hence Math.abs.
+async function measureWatermarkContent() {
+  try {
+    const { info } = await sharp(WATERMARK_PATH)
+      .trim({ threshold: 10 })
+      .toBuffer({ resolveWithObject: true });
+
+    watermarkContent = {
+      top: Math.abs(info.trimOffsetTop),
+      left: Math.abs(info.trimOffsetLeft),
+      width: info.width,
+      height: info.height,
+    };
+  } catch (error) {
+    console.warn(
+      '[WATERMARK] Watermark content measure failed; using full canvas:',
+      error?.message
+    );
+  }
+}
+
+setupWatermarkFontconfig();
+const watermarkContentPromise = measureWatermarkContent();
 
 function getS3Client() {
   const required = [
@@ -116,7 +187,7 @@ function getPublicVideoUrl(key) {
 }
 
 function getWatermarkStorageKey(videoId) {
-  return `watermarked/v4/${videoId}.mp4`;
+  return `watermarked/v5/${videoId}.mp4`;
 }
 
 function runProcess(command, args) {
@@ -325,38 +396,50 @@ async function downloadToDisk(url, destinationPath) {
   }
 }
 
-// Four-position movement cycle (20 s): bottom-right, top-left,
-// bottom-left, top-right — 2.5% horizontal / 8% vertical safe margins,
-// switching instantly every 5 seconds and repeating via mod(t,20).
+// Two-position movement: MIDDLE-LEFT EDGE for the first 7 seconds, then
+// BOTTOM-RIGHT EDGE for the rest of the video. One instantaneous switch
+// at t=7 — no repeat, no travel animation. All terms are proportional to
+// the source frame (main_w/main_h) and the group size (w/h), so placement
+// adapts to any resolution or aspect ratio. 3% horizontal edge margin,
+// 8% vertical bottom margin, exact vertical centering for middle-left.
 // Shared by BOTH watermark builders so the layers can never diverge.
 // NOTE: commas inside the filter expressions are escaped as "\," — ffmpeg's
 // filtergraph parser requires this even when args are passed via spawn
 // (no shell involved); unescaped commas break the filter description.
 const WATERMARK_POS_X =
-  'if(lt(mod(t\\,20)\\,5)\\,W-w-main_w*0.025\\,' +
-  'if(lt(mod(t\\,20)\\,10)\\,main_w*0.025\\,' +
-  'if(lt(mod(t\\,20)\\,15)\\,main_w*0.025\\,W-w-main_w*0.025)))';
+  'if(lt(t\\,7)\\,main_w*0.03\\,W-w-main_w*0.03)';
 
 const WATERMARK_POS_Y =
-  'if(lt(mod(t\\,20)\\,5)\\,H-h-main_h*0.08\\,' +
-  'if(lt(mod(t\\,20)\\,10)\\,main_h*0.08\\,' +
-  'if(lt(mod(t\\,20)\\,15)\\,H-h-main_h*0.08\\,main_h*0.08)))';
+  'if(lt(t\\,7)\\,(H-h)/2\\,H-h-main_h*0.08)';
 
 // Maximum visible length of the "@username" text (including "@").
 const USERNAME_MAX_DISPLAY_LENGTH = 30;
 
 // Builds the single grouped watermark filter chain. The Bushrann PNG is
-// scaled to 25% of the source width and, when a username image is present,
-// padded onto a transparent canvas with the text PNG overlaid centered
-// beneath the logo. Logo and text move as ONE unit because there is a
-// single overlay of the combined [grp] stream.
+// scaled to 25% of the source width and cropped to its VISIBLE content
+// (the source PNG has large transparent paddings), so the @username can
+// sit directly beneath the visible logo with only a small gap. When a
+// username image is present it is overlaid centered on a transparent
+// canvas below the visible logo. Logo and text move as ONE unit because
+// there is a single overlay of the combined [grp] stream.
 function buildGroupWatermarkChain(
   watermarkWidthPx,
   logoHeightPx,
   usernameImage
 ) {
+  const scale = watermarkWidthPx / WATERMARK_PNG_WIDTH;
+  const cropTop = Math.round(watermarkContent.top * scale);
+  const cropHeight = Math.max(
+    1,
+    Math.round(watermarkContent.height * scale)
+  );
+
+  const logoChain =
+    `[1:v]scale=${watermarkWidthPx}:-2,` +
+    `crop=${watermarkWidthPx}:${cropHeight}:0:${cropTop},format=rgba`;
+
   if (!usernameImage) {
-    return `[1:v]scale=${watermarkWidthPx}:-2[grp]`;
+    return `${logoChain}[grp]`;
   }
 
   const gap = usernameImage.gap;
@@ -364,20 +447,18 @@ function buildGroupWatermarkChain(
     watermarkWidthPx,
     usernameImage.width + 12
   );
-  const canvasHeight =
-    logoHeightPx + gap + usernameImage.height;
+  const canvasHeight = cropHeight + gap + usernameImage.height;
 
   return (
-    `[1:v]scale=${watermarkWidthPx}:-2,format=rgba,` +
-    `pad=${canvasWidth}:${canvasHeight}:0:0:color=black@0[cnv];` +
-    `[cnv][2:v]overlay=x=(main_w-w)/2:y=${logoHeightPx}+${gap}[grp]`
+    `${logoChain},pad=${canvasWidth}:${canvasHeight}:0:0:color=black@0[cnv];` +
+    `[cnv][2:v]overlay=x=(main_w-w)/2:y=${cropHeight}+${gap}[grp]`
   );
 }
 
 // Single-overlay grouped watermark: no glow, no pulse, no blur, and no
 // drawtext (production FFmpeg lacks it — the @username is pre-rendered to
-// a transparent PNG by sharp). The whole group jumps between the four
-// corners as one unit and is stationary within each 5-second phase.
+// a transparent PNG by sharp). The whole group sits at middle-left for
+// the first 7 seconds, then instantly moves to bottom-right as one unit.
 function buildWatermarkFilterComplex(
   watermarkWidthPx,
   logoHeightPx,
@@ -400,12 +481,13 @@ function escapeSvgText(value) {
 }
 
 // Renders the "@username" text to a small transparent PNG (white text,
-// black stroke, bundled Roboto via a server-derived file:// @font-face).
-// Returns { filePath, width, height, gap } or null on any failure, so the
-// caller can fall back to a logo-only watermark. The SVG contains a single
-// <text> element and no external references; only the font file the server
-// itself points at is loaded. The PNG is written into the per-video temp
-// directory and removed by the existing recursive cleanup.
+// black stroke, bundled Roboto resolved via Fontconfig — the SVG simply
+// requests font-family="Roboto" and the server-generated fonts.conf
+// points Fontconfig at the bundled font directory). Returns
+// { filePath, width, height, gap } or null on any failure, so the caller
+// can fall back to a logo-only watermark. The SVG contains a single
+// <text> element and no external references. The PNG is written into the
+// per-video temp directory and removed by the existing recursive cleanup.
 async function renderUsernameImage(tempDirectory, username, logoHeightPx) {
   const text = `@${username}`;
 
@@ -425,9 +507,7 @@ async function renderUsernameImage(tempDirectory, username, logoHeightPx) {
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">` +
-    `<defs><style>@font-face { font-family: 'WmFont'; ` +
-    `src: url('${WATERMARK_FONT_URL}'); }</style></defs>` +
-    `<text x="${svgWidth / 2}" y="${svgHeight / 2}" font-family="WmFont" ` +
+    `<text x="${svgWidth / 2}" y="${svgHeight / 2}" font-family="Roboto" ` +
     `font-size="${fontsize}" font-weight="bold" fill="white" ` +
     `text-anchor="middle" dominant-baseline="central" stroke="black" ` +
     `stroke-width="${strokeWidth}" paint-order="stroke" ` +
@@ -511,7 +591,8 @@ async function getVideoOwnerUsername(userId) {
 }
 
 // Burns the Bushrann PNG watermark (plus the owner's @username image when
-// available) into the video, moving between four corners every 5 seconds.
+// available) into the video: middle-left edge for the first 7
+// seconds, then bottom-right edge for the remainder.
 // The watermark width is computed in JS from the source video width
 // (~25%, aspect preserved); the base video is never resized.
 function buildWatermarkArgs(
@@ -679,6 +760,10 @@ async function generateWatermarkedVideo(videoId, sourceUrl, username) {
     if (username && !usernameImage) {
       console.log('[WATERMARK] Falling back to logo-only watermark:', videoId);
     }
+
+    // Ensure the watermark content measurement has settled before the
+    // graph is built (it starts at module load and resolves quickly).
+    await watermarkContentPromise;
 
     const watermarkArgs = buildWatermarkArgs(
       sourcePath,
@@ -942,7 +1027,7 @@ async function requireAuth(req, res, next) {
 // validates it, resolves the owner's username authoritatively
 // (videos.user_id -> profiles.id -> profiles.username), burns the
 // Bushrann watermark PNG (plus "@username" beneath it) in with FFmpeg,
-// and stores the result at the deterministic key watermarked/v4/<id>.mp4.
+// and stores the result at the deterministic key watermarked/v5/<id>.mp4.
 // ─────────────────────────────────────────────────────────────
 
 router.post('/:videoId/watermark', async (req, res) => {
