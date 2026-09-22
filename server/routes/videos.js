@@ -62,7 +62,7 @@ const WATERMARK_PNG_HEIGHT = 1024;
 
 // In-memory job dedupe: simultaneous requests for the same video share
 // one FFmpeg job. Cross-instance duplicates are harmless because the
-// storage key is deterministic (watermarked/v5/<videoId>.mp4).
+// storage key is deterministic (watermarked/v6/<videoId>.mp4).
 const watermarkJobs = new Map();
 
 // ─────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ function getPublicVideoUrl(key) {
 }
 
 function getWatermarkStorageKey(videoId) {
-  return `watermarked/v5/${videoId}.mp4`;
+  return `watermarked/v6/${videoId}.mp4`;
 }
 
 function runProcess(command, args) {
@@ -400,17 +400,17 @@ async function downloadToDisk(url, destinationPath) {
 // BOTTOM-RIGHT EDGE for the rest of the video. One instantaneous switch
 // at t=7 — no repeat, no travel animation. All terms are proportional to
 // the source frame (main_w/main_h) and the group size (w/h), so placement
-// adapts to any resolution or aspect ratio. 3% horizontal edge margin,
-// 8% vertical bottom margin, exact vertical centering for middle-left.
+// adapts to any resolution or aspect ratio. 1.5% horizontal edge margin,
+// 1.5% vertical bottom margin, exact vertical centering for middle-left.
 // Shared by BOTH watermark builders so the layers can never diverge.
 // NOTE: commas inside the filter expressions are escaped as "\," — ffmpeg's
 // filtergraph parser requires this even when args are passed via spawn
 // (no shell involved); unescaped commas break the filter description.
 const WATERMARK_POS_X =
-  'if(lt(t\\,7)\\,main_w*0.03\\,W-w-main_w*0.03)';
+  'if(lt(t\\,7)\\,main_w*0.015\\,W-w-main_w*0.015)';
 
 const WATERMARK_POS_Y =
-  'if(lt(t\\,7)\\,(H-h)/2\\,H-h-main_h*0.08)';
+  'if(lt(t\\,7)\\,(H-h)/2\\,H-h-main_h*0.015)';
 
 // Maximum visible length of the "@username" text (including "@").
 const USERNAME_MAX_DISPLAY_LENGTH = 30;
@@ -493,14 +493,14 @@ async function renderUsernameImage(tempDirectory, username, logoHeightPx) {
 
   const tier =
     text.length <= 15
-      ? 0.2
+      ? 0.24
       : text.length <= 24
-        ? 0.15
-        : 0.11;
+        ? 0.18
+        : 0.132;
 
   const fontsize = Math.max(6, Math.round(logoHeightPx * tier));
   const gap = Math.round(fontsize * 0.35);
-  const strokeWidth = Math.max(2, Math.round(fontsize * 0.09));
+  const strokeWidth = Math.max(2, Math.round(fontsize * 0.11));
 
   const svgWidth = Math.ceil(text.length * fontsize * 0.9) + 60;
   const svgHeight = Math.ceil(fontsize * 2);
@@ -1027,7 +1027,7 @@ async function requireAuth(req, res, next) {
 // validates it, resolves the owner's username authoritatively
 // (videos.user_id -> profiles.id -> profiles.username), burns the
 // Bushrann watermark PNG (plus "@username" beneath it) in with FFmpeg,
-// and stores the result at the deterministic key watermarked/v5/<id>.mp4.
+// and stores the result at the deterministic key watermarked/v6/<id>.mp4.
 // ─────────────────────────────────────────────────────────────
 
 router.post('/:videoId/watermark', async (req, res) => {
