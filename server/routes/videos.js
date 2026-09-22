@@ -62,7 +62,7 @@ const WATERMARK_PNG_HEIGHT = 1024;
 
 // In-memory job dedupe: simultaneous requests for the same video share
 // one FFmpeg job. Cross-instance duplicates are harmless because the
-// storage key is deterministic (watermarked/v7/<videoId>.mp4).
+// storage key is deterministic (watermarked/v8/<videoId>.mp4).
 const watermarkJobs = new Map();
 
 // ─────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ function getPublicVideoUrl(key) {
 }
 
 function getWatermarkStorageKey(videoId) {
-  return `watermarked/v7/${videoId}.mp4`;
+  return `watermarked/v8/${videoId}.mp4`;
 }
 
 function runProcess(command, args) {
@@ -473,9 +473,16 @@ function buildWatermarkFilterComplex(
     ? logoHeight + usernameImage.gap + usernameImage.height
     : logoHeight;
 
+  // The VISIBLE logo edge must sit exactly at the 1.5% frame margin, so the
+  // layer X compensates for the PNG's horizontal transparent padding
+  // (visibleLeft / visibleWidth measured by trim at startup):
+  //   t<7:  layer X = main_w*0.015 - visibleLeft
+  //         → visible logo left edge = main_w*0.015 (1.5% from frame left)
+  //   t≥7: layer X = W - visibleLeft - visibleWidth - main_w*0.015
+  //         → visible logo right edge = W - main_w*0.015 (1.5% from right)
   const logoPosX =
-    `if(lt(t\\,7)\\,main_w*0.015\\,` +
-    `W-${logoWidth}-main_w*0.015)`;
+    `if(lt(t\\,7)\\,main_w*0.015-${visibleLeft}\\,` +
+    `W-${visibleLeft}-${visibleWidth}-main_w*0.015)`;
 
   const logoPosY =
     `if(lt(t\\,7)\\,(H-${groupHeight})/2\\,` +
@@ -489,11 +496,12 @@ function buildWatermarkFilterComplex(
   }
 
   // t<7: username's VISIBLE left edge exactly at the logo's VISIBLE left
-  // edge (1.5% from frame left). t≥7: username's VISIBLE right edge exactly
-  // at the logo's VISIBLE right edge (1.5% from frame right).
+  // edge (both at 1.5% from frame left — same base term as logoPosX plus
+  // the visibleLeft layer offset). t≥7: username's VISIBLE right edge
+  // exactly at the logo's VISIBLE right edge (both 1.5% from frame right).
   const usernamePosX =
-    `if(lt(t\\,7)\\,main_w*0.015+${visibleLeft}\\,` +
-    `W-${logoWidth}-main_w*0.015+${visibleLeft}+` +
+    `if(lt(t\\,7)\\,main_w*0.015-${visibleLeft}+${visibleLeft}\\,` +
+    `W-${visibleLeft}-${visibleWidth}-main_w*0.015+${visibleLeft}+` +
     `${visibleWidth}-${usernameImage.width})`;
 
   const usernamePosY =
@@ -1065,7 +1073,7 @@ async function requireAuth(req, res, next) {
 // validates it, resolves the owner's username authoritatively
 // (videos.user_id -> profiles.id -> profiles.username), burns the
 // Bushrann watermark PNG (plus "@username" beneath it) in with FFmpeg,
-// and stores the result at the deterministic key watermarked/v7/<id>.mp4.
+// and stores the result at the deterministic key watermarked/v8/<id>.mp4.
 // ─────────────────────────────────────────────────────────────
 
 router.post('/:videoId/watermark', async (req, res) => {
