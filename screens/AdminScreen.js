@@ -19,7 +19,10 @@ import ModernDialog from './ModernDialog';
 import { SystemBars } from 'react-native-edge-to-edge';
 import { useFocusEffect } from '@react-navigation/native';
 import Video from 'react-native-video';
-import { deleteVideoOnServer } from '../utils/apiClient';
+import {
+  deleteVideoOnServer,
+  warmWatermarkOnServer,
+} from '../utils/apiClient';
 
 const VideoPlayer = React.memo(({ videoUrl, style }) => {
   return (
@@ -507,9 +510,38 @@ export default function AdminScreen({ navigation }) {
               });
 
               if (error) {
-                setDialog({ visible: true, title: 'Error', message: 'Failed to approve video: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+                setDialog({
+                  visible: true,
+                  title: 'Error',
+                  message: 'Failed to approve video: ' + error.message,
+                  type: 'error',
+                  buttons: [
+                    {
+                      text: 'OK',
+                      onPress: () => setDialog(d => ({ ...d, visible: false })),
+                    },
+                  ],
+                });
                 return;
               }
+
+              warmWatermarkOnServer(video.id)
+                .then(result => {
+                  if (!result.success) {
+                    console.warn(
+                      '[WATERMARK] Approval pre-warm request failed:',
+                      video.id,
+                      result.error
+                    );
+                  }
+                })
+                .catch(error => {
+                  console.warn(
+                    '[WATERMARK] Approval pre-warm request failed:',
+                    video.id,
+                    error?.message || error
+                  );
+                });
 
               if (!isMountedRef.current) return;
               setPendingVideos(prev => prev.filter(v => v.id !== video.id));
@@ -679,6 +711,24 @@ export default function AdminScreen({ navigation }) {
                     setDialog({ visible: true, title: 'Error', message: 'Failed to approve appeal: ' + error.message, type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
                     return;
                   }
+
+                  warmWatermarkOnServer(item.video_id)
+                    .then(result => {
+                      if (!result.success) {
+                        console.warn(
+                          '[WATERMARK] Appeal approval pre-warm request failed:',
+                          item.video_id,
+                          result.error
+                        );
+                      }
+                    })
+                    .catch(error => {
+                      console.warn(
+                        '[WATERMARK] Appeal approval pre-warm request failed:',
+                        item.video_id,
+                        error?.message || error
+                      );
+                    });
 
                   if (!isMountedRef.current) return;
                   setAppeals(prev => prev.filter(a => a.id !== item.id));

@@ -973,6 +973,7 @@ async function getOrCreateWatermarkJob(videoId, sourceUrl, username) {
   const existing = watermarkJobs.get(videoId);
 
   if (existing) {
+    console.log('[WATERMARK] CACHE IN-FLIGHT:', videoId);
     return existing;
   }
 
@@ -995,6 +996,7 @@ async function getOrCreateWatermarkJob(videoId, sourceUrl, username) {
         head.ContentLength > 0 &&
         head.ContentLength <= MAX_UPLOAD_BYTES
       ) {
+        console.log('[WATERMARK] CACHE HIT:', videoId);
         return getPublicVideoUrl(storageKey);
       }
     } catch (error) {
@@ -1013,6 +1015,7 @@ async function getOrCreateWatermarkJob(videoId, sourceUrl, username) {
       }
     }
 
+    console.log('[WATERMARK] CACHE MISS:', videoId);
     return generateWatermarkedVideo(videoId, sourceUrl, username);
   })();
 
@@ -1133,6 +1136,82 @@ async function requireAuth(req, res, next) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// ADMIN WATERMARK PRE-WARM
+//
+// POST /api/videos/:videoId/warm-watermark
+// Authenticated admin-only trigger used immediately after a video
+// becomes approved. Returns immediately; watermark generation continues
+// in the background through the existing v8 warm/cache pipeline.
+// ─────────────────────────────────────────────────────────────
+
+router.post('/:videoId/warm-watermark', requireAuth, async (req, res) => {
+  const { videoId } = req.params;
+
+  if (!videoId || typeof videoId !== 'string') {
+    return res.status(400).json({ error: 'Missing videoId' });
+  }
+
+  try {
+    const { data: adminRow, error: adminError } = await supabase
+      .from('admins')
+      .select('user_id')
+      .eq('user_id', req.authUserId)
+      .maybeSingle();
+
+    if (adminError) {
+      console.error(
+        '[WATERMARK] Admin verification failed:',
+        req.authUserId,
+        adminError.message
+      );
+
+      return res.status(500).json({
+        error: 'Failed to verify admin access',
+      });
+    }
+
+    if (!adminRow) {
+      return res.status(403).json({
+        error: 'Admin access required',
+      });
+    }
+
+    console.log('[WATERMARK] WARM REQUEST:', videoId);
+
+    warmWatermarkForVideo(videoId)
+      .then(warmed => {
+        console.log(
+          '[WATERMARK] WARM COMPLETE:',
+          videoId,
+          warmed ? 'ready' : 'skipped'
+        );
+      })
+      .catch(error => {
+        console.error(
+          '[WATERMARK] Background warm failed:',
+          videoId,
+          error?.message || error
+        );
+      });
+
+    return res.status(202).json({
+      success: true,
+      accepted: true,
+    });
+  } catch (error) {
+    console.error(
+      '[WATERMARK] Warm request failed:',
+      videoId,
+      error?.message || error
+    );
+
+    return res.status(500).json({
+      error: 'Failed to start watermark preparation',
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 // WATERMARK (public share)
 //
 // POST /api/videos/:videoId/watermark
@@ -1147,6 +1226,8 @@ async function requireAuth(req, res, next) {
 router.post('/:videoId/watermark', async (req, res) => {
   try {
     const { videoId } = req.params;
+
+    console.log('[WATERMARK] SHARE REQUEST:', videoId);
 
     if (!videoId || typeof videoId !== 'string') {
       return res.status(400).json({ error: 'Missing videoId' });

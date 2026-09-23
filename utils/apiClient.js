@@ -124,6 +124,67 @@ export async function deleteVideoOnServer(videoId) {
   }
 }
 
+// Trigger background preparation of a video's v8 watermarked share copy.
+// Admin-only server endpoint. This request returns as soon as Railway
+// accepts the background warm job; it does not wait for FFmpeg to finish.
+export async function warmWatermarkOnServer(videoId) {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return {
+        success: false,
+        error: 'Session expired. Please log in again.',
+      };
+    }
+
+    const response = await fetchWithTimeout(
+      `${API_BASE_URLS.TOKEN_SERVER}/api/videos/${videoId}/warm-watermark`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
+      30000
+    );
+
+    if (!response.ok) {
+      let message = 'Failed to start watermark preparation.';
+
+      try {
+        const data = await response.json();
+        if (data?.error) message = data.error;
+      } catch (parseError) {
+        // Keep the generic message.
+      }
+
+      return {
+        success: false,
+        error: message,
+      };
+    }
+
+    return {
+      success: true,
+      error: null,
+    };
+  } catch (error) {
+    if (__DEV__) {
+      console.error('Watermark pre-warm error:', error);
+    }
+
+    return {
+      success: false,
+      error:
+        error.message ||
+        ERROR_MESSAGES.SOMETHING_WENT_WRONG,
+    };
+  }
+}
+
 // Request a watermarked version of a public video for external sharing
 // (POST /api/videos/:videoId/watermark). Guest-accessible: no session is
 // required, but an active session token is attached when available.
