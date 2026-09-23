@@ -1083,17 +1083,96 @@ async function sweepProcessingVideos() {
   }
 }
 
+let watermarkWarmSweepInProgress = false;
+let watermarkWarmCursor = null;
+
+const MAX_CONCURRENT_WATERMARK_WARMS = 2;
+
+async function runWatermarkWarmBatch(videos) {
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= videos.length) {
+        return;
+      }
+
+      const video = videos[index];
+
+      if (!video?.id) {
+        continue;
+      }
+
+      try {
+        await warmWatermarkForVideo(video.id);
+      } catch (error) {
+        console.error(
+          '[WATERMARK] Approved-video pre-warm failed:',
+          video.id,
+          error?.message || error
+        );
+      }
+    }
+  }
+
+  const workerCount = Math.min(
+    MAX_CONCURRENT_WATERMARK_WARMS,
+    videos.length
+  );
+
+  await Promise.all(
+    Array.from(
+      { length: workerCount },
+      () => worker()
+    )
+  );
+}
+
+async function loadWatermarkWarmBatch(afterCursor = null) {
+  let query = supabase
+    .from('videos')
+    .select('id, reviewed_at')
+    .eq('status', 'approved')
+    .eq('processing_status', 'ready')
+    .eq('is_private', false)
+    .not('reviewed_at', 'is', null)
+    .order('reviewed_at', {
+      ascending: true,
+    })
+    .order('id', {
+      ascending: true,
+    })
+    .limit(MAX_WATERMARK_WARM_ROWS);
+
+  if (afterCursor?.reviewedAt) {
+    query = query.or(
+      [
+        `reviewed_at.gt.${afterCursor.reviewedAt}`,
+        `and(reviewed_at.eq.${afterCursor.reviewedAt},id.gt.${afterCursor.id})`,
+      ].join(',')
+    );
+  }
+
+  return query;
+}
+
 async function sweepApprovedWatermarks() {
+  if (watermarkWarmSweepInProgress) {
+    return;
+  }
+
+  watermarkWarmSweepInProgress = true;
+
   try {
-    const { data: videos, error } = await supabase
-      .from('videos')
-      .select('id')
-      .eq('status', 'approved')
-      .eq('processing_status', 'ready')
-      .eq('is_private', false)
-      .not('reviewed_at', 'is', null)
-      .order('reviewed_at', { ascending: false })
-      .limit(MAX_WATERMARK_WARM_ROWS);
+    let {
+      data: videos,
+      error,
+    } = await loadWatermarkWarmBatch(
+      watermarkWarmCursor
+    );
 
     if (error) {
       console.error(
@@ -1103,22 +1182,70 @@ async function sweepApprovedWatermarks() {
       return;
     }
 
-    for (const video of videos || []) {
-      if (!video?.id) continue;
+    /*
+     * We reached the end of the eligible-video list.
+     *
+     * Reset the cursor and begin again from the oldest eligible
+     * video. Existing v8 objects are cheap cache hits, while any
+     * newly approved/missed videos can now be picked up.
+     */
+    if (
+      (!videos || videos.length === 0) &&
+      watermarkWarmCursor
+    ) {
+      watermarkWarmCursor = null;
 
-      warmWatermarkForVideo(video.id).catch(error => {
+      const restartResult =
+        await loadWatermarkWarmBatch(null);
+
+      videos = restartResult.data;
+      error = restartResult.error;
+
+      if (error) {
         console.error(
-          '[WATERMARK] Approved-video pre-warm failed:',
-          video.id,
+          '[WATERMARK] Approved-video warm restart query failed:',
           error.message
         );
-      });
+        return;
+      }
+    }
+
+    if (!videos || videos.length === 0) {
+      return;
+    }
+
+    /*
+     * Await the bounded worker pool.
+     *
+     * This intentionally keeps watermarkWarmSweepInProgress=true
+     * until this entire batch finishes, preventing overlapping
+     * scheduled sweeps.
+     *
+     * At most two videos from THIS background sweep can enter
+     * warmWatermarkForVideo() concurrently.
+     */
+    await runWatermarkWarmBatch(videos);
+
+    const lastVideo =
+      videos[videos.length - 1];
+
+    if (
+      lastVideo?.id &&
+      lastVideo?.reviewed_at
+    ) {
+      watermarkWarmCursor = {
+        id: lastVideo.id,
+        reviewedAt:
+          lastVideo.reviewed_at,
+      };
     }
   } catch (error) {
     console.error(
       '[WATERMARK] Approved-video warm sweep failed:',
-      error.message
+      error?.message || error
     );
+  } finally {
+    watermarkWarmSweepInProgress = false;
   }
 }
 
