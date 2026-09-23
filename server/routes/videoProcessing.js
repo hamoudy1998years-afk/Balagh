@@ -18,6 +18,11 @@ const {
 const ffmpegPath = require('ffmpeg-static');
 const ffprobePath = require('ffprobe-static').path;
 
+// v8 watermark pre-warm helper (see routes/videos.js). Importing the
+// videos router here is safe: routes/videos.js does not require this file,
+// so there is no circular dependency.
+const { warmWatermarkForVideo } = require('./videos');
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -34,6 +39,7 @@ let recoverySweepInProgress = false;
 
 const RECOVERY_INTERVAL_MS = 60 * 1000;
 const MAX_RECOVERY_ROWS = 10;
+const MAX_WATERMARK_WARM_ROWS = 5;
 
 // ─────────────────────────────────────────────────────────────
 // AUTH
@@ -809,6 +815,18 @@ async function processVideo(videoId) {
       videoId,
       `duration=${canonicalDuration}s`
     );
+
+    // Fire-and-forget: pre-warm the v8 watermark cache so the first
+    // Share/Download reuses watermarked/v8/<id>.mp4 instead of waiting
+    // on FFmpeg. A warm failure is logged and must never fail the
+    // already-ready video; the watermark endpoint regenerates on demand.
+    warmWatermarkForVideo(videoId).catch((error) => {
+      console.warn(
+        '[WATERMARK] Background warm failed:',
+        videoId,
+        error?.message || error
+      );
+    });
   } catch (error) {
     if (uploadedStorageKey) {
       await deleteProcessedObject(
@@ -1065,6 +1083,45 @@ async function sweepProcessingVideos() {
   }
 }
 
+async function sweepApprovedWatermarks() {
+  try {
+    const { data: videos, error } = await supabase
+      .from('videos')
+      .select('id')
+      .eq('status', 'approved')
+      .eq('processing_status', 'ready')
+      .eq('is_private', false)
+      .not('reviewed_at', 'is', null)
+      .order('reviewed_at', { ascending: false })
+      .limit(MAX_WATERMARK_WARM_ROWS);
+
+    if (error) {
+      console.error(
+        '[WATERMARK] Approved-video warm query failed:',
+        error.message
+      );
+      return;
+    }
+
+    for (const video of videos || []) {
+      if (!video?.id) continue;
+
+      warmWatermarkForVideo(video.id).catch(error => {
+        console.error(
+          '[WATERMARK] Approved-video pre-warm failed:',
+          video.id,
+          error.message
+        );
+      });
+    }
+  } catch (error) {
+    console.error(
+      '[WATERMARK] Approved-video warm sweep failed:',
+      error.message
+    );
+  }
+}
+
 function startRecoverySweeper() {
   const globalKey =
     '__bushrannVideoProcessingSweeperStarted';
@@ -1095,6 +1152,15 @@ function startRecoverySweeper() {
         error => {
           console.error(
             '[VIDEO PROCESS] Scheduled recovery sweep failed:',
+            error.message
+          );
+        }
+      );
+
+      sweepApprovedWatermarks().catch(
+        error => {
+          console.error(
+            '[WATERMARK] Scheduled pre-warm sweep failed:',
             error.message
           );
         }

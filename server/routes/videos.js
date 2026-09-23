@@ -1025,6 +1025,74 @@ async function getOrCreateWatermarkJob(videoId, sourceUrl, username) {
   }
 }
 
+// Fire-and-forget v8 watermark pre-warm. Called after normal video
+// processing publishes a READY video so the first Share/Download hits the
+// existing watermarked/v8/<id>.mp4 cache instead of waiting on FFmpeg.
+// Applies the exact same eligibility rules as POST /:videoId/watermark;
+// skips silently (leaving on-demand generation as the fallback) when the
+// video is not yet shareable. getOrCreateWatermarkJob deduplicates against
+// concurrent Share requests and reuses an existing cached object.
+async function warmWatermarkForVideo(videoId) {
+  const {
+    data: video,
+    error: loadError,
+  } = await supabase
+    .from('videos')
+    .select(
+      [
+        'id',
+        'user_id',
+        'video_url',
+        'original_video_url',
+        'is_private',
+        'status',
+        'processing_status',
+      ].join(',')
+    )
+    .eq('id', videoId)
+    .maybeSingle();
+
+  if (loadError) {
+    throw new Error(loadError.message);
+  }
+
+  if (!video) {
+    return false;
+  }
+
+  if (video.is_private) {
+    return false;
+  }
+
+  if (video.status !== 'approved') {
+    return false;
+  }
+
+  if (video.processing_status !== 'ready') {
+    return false;
+  }
+
+  const sourceUrl =
+    video.original_video_url || video.video_url;
+
+  const allowedPrefix =
+    `${process.env.SUPABASE_URL}` +
+    `/storage/v1/object/public/${VIDEO_BUCKET}/`;
+
+  if (
+    typeof sourceUrl !== 'string' ||
+    !sourceUrl.startsWith(allowedPrefix)
+  ) {
+    return false;
+  }
+
+  const username = await getVideoOwnerUsername(video.user_id);
+
+  await getOrCreateWatermarkJob(videoId, sourceUrl, username);
+
+  return true;
+}
+
 // ─────────────────────────────────────────────────────────────
 // AUTH (same pattern as routes/videoProcessing.js)
 // ─────────────────────────────────────────────────────────────
@@ -1328,3 +1396,4 @@ router.post('/account/:userId/cleanup-videos', requireAuth, async (req, res) => 
 });
 
 module.exports = router;
+module.exports.warmWatermarkForVideo = warmWatermarkForVideo;
