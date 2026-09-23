@@ -61,6 +61,50 @@ app.use('/api/video-processing', videoProcessingRoutes);
 // Video deletion backend (owner + admin)
 app.use('/api/videos', videoRoutes);
 
+// Android App Links verification for Bushrann.
+// Android fetches this file to verify that this Railway domain
+// is authorized to open links directly in the Bushrann app.
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.type('application/json');
+
+  res.json([
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'com.bushrann.app',
+        sha256_cert_fingerprints: [
+          'CB:8F:23:D5:15:5A:60:2C:5B:3F:EA:87:B4:8F:7A:87:6A:6C:33:5B:D4:C6:A4:42:AB:C3:33:AF:49:93:10:ED',
+        ],
+      },
+    },
+  ]);
+});
+
+// Fallback for shared Bushrann video links.
+//
+// If Bushrann is installed and Android App Links verification succeeds,
+// Android opens the matching /video/:id URL directly in Bushrann,
+// so this route is never reached.
+//
+// If Bushrann is not installed, the browser reaches this route and
+// sends the user to Bushrann on Google Play.
+app.get('/video/:id', (req, res) => {
+  const videoId = String(req.params.id || '').trim();
+
+  if (!videoId) {
+    return res.redirect(
+      302,
+      'https://play.google.com/store/apps/details?id=com.bushrann.app'
+    );
+  }
+
+  return res.redirect(
+    302,
+    'https://play.google.com/store/apps/details?id=com.bushrann.app'
+  );
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
