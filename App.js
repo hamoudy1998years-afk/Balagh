@@ -604,6 +604,7 @@ const linking = {
   prefixes: [
     'bushrann://',
     'https://bushrann.app',
+    'https://balagh-server-production.up.railway.app',
   ],
 
   config: {
@@ -1005,14 +1006,19 @@ function App() {
         'https://bushrann.app/'
       );
 
+    const isBushrannRailwayHttps =
+      url?.startsWith(
+        'https://balagh-server-production.up.railway.app/'
+      );
+
     if (
       !url ||
       (!isBushrannScheme &&
-        !isBushrannHttps)
+        !isBushrannHttps &&
+        !isBushrannRailwayHttps)
     ) {
       return;
     }
-
     if (
       url.includes(
         'expo-development-client'
@@ -1036,12 +1042,19 @@ function App() {
               ''
             )
             .split('?')[0]
-        : url
-            .replace(
-              'https://bushrann.app/',
-              ''
-            )
-            .split('?')[0];
+        : isBushrannRailwayHttps
+          ? url
+              .replace(
+                'https://balagh-server-production.up.railway.app/',
+                ''
+              )
+              .split('?')[0]
+          : url
+              .replace(
+                'https://bushrann.app/',
+                ''
+              )
+              .split('?')[0];
 
     if (
       !validRoutes.some(route =>

@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import {
-  View, Text, StyleSheet, Animated, Pressable, PanResponder, Image, ActivityIndicator,
+  View, Text, StyleSheet, Animated, Pressable, PanResponder, Image, Share,
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +11,6 @@ import { COLORS } from '../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import ModernDialog from '../screens/ModernDialog';
-import { shareVideoFile, isShareableVideo } from '../utils/videoShare';
 
 const SHEET_HEIGHT = 400;
 
@@ -25,7 +24,7 @@ export default function GlobalVideoOptionsSheet() {
   const [blockConfirmVisible, setBlockConfirmVisible] = useState(false);
   const [blockUserData, setBlockUserData] = useState(null);
   const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
-  const [isPreparingShare, setIsPreparingShare] = useState(false);
+
   const shareLockRef = useRef(false);
   
   // TikTok sheet animation
@@ -70,6 +69,30 @@ export default function GlobalVideoOptionsSheet() {
 
   const { visible, video, isOwner, hasDownloaded, currentUserId, onPin, onDelete, onDownload, onBlock, tiktokShareVisible } = sheetState || {};
 
+  // Dismiss the sheet/popups when the screen that opened them navigates away.
+  // Keep the popup alive while the native share sheet is active.
+  const openerNavigation = sheetState?.navigation;
+
+  useEffect(() => {
+    if (!visible && !tiktokShareVisible) return;
+    if (!openerNavigation || typeof openerNavigation.addListener !== 'function') return;
+
+    const sub = openerNavigation.addListener('blur', () => {
+      if (shareLockRef.current) return;
+
+      hideTikTokShare();
+      hideVideoOptionsSheet();
+    });
+
+    return () => sub();
+  }, [
+    visible,
+    tiktokShareVisible,
+    openerNavigation,
+    hideTikTokShare,
+    hideVideoOptionsSheet,
+  ]);
+
   useEffect(() => {
     if (tiktokShareVisible) {
       tikTokTranslateY.stopAnimation(() => {
@@ -93,57 +116,110 @@ export default function GlobalVideoOptionsSheet() {
     hideTikTokShare();
   };
 
-  const handleCopyLink = async () => {
-    await Clipboard.setStringAsync(`https://bushrann.app/video/${video?.id}`);
-    hideTikTokShare();
+  const getVideoShareUrl = () => {
+  if (!video?.id) return null;
+
+  return `https://balagh-server-production.up.railway.app/video/${encodeURIComponent(
+    video.id
+  )}`;
+};
+
+const handleCopyLink = async () => {
+  const shareUrl = getVideoShareUrl();
+
+  if (!shareUrl) {
     setDialog({
       visible: true,
-      title: 'Copied!',
-      message: 'Link copied to clipboard',
-      type: 'success',
-      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
+      title: 'Copy Failed',
+      message: 'Video ID is missing.',
+      type: 'error',
+      buttons: [
+        {
+          text: 'OK',
+          onPress: () =>
+            setDialog(d => ({ ...d, visible: false })),
+        },
+      ],
     });
-  };
+    return;
+  }
+
+  await Clipboard.setStringAsync(shareUrl);
+
+  hideTikTokShare();
+
+  setDialog({
+    visible: true,
+    title: 'Copied!',
+    message: 'Link copied to clipboard',
+    type: 'success',
+    buttons: [
+      {
+        text: 'OK',
+        onPress: () =>
+          setDialog(d => ({ ...d, visible: false })),
+      },
+    ],
+  });
+};
 
   const handleShareVideo = async () => {
-    if (shareLockRef.current || isPreparingShare) return;
+  if (shareLockRef.current) return;
 
-    shareLockRef.current = true;
+  const shareUrl = getVideoShareUrl();
 
-    if (!isShareableVideo(video)) {
-      shareLockRef.current = false;
-      setDialog({
-        visible: true,
-        title: 'Not Available',
-        message: 'Video sharing is not available for livestreams yet.',
-        type: 'info',
-        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
-      });
-      return;
-    }
-
-    setIsPreparingShare(true);
-
-    await shareVideoFile(video, {
-      onStart: () => setIsPreparingShare(true),
-      onComplete: () => {
-        setIsPreparingShare(false);
-        shareLockRef.current = false;
-        hideTikTokShare();
-      },
-      onError: (message) => {
-        setIsPreparingShare(false);
-        shareLockRef.current = false;
-        setDialog({
-          visible: true,
-          title: 'Share Failed',
-          message,
-          type: 'error',
-          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }]
-        });
-      },
+  if (!shareUrl) {
+    setDialog({
+      visible: true,
+      title: 'Share Failed',
+      message: 'Video ID is missing.',
+      type: 'error',
+      buttons: [
+        {
+          text: 'OK',
+          onPress: () =>
+            setDialog(d => ({ ...d, visible: false })),
+        },
+      ],
     });
-  };
+    return;
+  }
+
+  shareLockRef.current = true;
+
+  try {
+    await Share.share({
+      message: `Watch this video on Bushrann:\n${shareUrl}`,
+      url: shareUrl,
+      title: 'Share Bushrann video',
+    });
+
+    hideTikTokShare();
+  } catch (error) {
+    console.error(
+      '[GlobalVideoOptionsSheet] Error sharing video link:',
+      error
+    );
+
+    setDialog({
+      visible: true,
+      title: 'Share Failed',
+      message:
+        error?.message ||
+        'Failed to share video.',
+      type: 'error',
+      buttons: [
+        {
+          text: 'OK',
+          onPress: () =>
+            setDialog(d => ({ ...d, visible: false })),
+        },
+      ],
+    });
+  } finally {
+    shareLockRef.current = false;
+  }
+};
 
 
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
@@ -191,8 +267,7 @@ export default function GlobalVideoOptionsSheet() {
     !tiktokShareVisible &&
     !dialog.visible &&
     !loginDialogVisible &&
-    !blockConfirmVisible &&
-    !isPreparingShare
+    !blockConfirmVisible
   ) {
     return null;
   }
@@ -474,14 +549,6 @@ export default function GlobalVideoOptionsSheet() {
         buttons={dialog.buttons}
         onDismiss={() => setDialog(d => ({ ...d, visible: false }))}
       />
-
-      {/* Share preparation loading overlay */}
-      {isPreparingShare && (
-        <View style={styles.preparingOverlay}>
-          <ActivityIndicator size="large" color="#ffffff" />
-          <Text style={styles.preparingText}>Preparing video...</Text>
-        </View>
-      )}
     </View>
   );
 }
@@ -829,25 +896,5 @@ const styles = StyleSheet.create({
   blockConfirmButtonText: {
     fontSize: 15,
     fontWeight: '600',
-  },
-
-  // Share preparation loading overlay
-  preparingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 200000,
-    elevation: 200000,
-  },
-  preparingText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 16,
   },
 });

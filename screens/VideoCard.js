@@ -783,7 +783,7 @@ function VideoCard({
           <Text style={styles.actionCount}>Comment</Text>
         </AnimatedButton>
         <AnimatedButton
-          onPress={() => { showTikTokShare(item, currentUserId); }}
+          onPress={() => { showTikTokShare(item, currentUserId, navigation); }}
           style={styles.actionBtn}
           accessibilityLabel="Share video"
           accessibilityRole="button"
