@@ -1,10 +1,16 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const { createClient } = require('@supabase/supabase-js');
 
 require('dotenv').config();
 
 const app = express();
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
 
 app.set('trust proxy', true);
 
@@ -13,6 +19,7 @@ const recordingRoutes = require('./routes/recording');
 const livekitRoutes = require('./routes/livekit');
 const videoProcessingRoutes = require('./routes/videoProcessing');
 const videoRoutes = require('./routes/videos');
+
 // Importing starts the rejected-video cleanup sweeper (delayed first run).
 require('./lib/rejectedVideoCleanup');
 
@@ -58,10 +65,11 @@ app.use('/api/livekit', livekitRoutes);
 // Uploaded-video processing backend
 app.use('/api/video-processing', videoProcessingRoutes);
 
-// Video deletion backend (owner + admin)
+// Video deletion/backend routes
 app.use('/api/videos', videoRoutes);
 
 // Android App Links verification for Bushrann.
+//
 // Android fetches this file to verify that this Railway domain
 // is authorized to open links directly in the Bushrann app.
 app.get('/.well-known/assetlinks.json', (req, res) => {
@@ -81,28 +89,152 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
   ]);
 });
 
-// Fallback for shared Bushrann video links.
+// Escape database-derived text before inserting it into the
+// public HTML preview page.
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Shared Bushrann video links.
 //
+// Android:
 // If Bushrann is installed and Android App Links verification succeeds,
-// Android opens the matching /video/:id URL directly in Bushrann,
-// so this route is never reached.
+// Android opens /video/:id directly in Bushrann before this page loads.
 //
-// If Bushrann is not installed, the browser reaches this route and
-// sends the user to Bushrann on Google Play.
-app.get('/video/:id', (req, res) => {
+// Social crawlers:
+// Facebook/Messenger and other crawlers receive Open Graph metadata
+// containing the video's thumbnail and owner.
+//
+// Browser fallback:
+// If Bushrann is not installed, the page immediately redirects the
+// person to Bushrann on Google Play.
+app.get('/video/:id', async (req, res) => {
   const videoId = String(req.params.id || '').trim();
 
+  const playStoreUrl =
+    'https://play.google.com/store/apps/details?id=com.bushrann.app';
+
   if (!videoId) {
-    return res.redirect(
-      302,
-      'https://play.google.com/store/apps/details?id=com.bushrann.app'
-    );
+    return res.redirect(302, playStoreUrl);
   }
 
-  return res.redirect(
-    302,
-    'https://play.google.com/store/apps/details?id=com.bushrann.app'
-  );
+  try {
+    const { data: video, error: videoError } = await supabase
+      .from('videos')
+      .select(
+        'id, user_id, thumbnail_url, is_private, status, processing_status'
+      )
+      .eq('id', videoId)
+      .maybeSingle();
+
+    // Never expose preview metadata for a video that is missing,
+    // private, unapproved, or not ready.
+    if (
+      videoError ||
+      !video ||
+      video.is_private ||
+      video.status !== 'approved' ||
+      video.processing_status !== 'ready'
+    ) {
+      return res.redirect(302, playStoreUrl);
+    }
+
+    // Resolve the owner from the server rather than trusting anything
+    // supplied by the shared URL/client.
+    let username = 'Bushrann';
+
+    if (video.user_id) {
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', video.user_id)
+        .maybeSingle();
+
+      if (
+        !profileError &&
+        typeof profile?.username === 'string' &&
+        profile.username.trim().length > 0
+      ) {
+        username = `@${profile.username.trim()}`;
+      }
+    }
+
+    const shareUrl =
+      `https://balagh-server-production.up.railway.app/video/` +
+      encodeURIComponent(video.id);
+
+    const title =
+      username === 'Bushrann'
+        ? 'Watch this video on Bushrann'
+        : `${username} on Bushrann`;
+
+    const description =
+      'Watch this video on Bushrann — Muslim social videos, scholar livestreams, Quran & prayer.';
+
+    const thumbnailUrl =
+      typeof video.thumbnail_url === 'string'
+        ? video.thumbnail_url.trim()
+        : '';
+
+    const safeTitle = escapeHtml(title);
+    const safeDescription = escapeHtml(description);
+    const safeShareUrl = escapeHtml(shareUrl);
+    const safeThumbnailUrl = escapeHtml(thumbnailUrl);
+    const safePlayStoreUrl = escapeHtml(playStoreUrl);
+
+    const imageMetadata = safeThumbnailUrl
+      ? `
+  <meta property="og:image" content="${safeThumbnailUrl}" />
+  <meta property="og:image:alt" content="${safeTitle}" />
+  <meta name="twitter:image" content="${safeThumbnailUrl}" />`
+      : '';
+
+    res.status(200);
+    res.type('html');
+
+    return res.send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+
+  <title>${safeTitle}</title>
+  <meta name="description" content="${safeDescription}" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Bushrann" />
+  <meta property="og:title" content="${safeTitle}" />
+  <meta property="og:description" content="${safeDescription}" />
+  <meta property="og:url" content="${safeShareUrl}" />
+  ${imageMetadata}
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${safeTitle}" />
+  <meta name="twitter:description" content="${safeDescription}" />
+
+  <meta http-equiv="refresh" content="0;url=${safePlayStoreUrl}" />
+</head>
+
+<body>
+  <p>
+    Opening Bushrann…
+    <a href="${safePlayStoreUrl}">Continue to Google Play</a>
+  </p>
+</body>
+</html>`);
+  } catch (error) {
+    console.error(
+      '[VIDEO SHARE] Preview page failed:',
+      videoId,
+      error?.message || error
+    );
+
+    return res.redirect(302, playStoreUrl);
+  }
 });
 
 // Health check endpoint
