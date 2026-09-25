@@ -217,6 +217,12 @@ app.get('/video/:id/social-preview.jpg', async (req, res) => {
       .rotate()
       .resize(1200, 630, {
         fit: 'contain',
+        background: {
+          r: 0,
+          g: 0,
+          b: 0,
+          alpha: 0,
+        },
       })
       .png()
       .toBuffer();
