@@ -192,6 +192,10 @@ app.get('/video/:id', async (req, res) => {
     const imageMetadata = safeThumbnailUrl
       ? `
   <meta property="og:image" content="${safeThumbnailUrl}" />
+  <meta property="og:image:secure_url" content="${safeThumbnailUrl}" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="720" />
+  <meta property="og:image:height" content="1280" />
   <meta property="og:image:alt" content="${safeTitle}" />
   <meta name="twitter:image" content="${safeThumbnailUrl}" />`
       : '';
