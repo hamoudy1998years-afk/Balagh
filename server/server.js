@@ -225,7 +225,7 @@ app.get('/video/:id', async (req, res) => {
 
   <link rel="canonical" href="${safeShareUrl}" />
 
-  <meta property="og:type" content="video.other" />
+  <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Bushrann" />
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safeDescription}" />
