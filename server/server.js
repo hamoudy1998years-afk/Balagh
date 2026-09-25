@@ -215,6 +215,7 @@ app.get('/video/:id/social-preview.jpg', async (req, res) => {
 
     const foreground = await sharp(thumbnailBuffer)
       .rotate()
+      .ensureAlpha()
       .resize(1200, 630, {
         fit: 'contain',
         background: {
