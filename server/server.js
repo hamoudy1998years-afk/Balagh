@@ -204,16 +204,30 @@ app.get('/video/:id/social-preview.jpg', async (req, res) => {
       return res.status(502).end();
     }
 
-    const socialPreview = await sharp(thumbnailBuffer)
+    const background = await sharp(thumbnailBuffer)
+      .rotate()
+      .resize(1200, 630, {
+        fit: 'cover',
+      })
+      .blur(25)
+      .jpeg()
+      .toBuffer();
+
+    const foreground = await sharp(thumbnailBuffer)
       .rotate()
       .resize(1200, 630, {
         fit: 'contain',
-        background: {
-          r: 0,
-          g: 0,
-          b: 0,
-        },
       })
+      .png()
+      .toBuffer();
+
+    const socialPreview = await sharp(background)
+      .composite([
+        {
+          input: foreground,
+          gravity: 'center',
+        },
+      ])
       .jpeg({
         quality: 88,
         progressive: true,
