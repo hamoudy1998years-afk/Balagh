@@ -108,11 +108,13 @@ function escapeHtml(value) {
 //
 // Social crawlers:
 // Facebook/Messenger and other crawlers receive Open Graph metadata
-// containing the video's thumbnail and owner.
+// containing the video's thumbnail and owner. Social crawlers are NOT
+// redirected to Google Play, otherwise they would use the Play Store's
+// generic Bushrann metadata instead of the video's metadata.
 //
 // Browser fallback:
-// If Bushrann is not installed, the page immediately redirects the
-// person to Bushrann on Google Play.
+// If Bushrann is not installed and a normal browser opens this page,
+// the person is immediately redirected to Bushrann on Google Play.
 app.get('/video/:id', async (req, res) => {
   const videoId = String(req.params.id || '').trim();
 
@@ -194,6 +196,22 @@ app.get('/video/:id', async (req, res) => {
   <meta name="twitter:image" content="${safeThumbnailUrl}" />`
       : '';
 
+    // Social crawlers must remain on the Bushrann video page so they
+    // can read the video's Open Graph metadata instead of following
+    // the Google Play fallback.
+    const userAgent = String(req.get('user-agent') || '');
+
+    const isSocialCrawler =
+      /facebookexternalhit|Facebot|Twitterbot|LinkedInBot|WhatsApp|TelegramBot|Discordbot|Slackbot/i.test(
+        userAgent
+      );
+
+    // Normal browser visitors without the app should go to Google Play.
+    // Social crawlers must NOT receive this meta refresh.
+    const browserFallback = isSocialCrawler
+      ? ''
+      : `<meta http-equiv="refresh" content="0;url=${safePlayStoreUrl}" />`;
+
     res.status(200);
     res.type('html');
 
@@ -205,7 +223,9 @@ app.get('/video/:id', async (req, res) => {
   <title>${safeTitle}</title>
   <meta name="description" content="${safeDescription}" />
 
-  <meta property="og:type" content="website" />
+  <link rel="canonical" href="${safeShareUrl}" />
+
+  <meta property="og:type" content="video.other" />
   <meta property="og:site_name" content="Bushrann" />
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safeDescription}" />
@@ -216,7 +236,7 @@ app.get('/video/:id', async (req, res) => {
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDescription}" />
 
-  <meta http-equiv="refresh" content="0;url=${safePlayStoreUrl}" />
+  ${browserFallback}
 </head>
 
 <body>
