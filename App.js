@@ -831,21 +831,27 @@ function App() {
   useEffect(() => {
     runMigrationIfNeeded();
 
+    // React Navigation's `linking` prop handles normal app links such as:
+    // /video/:id
+    // /user/:id
+    // /live/:streamId
+    //
+    // This manual handler is kept only for Supabase password-recovery links,
+    // because those require setting the recovered auth session before navigation.
     Linking.getInitialURL().then(url => {
-      if (url) {
+      if (url?.includes('type=recovery')) {
         handleDeepLink(url);
       }
     });
 
-    const linkingSub =
-      Linking.addEventListener(
-        'url',
-        ({ url }) => {
-          if (url) {
-            handleDeepLink(url);
-          }
+    const linkingSub = Linking.addEventListener(
+      'url',
+      ({ url }) => {
+        if (url?.includes('type=recovery')) {
+          handleDeepLink(url);
         }
-      );
+      }
+    );
 
     const {
       data: { subscription },
