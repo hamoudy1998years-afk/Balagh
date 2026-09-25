@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 
 require('dotenv').config();
@@ -100,6 +101,144 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+const SHARE_BASE_URL =
+  'https://balagh-server-production.up.railway.app';
+
+const PLAY_STORE_URL =
+  'https://play.google.com/store/apps/details?id=com.bushrann.app';
+
+// Only allow the server to fetch thumbnail objects belonging to this
+// Bushrann Supabase project's public thumbnails bucket.
+function isAllowedThumbnailUrl(url) {
+  if (typeof url !== 'string' || !url.trim()) {
+    return false;
+  }
+
+  const allowedPrefix =
+    `${process.env.SUPABASE_URL}` +
+    '/storage/v1/object/public/thumbnails/';
+
+  return url.startsWith(allowedPrefix);
+}
+
+// Dedicated Facebook/social preview.
+//
+// The original Bushrann thumbnail remains untouched. This endpoint
+// converts the existing portrait thumbnail into a Facebook-friendly
+// 1200x630 JPEG.
+//
+// "contain" preserves the entire original thumbnail without cropping it.
+// The remaining horizontal space is filled with black.
+app.get('/video/:id/social-preview.jpg', async (req, res) => {
+  const videoId = String(req.params.id || '').trim();
+
+  if (!videoId) {
+    return res.status(404).end();
+  }
+
+  try {
+    const { data: video, error: videoError } = await supabase
+      .from('videos')
+      .select(
+        'id, thumbnail_url, is_private, status, processing_status'
+      )
+      .eq('id', videoId)
+      .maybeSingle();
+
+    // Never expose a social image for a video that is missing,
+    // private, unapproved, or not ready.
+    if (
+      videoError ||
+      !video ||
+      video.is_private ||
+      video.status !== 'approved' ||
+      video.processing_status !== 'ready' ||
+      !isAllowedThumbnailUrl(video.thumbnail_url)
+    ) {
+      return res.status(404).end();
+    }
+
+    const controller = new AbortController();
+
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 10000);
+
+    let thumbnailResponse;
+
+    try {
+      thumbnailResponse = await fetch(video.thumbnail_url, {
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!thumbnailResponse.ok) {
+      console.warn(
+        '[VIDEO SHARE] Thumbnail fetch failed:',
+        videoId,
+        thumbnailResponse.status
+      );
+
+      return res.status(502).end();
+    }
+
+    const contentType =
+      thumbnailResponse.headers.get('content-type') || '';
+
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      console.warn(
+        '[VIDEO SHARE] Thumbnail response was not an image:',
+        videoId,
+        contentType
+      );
+
+      return res.status(502).end();
+    }
+
+    const arrayBuffer = await thumbnailResponse.arrayBuffer();
+    const thumbnailBuffer = Buffer.from(arrayBuffer);
+
+    if (thumbnailBuffer.length === 0) {
+      return res.status(502).end();
+    }
+
+    const socialPreview = await sharp(thumbnailBuffer)
+      .rotate()
+      .resize(1200, 630, {
+        fit: 'contain',
+        background: {
+          r: 0,
+          g: 0,
+          b: 0,
+        },
+      })
+      .jpeg({
+        quality: 88,
+        progressive: true,
+      })
+      .toBuffer();
+
+    // Facebook may cache this deterministic preview aggressively.
+    res.set({
+      'Content-Type': 'image/jpeg',
+      'Content-Length': String(socialPreview.length),
+      'Cache-Control': 'public, max-age=86400',
+    });
+
+    return res.status(200).send(socialPreview);
+  } catch (error) {
+    console.error(
+      '[VIDEO SHARE] Social preview generation failed:',
+      videoId,
+      error?.message || error
+    );
+
+    return res.status(500).end();
+  }
+});
+
 // Shared Bushrann video links.
 //
 // Android:
@@ -108,9 +247,9 @@ function escapeHtml(value) {
 //
 // Social crawlers:
 // Facebook/Messenger and other crawlers receive Open Graph metadata
-// containing the video's thumbnail and owner. Social crawlers are NOT
-// redirected to Google Play, otherwise they would use the Play Store's
-// generic Bushrann metadata instead of the video's metadata.
+// containing the video's social-preview image and owner. Social crawlers
+// are NOT redirected to Google Play, otherwise they would use the Play
+// Store's generic Bushrann metadata instead of the video's metadata.
 //
 // Browser fallback:
 // If Bushrann is not installed and a normal browser opens this page,
@@ -118,8 +257,7 @@ function escapeHtml(value) {
 app.get('/video/:id', async (req, res) => {
   const videoId = String(req.params.id || '').trim();
 
-  const playStoreUrl =
-    'https://play.google.com/store/apps/details?id=com.bushrann.app';
+  const playStoreUrl = PLAY_STORE_URL;
 
   if (!videoId) {
     return res.redirect(302, playStoreUrl);
@@ -167,8 +305,13 @@ app.get('/video/:id', async (req, res) => {
     }
 
     const shareUrl =
-      `https://balagh-server-production.up.railway.app/video/` +
+      `${SHARE_BASE_URL}/video/` +
       encodeURIComponent(video.id);
+
+    const socialPreviewUrl =
+      `${SHARE_BASE_URL}/video/` +
+      encodeURIComponent(video.id) +
+      '/social-preview.jpg';
 
     const title =
       username === 'Bushrann'
@@ -178,27 +321,20 @@ app.get('/video/:id', async (req, res) => {
     const description =
       'Watch this video on Bushrann — Muslim social videos, scholar livestreams, Quran & prayer.';
 
-    const thumbnailUrl =
-      typeof video.thumbnail_url === 'string'
-        ? video.thumbnail_url.trim()
-        : '';
-
     const safeTitle = escapeHtml(title);
     const safeDescription = escapeHtml(description);
     const safeShareUrl = escapeHtml(shareUrl);
-    const safeThumbnailUrl = escapeHtml(thumbnailUrl);
+    const safeSocialPreviewUrl = escapeHtml(socialPreviewUrl);
     const safePlayStoreUrl = escapeHtml(playStoreUrl);
 
-    const imageMetadata = safeThumbnailUrl
-      ? `
-  <meta property="og:image" content="${safeThumbnailUrl}" />
-  <meta property="og:image:secure_url" content="${safeThumbnailUrl}" />
+    const imageMetadata = `
+  <meta property="og:image" content="${safeSocialPreviewUrl}" />
+  <meta property="og:image:secure_url" content="${safeSocialPreviewUrl}" />
   <meta property="og:image:type" content="image/jpeg" />
-  <meta property="og:image:width" content="720" />
-  <meta property="og:image:height" content="1280" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="${safeTitle}" />
-  <meta name="twitter:image" content="${safeThumbnailUrl}" />`
-      : '';
+  <meta name="twitter:image" content="${safeSocialPreviewUrl}" />`;
 
     // Social crawlers must remain on the Bushrann video page so they
     // can read the video's Open Graph metadata instead of following
