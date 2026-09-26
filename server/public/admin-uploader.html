@@ -26,7 +26,7 @@
     width: 100%; padding: 10px 12px; border: 1px solid #c6ced8; border-radius: 8px;
     font-size: 15px; font-family: inherit;
   }
-  textarea { resize: vertical; min-height: 80px; }
+  textarea { resize: vertical; min-height: 56px; }
   .hint { font-size: 12px; color: #7b8593; margin-top: 4px; }
   button {
     width: 100%; padding: 12px; border: 0; border-radius: 8px; font-size: 16px;
@@ -42,14 +42,31 @@
   #status.info { background: #e8f1fd; color: #1d4ed8; }
   #status.ok { background: #e6f6ef; color: #0d6e4f; }
   #status.err { background: #fdeaea; color: #b42318; }
-  #progressWrap { margin-top: 14px; display: none; }
-  #progressWrap.show { display: block; }
-  progress { width: 100%; height: 10px; }
-  #fileName { font-size: 13px; color: #66707d; margin-top: 6px; }
+  progress { width: 100%; height: 8px; }
   .row { display: flex; justify-content: space-between; align-items: baseline; }
   .charCount { font-size: 12px; color: #7b8593; }
   .errorText { color: #b42318; font-size: 14px; margin-top: 8px; display: none; }
   .errorText.show { display: block; }
+
+  /* Per-video item cards */
+  .vid { border: 1px solid #dde3ea; border-radius: 8px; padding: 14px; margin-top: 14px; }
+  .vid .vhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .vid .vname { font-size: 14px; font-weight: 600; word-break: break-all; }
+  .vid .vsize { font-size: 12px; color: #7b8593; white-space: nowrap; }
+  .vid .vremove {
+    width: auto; margin: 0; padding: 2px 10px; font-size: 12px; font-weight: 600;
+    background: #e6ebf0; color: #1c2430;
+  }
+  .vid progress { margin-top: 10px; }
+  .vid label { margin-top: 10px; font-size: 13px; }
+  .vstatus {
+    margin-top: 10px; padding: 10px; border-radius: 6px; font-size: 13px;
+    display: none; white-space: pre-wrap;
+  }
+  .vstatus.show { display: block; }
+  .vstatus.info { background: #e8f1fd; color: #1d4ed8; }
+  .vstatus.ok { background: #e6f6ef; color: #0d6e4f; }
+  .vstatus.err { background: #fdeaea; color: #b42318; }
 </style>
 </head>
 <body>
@@ -75,30 +92,13 @@
       <button id="signOutBtn" class="secondary" style="width:auto; margin:0; padding:6px 12px; font-size:13px">Sign out</button>
     </div>
 
-    <label for="videoFile">Video</label>
-    <input id="videoFile" type="file" accept="video/*" />
-    <div class="hint">Maximum 500MB. MP4 (H.264) recommended.</div>
-    <div id="fileName"></div>
+    <label for="videoFiles">Videos</label>
+    <input id="videoFiles" type="file" accept="video/*" multiple />
+    <div class="hint">Select up to 10 videos. Maximum 500MB per video. MP4 (H.264) recommended.</div>
+    <div id="batchCount" class="hint"></div>
+    <div id="itemList"></div>
 
-    <label for="caption">Caption</label>
-    <textarea id="caption" maxlength="200"></textarea>
-    <div class="row"><span class="hint">Required. Max 200 characters (credit text counts toward the limit).</span><span class="charCount" id="captionCount">0/200</span></div>
-
-    <label for="category">Category</label>
-    <select id="category">
-      <option>Quran</option><option>Hadith</option><option>Reminder</option>
-      <option>Lecture</option><option>Nasheeds</option><option>Dua</option><option>Other</option>
-    </select>
-
-    <label for="credit">Source / Credit <span style="font-weight:400">(optional)</span></label>
-    <input id="credit" type="text" placeholder="e.g. Sheikh Assim Al-Hakeem" />
-
-    <div id="progressWrap">
-      <progress id="progressBar" max="100" value="0"></progress>
-      <div id="fileName2" class="hint"></div>
-    </div>
-
-    <button id="uploadBtn">Upload to Bushrann</button>
+    <button id="batchBtn">Upload Batch to Bushrann</button>
     <div id="status" class="info"></div>
   </section>
 </main>
@@ -112,6 +112,7 @@
   var CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
   var MAX_BYTES = 500 * 1024 * 1024;
   var MAX_CAPTION = 200;
+  var MAX_FILES = 10;
   var POLL_INTERVAL_MS = 10000;
   var POLL_MAX_ATTEMPTS = 30; // ~5 minutes, then report background processing
 
@@ -121,20 +122,115 @@
   // ---- DOM ----
   function $(id) { return document.getElementById(id); }
   var loginCard = $('loginCard'), uploaderCard = $('uploaderCard');
-  var statusEl = $('status'), progressWrap = $('progressWrap'), progressBar = $('progressBar');
-  var uploadBtn = $('uploadBtn');
+  var statusEl = $('status'), batchBtn = $('batchBtn');
+  var itemListEl = $('itemList'), batchCountEl = $('batchCount');
 
   function setStatus(kind, text) {
     statusEl.className = 'show ' + kind;
     statusEl.textContent = text;
   }
   function clearStatus() { statusEl.className = ''; statusEl.textContent = ''; }
-  function setProgress(pct, label) {
-    progressWrap.className = 'show';
-    progressBar.value = pct;
-    $('fileName2').textContent = label;
+
+  // ---- Per-item helpers ----
+  var itemSeq = 0;
+  var items = [];           // selected videos with per-item DOM + metadata
+  var batchRunning = false;
+
+  function setItemStatus(item, kind, text) {
+    item.statusEl.className = 'vstatus show ' + kind;
+    item.statusEl.textContent = text;
   }
-  function hideProgress() { progressWrap.className = ''; }
+  function setItemProgress(item, pct) {
+    item.progressEl.style.display = '';
+    item.progressEl.value = pct;
+  }
+  function hideItemProgress(item) { item.progressEl.style.display = 'none'; }
+
+  function updateBatchCount(submitted, total) {
+    batchCountEl.textContent = total > 0
+      ? 'Completed ' + submitted + ' / ' + total
+      : '';
+  }
+
+  function removeItem(id) {
+    if (batchRunning) return;
+    items = items.filter(function (it) { return it.id !== id; });
+    var el = $('vid-' + id);
+    if (el) el.parentNode.removeChild(el);
+    updateBatchCount(0, items.length);
+  }
+
+  function buildItems(files) {
+    if (batchRunning) return;
+    items = [];
+    itemListEl.innerHTML = '';
+
+    var list = Array.prototype.slice.call(files);
+    if (list.length > MAX_FILES) {
+      setStatus('err', 'You selected ' + list.length + ' videos. Only the first ' + MAX_FILES + ' were kept; remove files to upload the rest in another batch.');
+      list = list.slice(0, MAX_FILES);
+    } else {
+      clearStatus();
+    }
+
+    list.forEach(function (file) {
+      var id = ++itemSeq;
+      var wrap = document.createElement('div');
+      wrap.className = 'vid';
+      wrap.id = 'vid-' + id;
+      wrap.innerHTML =
+        '<div class="vhead">' +
+          '<span class="vname"></span>' +
+          '<span class="vsize"></span>' +
+          '<button class="vremove" type="button">Remove</button>' +
+        '</div>' +
+        '<progress max="100" value="0" style="display:none"></progress>' +
+        '<label>Caption <span class="charCount">0/' + MAX_CAPTION + '</span></label>' +
+        '<textarea maxlength="' + MAX_CAPTION + '"></textarea>' +
+        '<label>Category</label>' +
+        '<select>' + CATEGORIES.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
+        '<label>Source / Credit <span style="font-weight:400">(optional)</span></label>' +
+        '<input type="text" placeholder="e.g. Sheikh Assim Al-Hakeem" />' +
+        '<div class="vstatus"></div>';
+      itemListEl.appendChild(wrap);
+
+      var item = {
+        id: id,
+        file: file,
+        invalid: false,
+        captionEl: wrap.querySelector('textarea'),
+        categoryEl: wrap.querySelector('select'),
+        creditEl: wrap.querySelector('input[type="text"]'),
+        progressEl: wrap.querySelector('progress'),
+        statusEl: wrap.querySelector('.vstatus')
+      };
+      wrap.querySelector('.vname').textContent = file.name;
+      wrap.querySelector('.vsize').textContent = Math.round(file.size / 1048576) + ' MB';
+      wrap.querySelector('.vremove').addEventListener('click', function () { removeItem(id); });
+      item.captionEl.addEventListener('input', function () {
+        wrap.querySelector('.charCount').textContent = this.value.length + '/' + MAX_CAPTION;
+      });
+
+      if (file.size > MAX_BYTES) {
+        item.invalid = true;
+        setItemStatus(item, 'err', 'Skipped: exceeds the 500MB per-video limit.');
+      } else {
+        setItemStatus(item, 'info', 'Waiting');
+      }
+
+      items.push(item);
+    });
+
+    updateBatchCount(0, items.length);
+  }
+
+  function setFormDisabled(disabled) {
+    batchBtn.disabled = disabled;
+    $('videoFiles').disabled = disabled;
+    Array.prototype.forEach.call(itemListEl.querySelectorAll('textarea, select, input, button'), function (el) {
+      el.disabled = disabled;
+    });
+  }
 
   // ---- Config ----
   fetch('/api/admin-uploader/config')
@@ -285,47 +381,88 @@
     });
   }
 
-  // ---- Caption ----
-  $('caption').addEventListener('input', function () {
-    $('captionCount').textContent = this.value.length + '/' + MAX_CAPTION;
+  // ---- File selection ----
+  $('videoFiles').addEventListener('change', function () {
+    buildItems(this.files);
   });
 
-  $('videoFile').addEventListener('change', function () {
-    $('fileName').textContent = this.files[0]
-      ? this.files[0].name + ' (' + Math.round(this.files[0].size / 1048576) + ' MB)'
-      : '';
-  });
-
-  // ---- Upload ----
-  uploadBtn.addEventListener('click', function () {
+  // ---- Batch upload: sequential queue, one video at a time ----
+  batchBtn.addEventListener('click', function () {
     clearStatus();
+    if (batchRunning) return;
 
-    var file = $('videoFile').files[0];
-    var caption = sanitize($('caption').value);
-    var category = $('category').value;
-    var credit = sanitize($('credit').value);
+    if (items.length === 0) { setStatus('err', 'Choose at least one video file.'); return; }
 
-    if (!file) { setStatus('err', 'Choose a video file.'); return; }
-    if (file.size > MAX_BYTES) { setStatus('err', 'Maximum file size is 500MB. Please select a shorter video.'); return; }
-    if (!caption) { setStatus('err', 'Please add a caption.'); return; }
-    if (CATEGORIES.indexOf(category) < 0) { setStatus('err', 'Please choose a category.'); return; }
+    // Validate metadata for every item BEFORE starting any upload.
+    var queue = [];
+    items.forEach(function (item) {
+      if (item.invalid) return; // already marked (e.g. oversized)
+      var caption = sanitize(item.captionEl.value);
+      var category = item.categoryEl.value;
+      var credit = sanitize(item.creditEl.value);
 
-    // Source/Credit has no DB column in V1; append it to the caption.
-    var finalCaption = credit ? caption + '\n\nSource: ' + credit : caption;
-    if (finalCaption.length > MAX_CAPTION) {
-      setStatus('err', 'Caption plus credit exceeds ' + MAX_CAPTION + ' characters. Shorten the caption or credit.');
-      return;
-    }
+      if (!caption) { setItemStatus(item, 'err', 'Skipped: caption is required.'); return; }
+      if (CATEGORIES.indexOf(category) < 0) { setItemStatus(item, 'err', 'Skipped: choose a category.'); return; }
 
-    uploadBtn.disabled = true;
-    runUpload(file, finalCaption, category).catch(function (err) {
-      setStatus('err', 'Upload failed: ' + (err && err.message ? err.message : String(err)));
-    }).finally(function () {
-      uploadBtn.disabled = false;
+      // Source/Credit has no DB column in V1; append it to the caption.
+      var finalCaption = credit ? caption + '\n\nSource: ' + credit : caption;
+      if (finalCaption.length > MAX_CAPTION) {
+        setItemStatus(item, 'err', 'Skipped: caption plus credit exceeds ' + MAX_CAPTION + ' characters.');
+        return;
+      }
+
+      queue.push({ item: item, finalCaption: finalCaption, category: category });
+    });
+
+    if (queue.length === 0) { setStatus('err', 'No valid videos to upload. Fix the errors above.'); return; }
+
+    batchRunning = true;
+    setFormDisabled(true);
+    batchBtn.textContent = 'Uploading batch...';
+
+    var completed = 0, succeeded = 0, failed = 0;
+    updateBatchCount(0, queue.length);
+
+    // Sequentially process one video at a time; an individual failure does
+    // not cancel the rest. Processing polling runs detached per item.
+    var chain = Promise.resolve();
+    queue.forEach(function (entry) {
+      chain = chain.then(function () {
+        return runUpload(entry.item, entry.item.file, entry.finalCaption, entry.category)
+          .then(function () {
+            succeeded += 1;
+            completed += 1;
+            updateBatchCount(completed, queue.length);
+          })
+          .catch(function (err) {
+            // Per-item failure: mark and continue with the next video.
+            failed += 1;
+            completed += 1;
+            updateBatchCount(completed, queue.length);
+            setItemStatus(entry.item, 'err', 'Failed: ' + (err && err.message ? err.message : String(err)));
+          });
+      });
+    });
+
+    chain.then(function () {
+      batchRunning = false;
+      batchBtn.textContent = 'Upload Batch to Bushrann';
+      setFormDisabled(false);
+      var summary = 'Batch finished: ' + succeeded + ' submitted, ' + failed + ' failed.';
+      if (succeeded > 0 && failed > 0) {
+        setStatus('info', summary + ' Processing continues in the background per submitted video.');
+      } else if (failed > 0) {
+        setStatus('err', summary);
+      } else {
+        setStatus('ok', summary + ' Processing continues in the background per video.');
+      }
     });
   });
 
-  function runUpload(file, finalCaption, category) {
+  // Proven single-video pipeline, parameterized per item.
+  // Resolves after the DB insert is committed and processing has been
+  // triggered; polling runs detached so the next video starts immediately.
+  function runUpload(item, file, finalCaption, category) {
     var videoPath = null, thumbPath = null, videoCommitted = false;
 
     return getFreshToken()
@@ -342,13 +479,13 @@
         thumbPath = uid + '/' + Date.now() + '.jpg';
 
         // 1) Thumbnail
-        setStatus('info', 'Generating thumbnail...');
+        setItemStatus(item, 'info', 'Generating thumbnail...');
         return generateThumbnail(file).then(function (thumbBlob) {
           // 2) Video via TUS (mirrors UploadScreen: bucketName/objectName metadata, fresh token per request)
-          setStatus('info', 'Uploading video...');
-          return uploadVideoTus(file, videoPath).then(function () {
+          setItemStatus(item, 'info', 'Uploading video...');
+          return uploadVideoTus(item, file, videoPath).then(function () {
             // 3) Thumbnail upload
-            setStatus('info', 'Uploading thumbnail...');
+            setItemStatus(item, 'info', 'Uploading thumbnail...');
             return supabase.storage.from('thumbnails').upload(thumbPath, thumbBlob, {
               contentType: 'image/jpeg',
               upsert: false
@@ -358,7 +495,7 @@
           });
         }).then(function () {
           // 4) DB insert (mirror of UploadScreen payload; moderation status untouched)
-          setStatus('info', 'Saving...');
+          setItemStatus(item, 'info', 'Creating record...');
           var base = supabase.supabaseUrl + '/storage/v1/object/public';
           var videoUrl = base + '/videos/' + videoPath;
           var thumbnailUrl = base + '/thumbnails/' + thumbPath;
@@ -387,13 +524,18 @@
       })
       .then(function (videoId) {
         // From here on the row is committed: storage objects must NOT be deleted on errors.
-        return triggerProcessing(videoId).then(function () {
-          return pollProcessing(videoId);
+        return triggerProcessing(item, videoId).then(function () {
+          // Detached polling: updates this item's status in the background
+          // and never blocks the next video in the batch.
+          setItemStatus(item, 'info', 'Processing (submitted) — checking status in the background...');
+          pollProcessing(item, videoId);
+          hideItemProgress(item);
         });
       })
       .catch(function (err) {
         // Best-effort cleanup of THIS upload's objects only when the DB insert
         // did not commit, mirroring UploadScreen semantics.
+        hideItemProgress(item);
         if (!videoCommitted) {
           if (videoPath) removeQuietly('videos', [videoPath]);
           if (thumbPath) removeQuietly('thumbnails', [thumbPath]);
@@ -402,7 +544,7 @@
       });
   }
 
-  function uploadVideoTus(file, videoPath) {
+  function uploadVideoTus(item, file, videoPath) {
     return getFreshToken().then(function () {
       return new Promise(function (resolve, reject) {
         var upload = new window.tus.Upload(file, {
@@ -429,23 +571,22 @@
           },
           onProgress: function (bytesUploaded, bytesTotal) {
             if (bytesTotal > 0) {
-              setProgress(Math.round((bytesUploaded / bytesTotal) * 100),
-                'Uploading video... ' + Math.round(bytesUploaded / 1048576) + ' / ' + Math.round(bytesTotal / 1048576) + ' MB');
+              setItemProgress(item, Math.round((bytesUploaded / bytesTotal) * 100));
             }
           },
-          onSuccess: function () { hideProgress(); resolve(); },
-          onError: function (err) { hideProgress(); reject(err); }
+          onSuccess: function () { resolve(); },
+          onError: function (err) { reject(err); }
         });
         upload.start();
       });
     });
   }
 
-  function triggerProcessing(videoId) {
-    setStatus('info', 'Processing...');
+  function triggerProcessing(item, videoId) {
+    setItemStatus(item, 'info', 'Processing...');
     if (!videoId) {
       // Insert committed but id was not readable (PGRST116) or trigger info missing.
-      setStatus('ok', 'Video saved. Processing will start automatically via the recovery sweeper.');
+      setItemStatus(item, 'ok', 'Video saved. Processing will start automatically via the recovery sweeper.');
       return Promise.resolve(false);
     }
     return getFreshToken().then(function (token) {
@@ -456,18 +597,20 @@
       }).then(function (r) {
         if (!r.ok) {
           // Committed upload is never turned into a failure here; the sweeper recovers.
-          setStatus('info', 'Video saved. Immediate processing trigger failed; the recovery sweeper will process it shortly.');
+          setItemStatus(item, 'info', 'Video saved. Immediate processing trigger failed; the recovery sweeper will process it shortly.');
           return false;
         }
         return true;
       }).catch(function () {
-        setStatus('info', 'Video saved. Immediate processing trigger failed; the recovery sweeper will process it shortly.');
+        setItemStatus(item, 'info', 'Video saved. Immediate processing trigger failed; the recovery sweeper will process it shortly.');
         return false;
       });
     });
   }
 
-  function pollProcessing(videoId) {
+  // Always eventually resolves; never rejects, so detached polling for one
+  // video can never hang or fail the batch.
+  function pollProcessing(item, videoId) {
     var attempts = 0;
     return new Promise(function (resolve) {
       function tick() {
@@ -477,28 +620,28 @@
           .then(function (r) {
             var st = r.data && r.data.processing_status;
             if (st === 'ready') {
-              setStatus('ok', 'Ready — the video is processed and will appear in Bushrann per the normal moderation rules.');
+              setItemStatus(item, 'ok', 'Ready — processed; it will appear in Bushrann per the normal moderation rules.');
               return resolve();
             }
             if (st === 'failed') {
-              setStatus('err', 'Processing failed on the server. The original upload is preserved; check the Railway logs for this video.');
+              setItemStatus(item, 'err', 'Processing failed on the server. The original upload is preserved; check the Railway logs for this video.');
               return resolve();
             }
             if (attempts >= POLL_MAX_ATTEMPTS) {
-              setStatus('info', 'Processing is taking longer than expected and continues in the background. Check the app later; the recovery sweeper also monitors this video.');
+              setItemStatus(item, 'info', 'Still processing in the background. Check the app later; the recovery sweeper also monitors this video.');
               return resolve();
             }
-            setStatus('info', 'Processing... (' + attempts + '/' + POLL_MAX_ATTEMPTS + ' checks)');
+            setItemStatus(item, 'info', 'Processing... (' + attempts + '/' + POLL_MAX_ATTEMPTS + ' checks)');
             setTimeout(tick, POLL_INTERVAL_MS);
           })
           .catch(function () {
             // Polling/network errors count as an attempt and never turn a
             // committed upload into a failure; the outer promise always resolves.
             if (attempts >= POLL_MAX_ATTEMPTS) {
-              setStatus('info', 'Unable to verify processing status. The video is saved and processing continues in the background; the recovery sweeper also monitors it.');
+              setItemStatus(item, 'info', 'Unable to verify processing status. The video is saved and processing continues in the background; the recovery sweeper also monitors it.');
               return resolve();
             }
-            setStatus('info', 'Processing... (status check failed, retrying ' + attempts + '/' + POLL_MAX_ATTEMPTS + ')');
+            setItemStatus(item, 'info', 'Processing... (status check failed, retrying ' + attempts + '/' + POLL_MAX_ATTEMPTS + ')');
             setTimeout(tick, POLL_INTERVAL_MS);
           });
       }
