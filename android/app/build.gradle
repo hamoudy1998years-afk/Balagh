@@ -98,8 +98,8 @@ android {
         applicationId 'com.bushrann.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 57
-        versionName "1.7.35"
+        versionCode 58
+        versionName "1.7.36"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -169,6 +169,13 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    // Media3 for the native Quran queue player (QuranPlaybackService).
+    // Version pinned to match expo-audio 55.0.15's androidxMedia3Version.
+    // Stage 2: media3-session hosts the MediaSession; media3-exoplayer is
+    // the queue/player engine.
+    implementation("androidx.media3:media3-session:1.8.0")
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

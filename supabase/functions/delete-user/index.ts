@@ -120,44 +120,63 @@ serve(async (req) => {
       { table: "profiles", column: "id" },
     ];
 
-    for (const { table, column } of tablesToClean) {
-      const { error } = await adminClient
-        .from(table)
-        .delete()
-        .eq(column, userId);
+    // Run all independent NON-PROFILE cleanup queries concurrently
+    // (supabase-js resolves with { error } instead of rejecting, so
+    // Promise.all cannot lose errors — every result is inspected below).
+    // Each entry carries the label used in the failure message.
+    const parallelCleanup = [
+      ...tablesToClean
+        .filter(({ table }) => table !== "profiles")
+        .map(({ table, column }) => ({
+          label: table,
+          promise: adminClient.from(table).delete().eq(column, userId),
+        })),
+      {
+        // Livestream replay rows in the videos table (the Railway cleanup
+        // above deliberately does not touch them). This preserves the
+        // pre-existing behavior of removing replay rows on account deletion
+        // without re-deleting normal-video rows Railway already handled.
+        label: "livestream replays",
+        promise: adminClient
+          .from("videos")
+          .delete()
+          .eq("user_id", userId),
+      },
+    ];
+
+    const cleanupResults = await Promise.all(
+      parallelCleanup.map(({ promise }) => promise)
+    );
+
+    for (let i = 0; i < cleanupResults.length; i++) {
+      const { error } = cleanupResults[i];
 
       if (error) {
         console.error(
-          `Error deleting from ${table}.${column}:`,
+          `Error deleting from ${parallelCleanup[i].label}:`,
           error.message
         );
 
         // Do not delete the Auth account if required data cleanup failed.
         throw new Error(
-          `Account data cleanup failed while deleting ${table}`
+          `Account data cleanup failed while deleting ${parallelCleanup[i].label}`
         );
       }
     }
 
-    // Livestream replay rows in the videos table (the Railway cleanup above
-    // deliberately does not touch them). This preserves the pre-existing
-    // behavior of removing replay rows on account deletion without
-    // re-deleting normal-video rows Railway already handled.
-    const { error: replayError } = await adminClient
-      .from("videos")
+    // Keep profile last: other tables may reference profiles with
+    // non-cascading FKs, so it must be deleted after the batch above.
+    const { error: profileError } = await adminClient
+      .from("profiles")
       .delete()
-      .eq("user_id", userId)
-      .eq("type", "livestream");
+      .eq("id", userId);
 
-    if (replayError) {
-      console.error(
-        "Error deleting livestream replay rows:",
-        replayError.message
-      );
+    if (profileError) {
+      console.error("Error deleting from profiles.id:", profileError.message);
 
       // Do not delete the Auth account if required data cleanup failed.
       throw new Error(
-        "Account data cleanup failed while deleting livestream replays"
+        "Account data cleanup failed while deleting profiles"
       );
     }
 

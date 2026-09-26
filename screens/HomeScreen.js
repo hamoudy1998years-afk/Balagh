@@ -22,7 +22,7 @@ import { Alert, Linking } from 'react-native';
 
 
 
-const CURRENT_VERSION_CODE = 57; // CHANGE THIS when you bump versionCode
+const CURRENT_VERSION_CODE = 58; // CHANGE THIS when you bump versionCode
 const VERSION_CHECK_URL = 'https://raw.githubusercontent.com/hamoudy1998years-afk/Balagh/main/version.json';
 const UPDATE_CHECK_KEY = 'lastUpdateCheck';
 

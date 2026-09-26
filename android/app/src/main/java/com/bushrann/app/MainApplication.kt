@@ -23,6 +23,7 @@ class MainApplication : Application(), ReactApplication {
         PackageList(this).packages.apply {
           add(AdhanPackage())
           add(ScreenStatePackage())
+          add(QuranPlayerPackage())
         }
     )
   }

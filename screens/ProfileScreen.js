@@ -189,7 +189,7 @@ function DownloadProgressOverlay({ visible, progress, preparing }) {
 export default function ProfileScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
   const targetUserId = route?.params?.profileUserId ?? null;
-  const { user: globalUser, loading: userLoading, blockUser, availableAccounts, refreshAccounts, switchToAccount, switchingAccount } = useUser() ?? {};
+  const { user: globalUser, loading: userLoading, blockUser, availableAccounts, refreshAccounts, switchToAccount, switchingAccount, switchError, clearSwitchError } = useUser() ?? {};
 
   useEffectHook(() => {
     if (!navigation) return;
@@ -237,6 +237,11 @@ export default function ProfileScreen({ route, navigation }) {
 
   // Track last user to prevent duplicate resets
   const lastUserIdRef = useRef(null);
+
+  // Monotonic request guard: when the viewed user/account changes, an older
+  // init's async completion must NOT dispatch its stale results into the
+  // screen now showing a different account.
+  const initRequestIdRef = useRef(0);
 
   // Track timeouts for cleanup
   const timeoutsRef = useRef([]);
@@ -338,6 +343,20 @@ export default function ProfileScreen({ route, navigation }) {
     }
   }, [globalUser?.id]);
 
+  // Surface account-switch failures that happened after we navigated away from
+  // the initiating screen (its own dialog is gone by then).
+  useEffectHook(() => {
+    if (switchError) {
+      setDialog({
+        visible: true,
+        title: 'Switch Failed',
+        message: switchError,
+        type: 'error',
+        buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); clearSwitchError?.(); } }],
+      });
+    }
+  }, [switchError]);
+
   useEffectHook(() => {
     livestreamIdsRef.current = new Set(livestreams.map(v => v.id));
   }, [livestreams]);
@@ -352,6 +371,7 @@ export default function ProfileScreen({ route, navigation }) {
       dispatchVideo({ type: 'RESET' });
     }
     lastUserIdRef.current = viewingId;
+    const requestId = ++initRequestIdRef.current;
 
     if (user && viewingId) {
       const ownProfile = viewingId === user.id;
@@ -380,7 +400,8 @@ export default function ProfileScreen({ route, navigation }) {
         // Try to load from cache if available, but don't fail
         try {
           const cachedProfile = await userCache.get();
-          if (cachedProfile) {
+          // Ownership: never render another account's cached profile.
+          if (cachedProfile && cachedProfile.id === viewingId) {
             dispatchProfile({ type: 'SET_PROFILE', profile: cachedProfile });
           }
         } catch (e) {
@@ -394,6 +415,13 @@ export default function ProfileScreen({ route, navigation }) {
         loadVideos(viewingId, ownProfile),
         loadLivestreams(viewingId),
       ]).then(([profileResult, videoResult, _]) => {
+        // Stale-request guard: a newer init (e.g. after an account switch)
+        // has superseded this one — its results must not overwrite the
+        // current account's state.
+        if (requestId !== initRequestIdRef.current) {
+          __DEV__ && console.log('[ProfileScreen] init: stale request completion ignored');
+          return;
+        }
         __DEV__ && console.log('[ProfileScreen] init: Promise.all COMPLETE');
         if (profileResult) {
           const { data, frsCount, fngCount, scholarResult } = profileResult;
@@ -419,7 +447,9 @@ export default function ProfileScreen({ route, navigation }) {
         // If API fails, try to use cached data
         try {
           const cachedProfile = await userCache.get();
-          if (cachedProfile) {
+          // Ownership: only fall back to cache if it belongs to the profile
+          // actually being viewed — never another account's cached data.
+          if (cachedProfile && cachedProfile.id === viewingId) {
             // Keep showing cached data, show offline toast
             dispatchProfile({ type: 'SET_PROFILE', profile: cachedProfile });
             dispatchUI({ type: 'SET_TOAST', toast: { message: 'Offline mode - showing cached data', type: 'offline' } });
@@ -903,12 +933,40 @@ export default function ProfileScreen({ route, navigation }) {
         const viewingId = targetUserId ?? user.id;
         const ownProfile = viewingId === user.id;
         
+        // Capture the current init/request generation: if an init for a newer
+        // account starts (or started) while this refresh is in flight, its
+        // completion must not apply old-account results.
+        const requestIdAtStart = initRequestIdRef.current;
+
         try {
-          await Promise.all([
+          const [profileResult, videoResult] = await Promise.all([
             loadProfile(viewingId),
             loadVideos(viewingId, ownProfile),
             loadLivestreams(viewingId),
           ]);
+
+          if (requestIdAtStart !== initRequestIdRef.current) {
+            __DEV__ && console.log('[ProfileScreen] onRefresh: stale refresh results ignored');
+            return;
+          }
+
+          if (profileResult) {
+            const { data, frsCount, fngCount, scholarResult } = profileResult;
+            dispatchProfile({
+              type: 'SET_ALL_PROFILE',
+              profile: data,
+              followersCount: frsCount ?? 0,
+              followingCount: fngCount ?? 0,
+              isScholar: data.is_scholar === true,
+              scholarData: data.is_scholar ? (scholarResult.data ?? null) : null,
+              hasPendingApplication: data.is_scholar ? false : !!scholarResult.data,
+            });
+          }
+          if (videoResult) {
+            const { pubVideos, privVideos } = videoResult;
+            dispatchVideo({ type: 'SET_PUBLIC', videos: pubVideos, totalLikes: pubVideos.reduce((sum, v) => sum + (v.likes_count ?? 0), 0) });
+            dispatchVideo({ type: 'SET_PRIVATE', videos: privVideos });
+          }
         } catch (e) {
           // Don't clear data on refresh failure - keep showing cached data
         }
@@ -1424,6 +1482,18 @@ export default function ProfileScreen({ route, navigation }) {
       />
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} preparing={downloadPreparing} />
+
+      {/* Blocking overlay while an account switch (started elsewhere) is in
+          progress — hides and locks the old account's profile until the new
+          account is in place. */}
+      {switchingAccount && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="auto">
+          <View style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.92)', alignItems: 'center', justifyContent: 'center' }}>
+            <ActivityIndicator color={COLORS.gold} size="large" />
+            <Text style={{ marginTop: 12, fontSize: 15, color: '#334155' }}>Switching account...</Text>
+          </View>
+        </View>
+      )}
 
         {toast && (
           <View style={[

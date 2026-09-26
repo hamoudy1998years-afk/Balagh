@@ -248,7 +248,7 @@ export default function SignupScreen({ navigation }) {
 
     try {
       if (data?.user) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // No artificial delay — the update below targets the row directly.
         const profileUpdate = { username: username.trim() };
         if (hasPhone) profileUpdate.phone = phone.trim();
         const { error: profileError } = await supabase
@@ -267,6 +267,15 @@ export default function SignupScreen({ navigation }) {
     }
 
     setLoading(false);
+
+    // If signUp already returned a usable session, enter the app directly —
+    // re-authenticating via signInWithPassword is redundant extra latency.
+    // The profile update and saved-account persistence above are complete
+    // before we navigate, so no signup data race is introduced.
+    if (data?.session?.user) {
+      navigation.navigate(ROUTES.MAIN);
+      return;
+    }
 
     setDialog({
       visible: true,

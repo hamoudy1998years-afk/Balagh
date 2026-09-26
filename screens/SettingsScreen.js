@@ -205,6 +205,15 @@ export default function SettingsScreen({ navigation }) {
 
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [switchModalVisible, setSwitchModalVisible] = useState(false);
+  // Arms the navigate-on-switch-start effect below: only a switch initiated from
+  // this screen may trigger navigation when switchingAccount turns true.
+  const switchArmedRef = useRef(false);
+
+  useEffect(() => {
+    if (switchingAccount && switchArmedRef.current) {
+      navigation.navigate(ROUTES.MAIN, { screen: ROUTES.PROFILE });
+    }
+  }, [switchingAccount, navigation]);
   const [showBugDialog, setShowBugDialog] = useState(false);
   const [bugText, setBugText] = useState('');
   const [bugPhone, setBugPhone] = useState('');
@@ -491,7 +500,8 @@ export default function SettingsScreen({ navigation }) {
       buttons: [
         { text: 'Cancel', style: 'cancel', onPress: () => setDialog(d => ({ ...d, visible: false })) },
         { text: 'Delete Forever', style: 'destructive', onPress: async () => {
-          setDialog(d => ({ ...d, visible: false }));
+          // Blocking loading state for the entire backend deletion request.
+          setDialog({ visible: true, title: 'Deleting account...', message: '', type: 'info', buttons: [], loading: true });
           try {
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) throw new Error('No active session');
@@ -571,15 +581,20 @@ export default function SettingsScreen({ navigation }) {
               onPress={async () => {
                 if (isCurrent) { setSwitchModalVisible(false); return; }
                 setSwitchModalVisible(false);
-                const result = await switchToAccount?.(account);
-                if (result && !result.success) {
-                  setDialog({
-                    visible: true,
-                    title: 'Switch Failed',
-                    message: result.reason === 'NO_PASSWORD' ? 'Please log in with password first.' : result.error || 'Could not switch account.',
-                    type: 'error',
-                    buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
-                  });
+                switchArmedRef.current = true;
+                try {
+                  const result = await switchToAccount?.(account);
+                  if (result && !result.success) {
+                    setDialog({
+                      visible: true,
+                      title: 'Switch Failed',
+                      message: result.reason === 'NO_PASSWORD' ? 'Please log in with password first.' : result.error || 'Could not switch account.',
+                      type: 'error',
+                      buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
+                    });
+                  }
+                } finally {
+                  switchArmedRef.current = false;
                 }
               }}
               disabled={switchingAccount}
@@ -621,6 +636,7 @@ export default function SettingsScreen({ navigation }) {
         message={dialog.message}
         type={dialog.type}
         buttons={dialog.buttons}
+        loading={dialog.loading}
       />
 
       {emailSent ? (
@@ -699,6 +715,7 @@ export default function SettingsScreen({ navigation }) {
         message={dialog.message}
         type={dialog.type}
         buttons={dialog.buttons}
+        loading={dialog.loading}
       />
       <GroupLabel text="PROFILE" />
       <Card>
@@ -890,6 +907,7 @@ export default function SettingsScreen({ navigation }) {
         message={dialog.message}
         type={dialog.type}
         buttons={dialog.buttons}
+        loading={dialog.loading}
       />
       <GroupLabel text="SUPPORT" />
       <Card>

@@ -18,6 +18,12 @@ export function useComments(videoId) {
   const PAGE_SIZE = 20;
   const realtimeSubscription = useRef(null);
 
+  // The realtime subscription below is established once per videoId and is
+  // not re-created when authUser changes, so the handler reads the current
+  // user through this ref instead of a stale closure.
+  const authUserRef = useRef(authUser);
+  authUserRef.current = authUser;
+
   // Fetch comments with pagination
   const fetchComments = useCallback(async (pageNum = 0, isRefresh = false) => {
     if (!videoId) return;
@@ -148,14 +154,57 @@ export function useComments(videoId) {
 
     setPosting(true);
 
-    try {
-      const user = authUser;
+    const user = authUser;
 
+    // Collision-safe local id for the optimistic comment. Replaced by the
+    // authoritative server id once the INSERT resolves.
+    const tempId = `temp-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+
+    try {
       if (!user) {
         throw new Error(
           'Not authenticated'
         );
       }
+
+      // Current-user display data is already available from authUser — no
+      // profiles query is needed before showing the comment.
+      const currentUserInfo = {
+        id: user.id,
+        username:
+          user.username ??
+          user.user_metadata?.username ??
+          'Unknown',
+        avatar_url:
+          user.avatar_url ??
+          user.user_metadata?.avatar_url ??
+          null,
+      };
+
+      const tempComment = {
+        id: tempId,
+        video_id: videoId,
+        user_id: user.id,
+        text: content.trim(),
+        parent_id: parentId,
+        created_at:
+          new Date().toISOString(),
+        user: currentUserInfo,
+        isLiked: false,
+        likesCount: 0,
+        repliesCount: 0,
+        comment_likes: [],
+        _pending: true,
+      };
+
+      // Optimistic insert: the comment (and the header count, which is
+      // comments.length) updates immediately, before any network round trip.
+      setComments(prev => [
+        tempComment,
+        ...prev,
+      ]);
 
       const {
         data: newComment,
@@ -179,44 +228,39 @@ export function useComments(videoId) {
         throw insertError;
       }
 
-      const {
-        data: userProfile,
-      } = await supabase
-        .from('profiles')
-        .select(
-          'id, username, avatar_url'
-        )
-        .eq('id', user.id)
-        .single();
-
-      const commentWithUser = {
-        ...newComment,
-
-        user:
-          userProfile || {
-            username: 'Unknown',
-            avatar_url: null,
-          },
-
-        isLiked: false,
-        likesCount: 0,
-        comment_likes: [],
-      };
-
+      // Reconcile: replace the temp comment by tempId AND drop any copy of
+      // the same real id that realtime may already have inserted (realtime
+      // can fire before this promise resolves). Exactly one copy remains.
       setComments(prev => [
-        commentWithUser,
-        ...prev,
+        {
+          ...newComment,
+          user: currentUserInfo,
+          isLiked: false,
+          likesCount: 0,
+          repliesCount: 0,
+          comment_likes: [],
+        },
+        ...prev.filter(
+          c =>
+            c.id !== tempId &&
+            c.id !== newComment.id
+        ),
       ]);
 
       setReplyingTo(null);
 
-      return commentWithUser;
+      return newComment;
     } catch (error) {
       __DEV__ &&
         console.error(
           'Error posting comment:',
           error
         );
+
+      // Roll back ONLY the optimistic comment — no ghost, count restored.
+      setComments(prev =>
+        prev.filter(c => c.id !== tempId)
+      );
 
       alert('Failed to post comment');
     } finally {
@@ -535,6 +579,55 @@ export function useComments(videoId) {
 
     loadComments();
 
+    // Insert-if-absent by real comment id. Never duplicates a comment that
+    // is already local (e.g. our own optimistic post reconciled with the
+    // server row), and never refetches the whole list for an INSERT.
+    const insertCommentIfAbsent = (
+      row,
+      userInfo
+    ) => {
+      setComments(prev =>
+        prev.some(c => c.id === row.id)
+          ? prev
+          : [
+              {
+                ...row,
+                user:
+                  userInfo || {
+                    username: 'Unknown',
+                    avatar_url: null,
+                  },
+                isLiked: false,
+                likesCount: 0,
+                repliesCount: 0,
+                comment_likes: [],
+              },
+              ...prev,
+            ]
+      );
+    };
+
+    // Latest realtime event seen per comment id, scoped to this subscription
+    // (fresh Map per videoId). Used to discard a stale async INSERT
+    // enrichment if a DELETE/UPDATE for the same id arrived while its
+    // profile lookup was in flight.
+    const lastEventById = new Map();
+
+    // False once this subscription's effect is cleaned up (videoId change or
+    // unmount). Straggling async profile lookups from THIS effect must not
+    // call setComments after a newer effect has taken over the state.
+    let isActive = true;
+
+    // Guard for the async other-user INSERT continuation: only insert if no
+    // newer event superseded this INSERT and the row still belongs to the
+    // video this subscription is for (videoId changes recreate the effect,
+    // but a straggling profile fetch from the old effect can still resolve).
+    const canApplyAsyncInsert = row =>
+      isActive &&
+      lastEventById.get(row.id) ===
+        'INSERT' &&
+      row.video_id === videoId;
+
     realtimeSubscription.current =
       supabase
         .channel(
@@ -550,14 +643,82 @@ export function useComments(videoId) {
               `video_id=eq.${videoId}`,
           },
           payload => {
+            lastEventById.set(
+              payload.new?.id ??
+                payload.old?.id,
+              payload.eventType
+            );
+
             if (
               payload.eventType ===
               'INSERT'
             ) {
-              fetchComments(
-                0,
-                true
-              );
+              const row = payload.new;
+              const currentUser =
+                authUserRef.current;
+
+              if (
+                row.user_id ===
+                currentUser?.id
+              ) {
+                // Our own comment: display data is already local.
+                insertCommentIfAbsent(
+                  row,
+                  {
+                    id: currentUser.id,
+                    username:
+                      currentUser.username ??
+                      currentUser
+                        .user_metadata
+                        ?.username ??
+                      'Unknown',
+                    avatar_url:
+                      currentUser.avatar_url ??
+                      currentUser
+                        .user_metadata
+                        ?.avatar_url ??
+                      null,
+                  }
+                );
+              } else {
+                // Another user's comment: fetch only that author's minimal
+                // profile (never a full list refetch), then insert. If the
+                // comment already arrived locally in the meantime, the
+                // insert-if-absent makes this a no-op.
+                supabase
+                  .from('profiles')
+                  .select(
+                    'id, username, avatar_url'
+                  )
+                  .eq('id', row.user_id)
+                  .single()
+                  .then(({ data }) => {
+                    if (
+                      !canApplyAsyncInsert(
+                        row
+                      )
+                    ) {
+                      return;
+                    }
+                    insertCommentIfAbsent(
+                      row,
+                      data
+                    );
+                  })
+                  .catch(() => {
+                    if (
+                      !canApplyAsyncInsert(
+                        row
+                      )
+                    ) {
+                      return;
+                    }
+                    insertCommentIfAbsent(
+                      row,
+                      null
+                    );
+                  });
+              }
             } else if (
               payload.eventType ===
               'UPDATE'
@@ -590,6 +751,8 @@ export function useComments(videoId) {
         .subscribe();
 
     return () => {
+      isActive = false;
+
       if (
         realtimeSubscription.current
       ) {

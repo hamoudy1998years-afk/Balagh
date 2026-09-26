@@ -10,6 +10,10 @@ export function UserProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [availableAccounts, setAvailableAccounts] = useState([]);
   const [switchingAccount, setSwitchingAccount] = useState(false);
+  // UI-facing only: preserves the switch failure message for screens that are no
+  // longer mounted/focused when a post-biometric failure occurs. Never touches
+  // auth/session state.
+  const [switchError, setSwitchError] = useState(null);
   const [following, setFollowing] = useState(new Set());
   const [blockedUsers, setBlockedUsers] = useState(new Set());
 
@@ -115,43 +119,45 @@ export function UserProvider({ children }) {
         }
 
         try {
-          // SHOULD-FIX: this query has been observed to hang indefinitely for
-          // certain accounts with no error and no data ever returned, which
-          // blocks supabase.auth.setSession() itself (it waits for all
-          // onAuthStateChange listeners to finish) — freezing any UI awaiting
-          // that call forever. Race it against a timeout so a hang here can
-          // never again block sign-in; falls back to session-only user data.
-          const profileQueryPromise = supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', sessionUser.id)
-            .single();
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('PROFILE_QUERY_TIMEOUT')), 8000)
-          );
+          // Apply session-only user state immediately. The profiles query and
+          // cache write are deliberately DETACHED from this callback: awaiting
+          // them here blocks supabase's own auth promise (setSession/signIn
+          // wait on listeners), which froze sign-in indefinitely whenever the
+          // query hung. The detached task keeps every authVersion stale-write
+          // guard and handles its own errors, so it can never surface as an
+          // unhandled rejection.
+          setUser(sessionUser);
+          __DEV__ && console.log('[UserContext] SET_USER_PRESENT (session-only, onAuthStateChange)');
 
-          let profile = null;
-          let profileError = null;
-          try {
-            const result = await Promise.race([profileQueryPromise, timeoutPromise]);
-            profile = result.data;
-            profileError = result.error;
-          } catch (raceErr) {
-            __DEV__ && console.log('[UserContext] onAuthStateChange profiles query TIMED OUT:', raceErr.message);
-          }
-          __DEV__ && console.log('[UserContext] onAuthStateChange profiles query done. data present:', !!profile, 'error present:', !!profileError);
+          Promise.resolve()
+            .then(async () => {
+              try {
+                const { data: profile } = await supabase
+                  .from('profiles')
+                  .select('*')
+                  .eq('id', sessionUser.id)
+                  .single();
+                __DEV__ && console.log('[UserContext] background profile refresh done. data present:', !!profile);
 
-          // A newer auth event superseded this one while the profile
-          // fetch was in flight — don't apply a now-stale result.
-          if (myVersion !== authVersion.current) {
-            __DEV__ && console.log('[UserContext] onAuthStateChange SKIPPED (stale version). myVersion:', myVersion, 'current authVersion:', authVersion.current);
-            return;
-          }
+                // A newer auth event superseded this one while the profile
+                // fetch was in flight — don't apply a now-stale result.
+                if (myVersion !== authVersion.current) {
+                  __DEV__ && console.log('[UserContext] background profile refresh SKIPPED (stale version). myVersion:', myVersion, 'current authVersion:', authVersion.current);
+                  return;
+                }
 
-          const mergedUser = { ...sessionUser, ...profile };
-          setUser(mergedUser);
-          __DEV__ && console.log('[UserContext] SET_USER_PRESENT (onAuthStateChange)');
-          await queueCacheSet(myVersion, mergedUser);
+                const mergedUser = { ...sessionUser, ...profile };
+                setUser(mergedUser);
+                __DEV__ && console.log('[UserContext] SET_USER_PRESENT (profile-merged, onAuthStateChange)');
+                await queueCacheSet(myVersion, mergedUser);
+              } catch (profileErr) {
+                // Keep session-only user state; never propagate.
+                __DEV__ && console.log('[UserContext] background profile refresh error:', profileErr?.message ?? profileErr);
+              }
+            })
+            .catch((profileErr) => {
+              __DEV__ && console.log('[UserContext] background profile refresh error:', profileErr?.message ?? profileErr);
+            });
         } catch (e) {
           __DEV__ && console.log('[UserContext] Auth state sync error:', e);
         } finally {
@@ -298,6 +304,13 @@ export function UserProvider({ children }) {
   const switchToAccount = useCallback(async (account) => {
     if (!account?.refresh_token) return { success: false, error: 'No saved session for this account.' };
 
+    // A new switch begins — clear any stale UI-facing error from a prior switch.
+    setSwitchError(null);
+    const switchFail = (error, extra = {}) => {
+      setSwitchError(error);
+      return { success: false, error, ...extra };
+    };
+
     // Enforce the same local-authentication gate LoginScreen requires before using
     // any stored secret (password / appPassword). A refresh_token grants an equally
     // live session, so it must be gated the same way — device biometrics, checked
@@ -309,7 +322,7 @@ export function UserProvider({ children }) {
       if (!hasHardware || !isEnrolled) {
         // No biometric gate available on this device — do not silently allow
         // the switch. Matches LoginScreen's own fallback behavior.
-        return { success: false, reason: 'NO_PASSWORD', error: 'Please log in with password first.' };
+        return switchFail('Please log in with password first.', { reason: 'NO_PASSWORD' });
       }
 
       const bioResult = await LocalAuthentication.authenticateAsync({
@@ -319,16 +332,16 @@ export function UserProvider({ children }) {
       });
 
       if (!bioResult.success) {
-        return { success: false, error: 'Authentication cancelled.' };
+        return switchFail('Authentication cancelled.');
       }
     } catch (e) {
-      return { success: false, error: 'Could not verify identity.' };
+      return switchFail('Could not verify identity.');
     }
 
     setSwitchingAccount(true);
     try {
       const { data, error } = await supabase.auth.refreshSession({ refresh_token: account.refresh_token });
-      if (error || !data?.session) return { success: false, error: error?.message ?? 'Session expired. Please log in again.' };
+      if (error || !data?.session) return switchFail(error?.message ?? 'Session expired. Please log in again.');
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
@@ -344,7 +357,7 @@ export function UserProvider({ children }) {
         // A newer auth event (e.g. SIGNED_OUT) superseded this switch while
         // the cache write was in flight — don't persist this account's
         // refresh token as if the switch were still the current truth.
-        return { success: false, error: 'Session changed during switch. Please try again.' };
+        return switchFail('Session changed during switch. Please try again.');
       }
 
       const savedAccountOk = await queueSavedAccountAdd(myVersion, {
@@ -357,14 +370,39 @@ export function UserProvider({ children }) {
       });
 
       if (!savedAccountOk) {
-        return { success: false, error: 'Session changed during switch. Please try again.' };
+        return switchFail('Session changed during switch. Please try again.');
       }
 
       const accounts = await userCache.savedAccounts.getAll();
       setAvailableAccounts(accounts);
+
+      // Account-scoped state must belong to the newly switched account —
+      // never leave the previous account's sets behind. `following` is only
+      // ever built incrementally (toggleFollow/FollowListScreen), so reset it;
+      // blockedUsers is loaded from the DB for the new account, with the same
+      // authVersion stale-write guard so a query started for this switch
+      // cannot land after a newer auth event and clobber it.
+      setFollowing(new Set());
+
+      const { data: blockedData } = await supabase
+        .from('blocks')
+        .select('blocked_id')
+        .eq('blocker_id', data.user.id);
+
+      if (myVersion !== authVersion.current) {
+        return switchFail('Session changed during switch. Please try again.');
+      }
+
+      if (blockedData) {
+        const blockedIds = blockedData
+          .map(b => b.blocked_id)
+          .filter(id => id && id !== data.user.id);
+        setBlockedUsers(new Set(blockedIds));
+      }
+
       return { success: true };
     } catch (e) {
-      return { success: false, error: e.message };
+      return switchFail(e.message);
     } finally {
       setSwitchingAccount(false);
     }
@@ -494,6 +532,8 @@ export function UserProvider({ children }) {
       availableAccounts,
       switchToAccount,
       switchingAccount,
+      switchError,
+      clearSwitchError: () => setSwitchError(null),
       following,
       setFollowing,
       isFollowing,

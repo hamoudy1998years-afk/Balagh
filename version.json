@@ -1,7 +1,7 @@
 {
-  "latestVersion": "1.7.35",
-  "latestVersionCode": 57,
-  "minRequiredVersion": "1.7.35",
+  "latestVersion": "1.7.36",
+  "latestVersionCode": 58,
+  "minRequiredVersion": "1.7.36",
   "updateUrl": "https://play.google.com/store/apps/details?id=com.bushrann.app",
   "changelog": "Fixed a rare notification crash. Performance improvements."
 }

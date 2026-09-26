@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Animated,
   TouchableWithoutFeedback,
+  ActivityIndicator,
 } from 'react-native';
 import { COLORS } from '../constants/theme';
 import { s, ms } from '../utils/responsive';
@@ -18,6 +19,7 @@ export default function ModernDialog({
   type = 'info', // 'info', 'success', 'error', 'warning', 'confirm'
   buttons = [],
   onDismiss,
+  loading = false,
 }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
@@ -81,16 +83,21 @@ export default function ModernDialog({
       transparent
       visible={shouldRender}
       animationType="none"
-      onRequestClose={onDismiss}
+      onRequestClose={loading ? undefined : onDismiss}
     >
-      <TouchableWithoutFeedback onPress={onDismiss}>
+      <TouchableWithoutFeedback onPress={loading ? undefined : onDismiss}>
         <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
           <TouchableWithoutFeedback>
             <Animated.View style={[styles.container, { transform: [{ scale: scaleAnim }] }]}>
-              <Text style={styles.icon}>{getIcon()}</Text>
+              {loading ? (
+                <ActivityIndicator size="large" color={COLORS.gold ?? '#c9a84c'} style={styles.loadingIndicator} />
+              ) : (
+                <Text style={styles.icon}>{getIcon()}</Text>
+              )}
               <Text style={[styles.title, { color: getTitleColor() }]}>{title}</Text>
               {message ? <Text style={styles.message}>{message}</Text> : null}
-              
+
+              {!loading && (
               <View style={styles.buttonContainer}>
                 {buttons.map((button, index) => (
                   <TouchableOpacity
@@ -122,6 +129,7 @@ export default function ModernDialog({
                   </TouchableOpacity>
                 ))}
               </View>
+              )}
             </Animated.View>
           </TouchableWithoutFeedback>
         </Animated.View>
@@ -153,6 +161,9 @@ const styles = StyleSheet.create({
   },
   icon: {
     fontSize: ms(48),
+    marginBottom: s(16),
+  },
+  loadingIndicator: {
     marginBottom: s(16),
   },
   title: {

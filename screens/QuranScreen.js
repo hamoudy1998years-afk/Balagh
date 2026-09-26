@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   StatusBar,
   AppState,
+  Alert,
   NativeModules,
   NativeEventEmitter,
 } from 'react-native';
@@ -29,7 +30,53 @@ import { COLORS } from '../constants/theme';
 import { isLowEndDevice } from '../utils/deviceInfo';
 import PlaybackModeDialog from '../components/PlaybackModeDialog';
 
-const { ScreenState } = NativeModules;
+const { ScreenState, QuranPlayer } = NativeModules;
+
+// Native Quran player event names (Stage 2). Foreground UI sync only —
+// queue progression is entirely native and never depends on these.
+const NATIVE_EVENTS = {
+  trackChanged: 'QuranPlayer:onTrackChanged',
+  state: 'QuranPlayer:onPlaybackState',
+  error: 'QuranPlayer:onError',
+  ended: 'QuranPlayer:onEnded',
+};
+
+// Best-effort call on the native QuranPlayer bridge.
+function nativeCall(method, ...args) {
+  return new Promise((resolve) => {
+    try {
+      const result = QuranPlayer?.[method]?.(...args);
+      if (result && typeof result.then === 'function') {
+        result.then(resolve).catch(() => resolve(null));
+      } else {
+        resolve(result ?? null);
+      }
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+// Map an authoritative native playback state into the existing
+// quran_resume_position format ({ surahIndex, verseIndex, surahName }).
+// Native surah is 1-based and native verse is 1-based; a Bismillah item
+// carries verse=0 with the TARGET surah identity — it maps to verseIndex 0
+// (start of the surah), exactly like the existing JS Bismillah stop path.
+function nativeStateToResume(st, surahsList) {
+  if (!st || typeof st.surah !== 'number' || st.surah < 1) return null;
+  const surahIndex = st.surah - 1;
+  const surah = surahsList?.[surahIndex];
+  const verseCount = surah?.verses_count ?? 1;
+  const verseIndex =
+    typeof st.verse === 'number' && st.verse >= 1
+      ? Math.min(st.verse - 1, verseCount - 1)
+      : 0;
+  return {
+    surahIndex,
+    verseIndex,
+    surahName: surah?.name_simple ?? `Surah ${st.surah}`,
+  };
+}
 
 const REVELATION_COLORS = {
   Makkah: '#c9a84c',
@@ -81,6 +128,12 @@ export default function QuranScreen({ navigation }) {
   // Set when a run is stopped on purpose (Stop button, unmount, or app-mode
   // background). Used to counter expo-audio's native auto-resume on foreground.
   const intentionallyStoppedRef = useRef(false);
+  // Set while a native QuranPlayer run owns playback (background/lock modes).
+  const nativeRunActiveRef = useRef(false);
+  // Latest native playback state, mirrored for UI/resume sync only.
+  const nativeStateRef = useRef(null);
+  // Stop callback of the currently active run (JS or native).
+  const activeStopRef = useRef(null);
   const surahsRef = useRef([]);
   const isMountedRef = useRef(true);
   // Generation token: every new playback run gets its own token.
@@ -96,6 +149,14 @@ export default function QuranScreen({ navigation }) {
       quranPlayingRef.current = false;
       intentionallyStoppedRef.current = true;
       stopActivePlayer(soundRef);
+
+      if (nativeRunActiveRef.current) {
+        nativeRunActiveRef.current = false;
+        try {
+          QuranPlayer?.stop();
+          QuranPlayer?.release();
+        } catch (_) {}
+      }
 
       try {
         ScreenState?.setQuranPlaybackMode(null);
@@ -222,6 +283,16 @@ export default function QuranScreen({ navigation }) {
 
       let player = null;
 
+      // One-player guarantee: starting the JS player must release any
+      // native Quran playback first.
+      if (nativeRunActiveRef.current) {
+        nativeRunActiveRef.current = false;
+        try {
+          await QuranPlayer.stop();
+          await QuranPlayer.release();
+        } catch (_) {}
+      }
+
       try {
         ScreenState?.setQuranPlaybackMode(mode);
       } catch (_) {}
@@ -249,6 +320,8 @@ export default function QuranScreen({ navigation }) {
           setIsPlayingQuran(false);
         }
       };
+
+      activeStopRef.current = stopThisRun;
 
       try {
         quranPlayingRef.current = true;
@@ -394,6 +467,10 @@ export default function QuranScreen({ navigation }) {
             s === startSurahIndex
               ? startVerseIndex
               : 0;
+
+          // Set when a verse is paused/stopped mid-playback (not natural
+          // completion) — halts the whole run without advancing.
+          let stoppedMidVerse = false;
 
           // Bismillah except Al-Fatihah and At-Tawbah.
           if (
@@ -580,6 +657,32 @@ export default function QuranScreen({ navigation }) {
 
                 break;
               }
+
+              // A mid-verse pause/stop (NOT natural completion)
+              // must not advance to the next verse or surah. Save
+              // the position and halt the run cleanly instead.
+              if (reason !== 'finished') {
+                stoppedMidVerse = true;
+
+                if (isMountedRef.current) {
+                  await AsyncStorage.setItem(
+                    'quran_resume_position',
+                    JSON.stringify({
+                      surahIndex: s,
+                      verseIndex: i,
+                      surahName: surah.name_simple,
+                    })
+                  );
+
+                  setResumePosition({
+                    surahIndex: s,
+                    verseIndex: i,
+                    surahName: surah.name_simple,
+                  });
+                }
+
+                break;
+              }
             } catch (audioError) {
               console.log(
                 'Audio error:',
@@ -591,6 +694,7 @@ export default function QuranScreen({ navigation }) {
           }
 
           if (
+            stoppedMidVerse ||
             !quranPlayingRef.current ||
             myToken !== playTokenRef.current
           ) {
@@ -613,6 +717,7 @@ export default function QuranScreen({ navigation }) {
         // Only the current run may clean up shared audio state.
         if (myToken === playTokenRef.current) {
           quranPlayingRef.current = false;
+          activeStopRef.current = null;
 
           try {
             ScreenState?.setQuranPlaybackMode(null);
@@ -656,6 +761,7 @@ export default function QuranScreen({ navigation }) {
 
         if (myToken === playTokenRef.current) {
           quranPlayingRef.current = false;
+          activeStopRef.current = null;
 
           try {
             ScreenState?.setQuranPlaybackMode(null);
@@ -674,10 +780,304 @@ export default function QuranScreen({ navigation }) {
       }
     }
 
+  /*
+   * BACKGROUND / LOCK SCREEN MODES (native QuranPlayer).
+   *
+   * The native queue (Stage 2) is the playback authority: it advances
+   * verse → verse → surah, injects Bismillah, persists state, and owns
+   * the MediaSession. JS listeners below are for UI/resume sync only and
+   * are never required for playback progression.
+   */
+  async function runNativePlay(startSurahIndex, startVerseIndex, mode) {
+    if (!QuranPlayer) return;
+
+    const myToken = ++playTokenRef.current;
+    const isBackgroundMode = mode === 'background';
+    const isLockMode = mode === 'lock';
+
+    let appStateSubscription = null;
+    let screenStateSubscription = null;
+    let userLeaveSubscription = null;
+    let nativeSubscriptions = [];
+
+    const removeSubscriptions = () => {
+      if (appStateSubscription) {
+        appStateSubscription.remove();
+        appStateSubscription = null;
+      }
+      if (screenStateSubscription) {
+        screenStateSubscription.remove();
+        screenStateSubscription = null;
+      }
+      if (userLeaveSubscription) {
+        userLeaveSubscription.remove();
+        userLeaveSubscription = null;
+      }
+      nativeSubscriptions.forEach((sub) => {
+        try {
+          sub.remove();
+        } catch (_) {}
+      });
+      nativeSubscriptions = [];
+    };
+
+    // Mirror the native playback authority into the existing
+    // quran_resume_position format. Native remains authoritative for
+    // in-verse positionMs; the JS resume stores surah/verse only.
+    const persistResumeFromNative = async () => {
+      const st = await nativeCall('getPlaybackState');
+      if (!st) return;
+      nativeStateRef.current = st;
+      if (st.ended) {
+        await AsyncStorage.removeItem('quran_resume_position');
+        if (isMountedRef.current) setResumePosition(null);
+        return;
+      }
+      const resume = nativeStateToResume(st, surahsRef.current);
+      if (resume) {
+        await AsyncStorage.setItem(
+          'quran_resume_position',
+          JSON.stringify(resume)
+        );
+        if (isMountedRef.current) setResumePosition(resume);
+      }
+    };
+
+    const finishNativeRun = () => {
+      removeSubscriptions();
+      if (myToken === playTokenRef.current) {
+        activeStopRef.current = null;
+        quranPlayingRef.current = false;
+        nativeRunActiveRef.current = false;
+        try {
+          ScreenState?.setQuranPlaybackMode(null);
+        } catch (_) {}
+        if (isMountedRef.current) setIsPlayingQuran(false);
+      }
+    };
+
+    const stopThisRun = () => {
+      if (
+        myToken !== playTokenRef.current ||
+        !quranPlayingRef.current
+      ) {
+        return;
+      }
+
+      intentionallyStoppedRef.current = true;
+      playTokenRef.current += 1;
+      quranPlayingRef.current = false;
+      nativeRunActiveRef.current = false;
+
+      // Pause the native player at the exact item, persist its state,
+      // then release the service/notification.
+      nativeCall('stop').then(() => nativeCall('release'));
+      persistResumeFromNative();
+      removeSubscriptions();
+
+      try {
+        ScreenState?.setQuranPlaybackMode(null);
+      } catch (_) {}
+
+      activeStopRef.current = null;
+      if (isMountedRef.current) setIsPlayingQuran(false);
+    };
+
+    activeStopRef.current = stopThisRun;
+
+    try {
+      quranPlayingRef.current = true;
+      intentionallyStoppedRef.current = false;
+      nativeRunActiveRef.current = true;
+
+      try {
+        ScreenState?.setQuranPlaybackMode(mode);
+      } catch (_) {}
+
+      // One-player guarantee: release the JS/expo-audio player first.
+      stopActivePlayer(soundRef);
+
+      // Flat verse list from the selected surah/verse to 114:6. Native
+      // code only reads items[startIndex] and then extends the window
+      // itself from the verse table (including Bismillah prefixes).
+      const allSurahs = surahsRef.current;
+      const items = [];
+      for (let s = startSurahIndex; s < allSurahs.length; s++) {
+        const firstVerse =
+          s === startSurahIndex ? startVerseIndex + 1 : 1;
+        for (let v = firstVerse; v <= allSurahs[s].verses_count; v++) {
+          items.push(`${allSurahs[s].id}:${v}`);
+        }
+      }
+
+      if (items.length === 0) {
+        finishNativeRun();
+        return;
+      }
+
+      if (isMountedRef.current) setIsPlayingQuran(true);
+
+      // Foreground sync + resume persistence around lifecycle changes.
+      appStateSubscription = AppState.addEventListener(
+        'change',
+        (state) => {
+          if (myToken !== playTokenRef.current) return;
+          if (state === 'active') {
+            if (intentionallyStoppedRef.current) return;
+            // Returning from background/lock screen: adopt the actual
+            // native verse/position and playing state.
+            (async () => {
+              const st = await nativeCall('getPlaybackState');
+              if (
+                myToken !== playTokenRef.current ||
+                !st ||
+                st.ended
+              ) {
+                return;
+              }
+              nativeStateRef.current = st;
+              if (isMountedRef.current) {
+                setIsPlayingQuran(!!st.isPlaying);
+              }
+              await persistResumeFromNative();
+            })();
+          } else {
+            // Backgrounding: persist the authoritative position while JS
+            // is still awake. No polling — native owns progression.
+            persistResumeFromNative();
+          }
+        }
+      );
+
+      if (ScreenState) {
+        const emitter = new NativeEventEmitter(ScreenState);
+
+        // BACKGROUND MODE: physical screen-off stops playback (existing
+        // policy). Native advances on its own while the screen is on.
+        screenStateSubscription = emitter.addListener(
+          'BushrannScreenStateChanged',
+          (isOn) => {
+            if (myToken !== playTokenRef.current) return;
+            if (isBackgroundMode && !isOn) stopThisRun();
+          }
+        );
+
+        // LOCK SCREEN MODE: the user intentionally leaving the app stops
+        // playback; screen-off keeps native playback going.
+        userLeaveSubscription = emitter.addListener(
+          'BushrannUserLeave',
+          () => {
+            if (myToken !== playTokenRef.current) return;
+            if (isLockMode) stopThisRun();
+          }
+        );
+      }
+
+      // Native event listeners — installed once per run, removed in
+      // removeSubscriptions(). All guarded by the run token.
+      if (QuranPlayer) {
+        const emitter = new NativeEventEmitter(QuranPlayer);
+
+        nativeSubscriptions.push(
+          emitter.addListener(NATIVE_EVENTS.trackChanged, (st) => {
+            if (myToken !== playTokenRef.current) return;
+            nativeStateRef.current = {
+              ...nativeStateRef.current,
+              ...st,
+            };
+          })
+        );
+
+        nativeSubscriptions.push(
+          emitter.addListener(NATIVE_EVENTS.state, (st) => {
+            if (myToken !== playTokenRef.current) return;
+            nativeStateRef.current = {
+              ...nativeStateRef.current,
+              ...st,
+            };
+            if (isMountedRef.current && st && !st.ended) {
+              setIsPlayingQuran(!!st.isPlaying);
+            }
+          })
+        );
+
+        // NEVER skip on error: native already paused at the exact verse
+        // and persisted it. Surface the error and offer a retry of the
+        // SAME item via native resume().
+        nativeSubscriptions.push(
+          emitter.addListener(NATIVE_EVENTS.error, (err) => {
+            if (myToken !== playTokenRef.current) return;
+            persistResumeFromNative();
+            if (isMountedRef.current) setIsPlayingQuran(false);
+            Alert.alert(
+              'Playback Error',
+              `Playback paused at ${err?.verseKey ?? 'the current verse'}.\n\n${err?.message ?? 'Unknown playback error'}`,
+              [
+                {
+                  text: 'Stop',
+                  style: 'cancel',
+                  onPress: () => stopThisRun(),
+                },
+                {
+                  text: 'Retry',
+                  onPress: () => {
+                    if (myToken !== playTokenRef.current) return;
+                    nativeCall('resume');
+                    if (isMountedRef.current) {
+                      setIsPlayingQuran(true);
+                    }
+                  },
+                },
+              ]
+            );
+          })
+        );
+
+        // Natural final completion at 114:6.
+        nativeSubscriptions.push(
+          emitter.addListener(NATIVE_EVENTS.ended, () => {
+            if (myToken !== playTokenRef.current) return;
+            (async () => {
+              try {
+                await AsyncStorage.removeItem(
+                  'quran_resume_position'
+                );
+              } catch (_) {}
+              if (isMountedRef.current) setResumePosition(null);
+              finishNativeRun();
+            })();
+          })
+        );
+      }
+
+      // loadQueue starts native playback immediately.
+      const st = await nativeCall(
+        'loadQueue',
+        items,
+        0,
+        0,
+        RECITER_NAME
+      );
+      if (st) nativeStateRef.current = st;
+
+      if (myToken !== playTokenRef.current) return;
+    } catch (e) {
+      console.log('runNativePlay error:', e.message);
+      nativeCall('stop').then(() => nativeCall('release'));
+      persistResumeFromNative();
+      finishNativeRun();
+    }
+  }
+
   function playEntireQuran(startSurahIndex = 0, startVerseIndex = 0) {
     if (surahs.length === 0) return;
 
     if (isPlayingQuran) {
+      // Let the active run stop itself (JS or native) so mode-specific
+      // cleanup — especially native stop/persist/release — happens there.
+      const stopActive = activeStopRef.current;
+      if (stopActive) stopActive();
+
       playTokenRef.current += 1;
       quranPlayingRef.current = false;
       intentionallyStoppedRef.current = true;
@@ -700,7 +1100,11 @@ export default function QuranScreen({ navigation }) {
 
   function handleModeSelect(mode) {
     const { si, vi } = pendingPlayParams;
-    runPlay(si, vi, mode);
+    if (mode === 'app') {
+      runPlay(si, vi, mode);
+    } else {
+      runNativePlay(si, vi, mode);
+    }
   }
 
   const handleSearch = useCallback(

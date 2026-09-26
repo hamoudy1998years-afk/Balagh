@@ -170,7 +170,7 @@ const HUAWEI_STEP_DATA = [
     key: 'batteryOpt',
     title: '3. Battery Optimization',
     instructions: [
-      'Tap "Open Settings" below, then tap "Allow" (or "Disable") in the dialog. That\'s it!',
+      'Tap "Open Settings," then turn off battery optimization for Bushrann. Return here when finished.',
     ],
   },
 ];

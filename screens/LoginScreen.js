@@ -73,7 +73,7 @@ export default function LoginScreen({ navigation }) {
   const eyeAnimRef = useRef(null);
   const passwordInputRef = useRef(null);
 
-  const { refreshUser, setUser } = useUser();
+  const { refreshUser } = useUser();
   const suppressDropdown = useRef(false);
   const silentReAuth = useRef(false);
 
@@ -320,15 +320,10 @@ export default function LoginScreen({ navigation }) {
             }
 
             __DEV__ && console.log('[LOGIN] Session created successfully');
-            if (data?.user) {
-              const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
-              const mergedUser = { ...data.user, ...profile };
-              await userCache.clear();
-              await userCache.set(mergedUser);
-              setUser(mergedUser);
-            }
+            // Profile fetch + cache write are already handled by UserContext's
+            // onAuthStateChange listener (fires on setSession) — don't
+            // duplicate that work here. Navigate as soon as auth succeeded.
             setLoading(false);
-            await new Promise(resolve => setTimeout(resolve, 100));
             navigation.navigate(ROUTES.MAIN);
             return;
           }
@@ -937,13 +932,9 @@ const resolveEmail = async (raw) => {
 
           const data = await loginWithPin(pinAccount, enteredPin);
           __DEV__ && console.log('[PIN] Session created successfully');
-          if (data?.user) {
-            const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
-            const mergedUser = { ...data.user, ...profile };
-            await userCache.clear();
-            await userCache.set(mergedUser);
-            setUser(mergedUser);
-          }
+          // Profile fetch + cache write are already handled by UserContext's
+          // onAuthStateChange listener (fires on setSession) — don't
+          // duplicate that work here.
           setPinModalVisible(false);
           setEnteredPin('');
           setPinError('');

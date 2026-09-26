@@ -33,7 +33,7 @@ export function DownloadProvider({ children }) {
     setSheetState(prev => ({ ...prev, visible: false }));
   }, []);
 
-  const showTikTokShare = useCallback((video, currentUserId) => {
+  const showTikTokShare = useCallback((video, currentUserId, navigation) => {
     // (removed for production)
     setSheetState({
       visible: false,
@@ -41,7 +41,7 @@ export function DownloadProvider({ children }) {
       isOwner: false,
       hasDownloaded: false,
       currentUserId,
-      navigation: null,
+      navigation: navigation || null,
       onPin: null,
       onDelete: null,
       onDownload: null,
