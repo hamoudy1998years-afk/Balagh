@@ -64,6 +64,7 @@
     <label for="password">Password</label>
     <input id="password" type="password" autocomplete="current-password" />
     <button id="signInBtn">Sign in</button>
+    <button id="googleBtn" class="secondary" type="button">Continue with Google</button>
     <div id="loginError" class="errorText"></div>
   </section>
 
@@ -151,6 +152,11 @@
       supabase.auth.getSession().then(function (_ref) {
         if (_ref.data && _ref.data.session) verifyAdmin();
       });
+      // OAuth redirect: supabase-js exchanges the ?code= in the URL
+      // asynchronously and emits SIGNED_IN; run the same admin verification.
+      supabase.auth.onAuthStateChange(function (event) {
+        if (event === 'SIGNED_IN') verifyAdmin();
+      });
     })
     .catch(function () {
       configError = 'Failed to load server configuration';
@@ -174,6 +180,22 @@
     supabase.auth.signOut().then(function () {
       uploaderCard.style.display = 'none';
       loginCard.style.display = '';
+    });
+  });
+
+  // Google OAuth: redirects to Google, then back to /admin-uploader,
+  // where supabase-js restores the session (detectSessionInUrl default).
+  $('googleBtn').addEventListener('click', function () {
+    var errEl = $('loginError');
+    errEl.className = 'errorText';
+    if (configError) { errEl.textContent = configError; errEl.className = 'errorText show'; return; }
+    supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin + '/admin-uploader'
+      }
+    }).then(function (res) {
+      if (res.error) { errEl.textContent = res.error.message; errEl.className = 'errorText show'; }
     });
   });
 
