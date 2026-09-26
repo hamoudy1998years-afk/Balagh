@@ -69,6 +69,20 @@ app.use('/api/video-processing', videoProcessingRoutes);
 // Video deletion/backend routes
 app.use('/api/videos', videoRoutes);
 
+// Admin PC uploader: static page + auth/config API.
+// Serves only the public admin-uploader HTML and its vendored browser
+// libraries (supabase-js, tus-js-client); no secrets are embedded.
+const path = require('path');
+const adminUploaderRoutes = require('./routes/adminUploader');
+app.use('/api/admin-uploader', adminUploaderRoutes);
+app.use(
+  '/admin-uploader-assets',
+  express.static(path.join(__dirname, 'public', 'assets'))
+);
+app.get('/admin-uploader', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin-uploader.html'));
+});
+
 // Android App Links verification for Bushrann.
 //
 // Android fetches this file to verify that this Railway domain

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Bushrann Content Uploader</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #f4f6f8;
+    color: #1c2430;
+  }
+  main { max-width: 560px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #66707d; font-size: 14px; margin-bottom: 24px; }
+  .card {
+    background: #fff; border: 1px solid #dde3ea; border-radius: 12px;
+    padding: 24px; margin-bottom: 16px;
+  }
+  label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+  input[type="email"], input[type="password"], input[type="text"], textarea, select {
+    width: 100%; padding: 10px 12px; border: 1px solid #c6ced8; border-radius: 8px;
+    font-size: 15px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 80px; }
+  .hint { font-size: 12px; color: #7b8593; margin-top: 4px; }
+  button {
+    width: 100%; padding: 12px; border: 0; border-radius: 8px; font-size: 16px;
+    font-weight: 600; cursor: pointer; background: #0d6e4f; color: #fff; margin-top: 18px;
+  }
+  button:disabled { background: #9db3aa; cursor: not-allowed; }
+  button.secondary { background: #e6ebf0; color: #1c2430; }
+  #status {
+    margin-top: 16px; padding: 12px; border-radius: 8px; font-size: 14px;
+    display: none; white-space: pre-wrap;
+  }
+  #status.show { display: block; }
+  #status.info { background: #e8f1fd; color: #1d4ed8; }
+  #status.ok { background: #e6f6ef; color: #0d6e4f; }
+  #status.err { background: #fdeaea; color: #b42318; }
+  #progressWrap { margin-top: 14px; display: none; }
+  #progressWrap.show { display: block; }
+  progress { width: 100%; height: 10px; }
+  #fileName { font-size: 13px; color: #66707d; margin-top: 6px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .charCount { font-size: 12px; color: #7b8593; }
+  .errorText { color: #b42318; font-size: 14px; margin-top: 8px; display: none; }
+  .errorText.show { display: block; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bushrann Content Uploader</h1>
+  <div class="sub">Admin-only curated video upload. Videos go through the normal moderation and processing pipeline.</div>
+
+  <!-- Sign in -->
+  <section id="loginCard" class="card">
+    <label for="email">Bushrann account email</label>
+    <input id="email" type="email" autocomplete="username" />
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" />
+    <button id="signInBtn">Sign in</button>
+    <div id="loginError" class="errorText"></div>
+  </section>
+
+  <!-- Uploader (hidden until admin verified) -->
+  <section id="uploaderCard" class="card" style="display:none">
+    <div class="row">
+      <strong id="whoami"></strong>
+      <button id="signOutBtn" class="secondary" style="width:auto; margin:0; padding:6px 12px; font-size:13px">Sign out</button>
+    </div>
+
+    <label for="videoFile">Video</label>
+    <input id="videoFile" type="file" accept="video/*" />
+    <div class="hint">Maximum 500MB. MP4 (H.264) recommended.</div>
+    <div id="fileName"></div>
+
+    <label for="caption">Caption</label>
+    <textarea id="caption" maxlength="200"></textarea>
+    <div class="row"><span class="hint">Required. Max 200 characters (credit text counts toward the limit).</span><span class="charCount" id="captionCount">0/200</span></div>
+
+    <label for="category">Category</label>
+    <select id="category">
+      <option>Quran</option><option>Hadith</option><option>Reminder</option>
+      <option>Lecture</option><option>Nasheeds</option><option>Dua</option><option>Other</option>
+    </select>
+
+    <label for="credit">Source / Credit <span style="font-weight:400">(optional)</span></label>
+    <input id="credit" type="text" placeholder="e.g. Sheikh Assim Al-Hakeem" />
+
+    <div id="progressWrap">
+      <progress id="progressBar" max="100" value="0"></progress>
+      <div id="fileName2" class="hint"></div>
+    </div>
+
+    <button id="uploadBtn">Upload to Bushrann</button>
+    <div id="status" class="info"></div>
+  </section>
+</main>
+
+<script src="/admin-uploader-assets/supabase-js.js"></script>
+<script src="/admin-uploader-assets/tus.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var CATEGORIES = ['Quran', 'Hadith', 'Reminder', 'Lecture', 'Nasheeds', 'Dua', 'Other'];
+  var MAX_BYTES = 500 * 1024 * 1024;
+  var MAX_CAPTION = 200;
+  var POLL_INTERVAL_MS = 10000;
+  var POLL_MAX_ATTEMPTS = 30; // ~5 minutes, then report background processing
+
+  var supabase = null;      // supabase-js client (created after config load)
+  var configError = null;
+
+  // ---- DOM ----
+  function $(id) { return document.getElementById(id); }
+  var loginCard = $('loginCard'), uploaderCard = $('uploaderCard');
+  var statusEl = $('status'), progressWrap = $('progressWrap'), progressBar = $('progressBar');
+  var uploadBtn = $('uploadBtn');
+
+  function setStatus(kind, text) {
+    statusEl.className = 'show ' + kind;
+    statusEl.textContent = text;
+  }
+  function clearStatus() { statusEl.className = ''; statusEl.textContent = ''; }
+  function setProgress(pct, label) {
+    progressWrap.className = 'show';
+    progressBar.value = pct;
+    $('fileName2').textContent = label;
+  }
+  function hideProgress() { progressWrap.className = ''; }
+
+  // ---- Config ----
+  fetch('/api/admin-uploader/config')
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        configError = res.body.error || 'Failed to load server configuration';
+        setStatus('err', configError);
+        return;
+      }
+      supabase = window.supabase.createClient(res.body.supabaseUrl, res.body.supabaseAnonKey, {
+        auth: { persistSession: true, autoRefreshToken: true }
+      });
+      // Resume a persisted session if present.
+      supabase.auth.getSession().then(function (_ref) {
+        if (_ref.data && _ref.data.session) verifyAdmin();
+      });
+    })
+    .catch(function () {
+      configError = 'Failed to load server configuration';
+      setStatus('err', configError);
+    });
+
+  // ---- Auth ----
+  $('signInBtn').addEventListener('click', function () {
+    var errEl = $('loginError');
+    errEl.className = 'errorText';
+    if (configError) { errEl.textContent = configError; errEl.className = 'errorText show'; return; }
+    var email = $('email').value.trim(), password = $('password').value;
+    if (!email || !password) { errEl.textContent = 'Enter your email and password.'; errEl.className = 'errorText show'; return; }
+    supabase.auth.signInWithPassword({ email: email, password: password }).then(function (res) {
+      if (res.error) { errEl.textContent = res.error.message; errEl.className = 'errorText show'; return; }
+      verifyAdmin();
+    });
+  });
+
+  $('signOutBtn').addEventListener('click', function () {
+    supabase.auth.signOut().then(function () {
+      uploaderCard.style.display = 'none';
+      loginCard.style.display = '';
+    });
+  });
+
+  // Verifies the current session belongs to a row in the `admins` table.
+  function verifyAdmin() {
+    supabase.auth.getSession().then(function (_ref) {
+      var session = _ref.data && _ref.data.session;
+      if (!session) return;
+      return fetch('/api/admin-uploader/me', {
+        headers: { 'Authorization': 'Bearer ' + session.access_token }
+      }).then(function (r) {
+        if (r.ok) {
+          loginCard.style.display = 'none';
+          uploaderCard.style.display = '';
+          $('whoami').textContent = session.user.email || '';
+        } else if (r.status === 403) {
+          var errEl = $('loginError');
+          errEl.textContent = 'This account is not an admin.';
+          errEl.className = 'errorText show';
+          supabase.auth.signOut();
+        } else {
+          setStatus('err', 'Admin verification failed. Try again.');
+        }
+      });
+    });
+  }
+
+  // ---- Helpers mirroring screens/UploadScreen.js ----
+  function sanitize(text) { return text.replace(/<[^>]*>/g, '').trim(); }
+
+  function getFreshToken() {
+    return supabase.auth.getSession().then(function (_ref) {
+      var session = _ref.data && _ref.data.session;
+      if (!session) throw new Error('Not signed in');
+      var expMs = session.expires_at ? session.expires_at * 1000 : 0;
+      if (expMs - Date.now() < 60000) {
+        return supabase.auth.refreshSession().then(function (r2) {
+          if (r2.error || !r2.data.session) throw new Error('Session expired. Sign in again.');
+          return r2.data.session.access_token;
+        });
+      }
+      return session.access_token;
+    });
+  }
+
+  function removeQuietly(bucket, paths) {
+    // Best-effort async cleanup; a rejected remove() must not surface or
+    // override the original upload error.
+    if (!paths || !paths.length) return;
+    supabase.storage.from(bucket).remove(paths).catch(function () { /* best effort, mirrors UploadScreen cleanup */ });
+  }
+
+  // ---- Thumbnail: browser video + canvas at ~1s ----
+  function generateThumbnail(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+
+      function fail(msg) { URL.revokeObjectURL(url); reject(new Error(msg)); }
+
+      video.addEventListener('error', function () { fail('Could not read the video file for thumbnail generation.'); });
+      video.addEventListener('loadedmetadata', function () {
+        if (!isFinite(video.duration) || video.duration <= 0) { fail('Could not determine video duration.'); return; }
+        video.currentTime = Math.min(1, video.duration / 2);
+      });
+      video.addEventListener('seeked', function () {
+        try {
+          var canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          if (!canvas.width || !canvas.height) { fail('Video has no drawable frames.'); return; }
+          canvas.getContext('2d').drawImage(video, 0, 0);
+          canvas.toBlob(function (blob) {
+            URL.revokeObjectURL(url);
+            if (!blob) { reject(new Error('Thumbnail generation failed.')); return; }
+            resolve(blob);
+          }, 'image/jpeg', 0.8);
+        } catch (e) {
+          fail('Thumbnail generation failed: ' + e.message);
+        }
+      });
+
+      video.src = url;
+    });
+  }
+
+  // ---- Caption ----
+  $('caption').addEventListener('input', function () {
+    $('captionCount').textContent = this.value.length + '/' + MAX_CAPTION;
+  });
+
+  $('videoFile').addEventListener('change', function () {
+    $('fileName').textContent = this.files[0]
+      ? this.files[0].name + ' (' + Math.round(this.files[0].size / 1048576) + ' MB)'
+      : '';
+  });
+
+  // ---- Upload ----
+  uploadBtn.addEventListener('click', function () {
+    clearStatus();
+
+    var file = $('videoFile').files[0];
+    var caption = sanitize($('caption').value);
+    var category = $('category').value;
+    var credit = sanitize($('credit').value);
+
+    if (!file) { setStatus('err', 'Choose a video file.'); return; }
+    if (file.size > MAX_BYTES) { setStatus('err', 'Maximum file size is 500MB. Please select a shorter video.'); return; }
+    if (!caption) { setStatus('err', 'Please add a caption.'); return; }
+    if (CATEGORIES.indexOf(category) < 0) { setStatus('err', 'Please choose a category.'); return; }
+
+    // Source/Credit has no DB column in V1; append it to the caption.
+    var finalCaption = credit ? caption + '\n\nSource: ' + credit : caption;
+    if (finalCaption.length > MAX_CAPTION) {
+      setStatus('err', 'Caption plus credit exceeds ' + MAX_CAPTION + ' characters. Shorten the caption or credit.');
+      return;
+    }
+
+    uploadBtn.disabled = true;
+    runUpload(file, finalCaption, category).catch(function (err) {
+      setStatus('err', 'Upload failed: ' + (err && err.message ? err.message : String(err)));
+    }).finally(function () {
+      uploadBtn.disabled = false;
+    });
+  });
+
+  function runUpload(file, finalCaption, category) {
+    var videoPath = null, thumbPath = null, videoCommitted = false;
+
+    return getFreshToken()
+      .then(function () { return supabase.auth.getUser(); })
+      .then(function (_ref) {
+        var user = _ref.data && _ref.data.user;
+        if (!user) throw new Error('Not signed in');
+        return user.id;
+      })
+      .then(function (uid) {
+        var ext = (file.name.split('.').pop() || 'mp4').toLowerCase();
+        if (!/^[a-z0-9]{1,5}$/.test(ext)) ext = 'mp4';
+        videoPath = uid + '/' + Date.now() + '.' + ext;
+        thumbPath = uid + '/' + Date.now() + '.jpg';
+
+        // 1) Thumbnail
+        setStatus('info', 'Generating thumbnail...');
+        return generateThumbnail(file).then(function (thumbBlob) {
+          // 2) Video via TUS (mirrors UploadScreen: bucketName/objectName metadata, fresh token per request)
+          setStatus('info', 'Uploading video...');
+          return uploadVideoTus(file, videoPath).then(function () {
+            // 3) Thumbnail upload
+            setStatus('info', 'Uploading thumbnail...');
+            return supabase.storage.from('thumbnails').upload(thumbPath, thumbBlob, {
+              contentType: 'image/jpeg',
+              upsert: false
+            }).then(function (r) {
+              if (r.error) throw r.error;
+            });
+          });
+        }).then(function () {
+          // 4) DB insert (mirror of UploadScreen payload; moderation status untouched)
+          setStatus('info', 'Saving...');
+          var base = supabase.supabaseUrl + '/storage/v1/object/public';
+          var videoUrl = base + '/videos/' + videoPath;
+          var thumbnailUrl = base + '/thumbnails/' + thumbPath;
+          return supabase.from('videos').insert({
+            user_id: uid,
+            caption: finalCaption,
+            category: category,
+            video_url: videoUrl,
+            original_video_url: videoUrl,
+            processing_status: 'processing',
+            thumbnail_url: thumbnailUrl,
+            is_private: false,
+            views_count: 0,
+            likes_count: 0
+          }).select('id, status').single().then(function (r) {
+            // Commit is confirmed ONLY by a returned row with a valid id.
+            // PGRST116 (no row readable) is treated as failure: unlike the
+            // mobile app, the owner can always SELECT their own row via the
+            // existing "approved OR own" policy, so no row means no commit.
+            if (r.error) throw r.error;
+            if (!r.data || !r.data.id) throw new Error('Insert did not return a video id');
+            videoCommitted = true;
+            return r.data.id;
+          });
+        });
+      })
+      .then(function (videoId) {
+        // From here on the row is committed: storage objects must NOT be deleted on errors.
+        return triggerProcessing(videoId).then(function () {
+          return pollProcessing(videoId);
+        });
+      })
+      .catch(function (err) {
+        // Best-effort cleanup of THIS upload's objects only when the DB insert
+        // did not commit, mirroring UploadScreen semantics.
+        if (!videoCommitted) {
+          if (videoPath) removeQuietly('videos', [videoPath]);
+          if (thumbPath) removeQuietly('thumbnails', [thumbPath]);
+        }
+        throw err;
+      });
+  }
+
+  function uploadVideoTus(file, videoPath) {
+    return getFreshToken().then(function (token) {
+      return new Promise(function (resolve, reject) {
+        var upload = new window.tus.Upload(file, {
+          endpoint: supabase.supabaseUrl + '/storage/v1/upload/resumable',
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          chunkSize: 6 * 1024 * 1024,
+          uploadDataDuringCreation: true,
+          metadata: {
+            bucketName: 'videos',
+            objectName: videoPath,
+            contentType: file.type || 'video/mp4',
+            cacheControl: '3600'
+          },
+          headers: { Authorization: 'Bearer ' + token },
+          onBeforeRequest: function (req) {
+            // Refresh the access token for every chunk request.
+            return getFreshToken().then(function (fresh) {
+              req.setHeader('Authorization', 'Bearer ' + fresh);
+            });
+          },
+          onProgress: function (bytesUploaded, bytesTotal) {
+            if (bytesTotal > 0) {
+              setProgress(Math.round((bytesUploaded / bytesTotal) * 100),
+                'Uploading video... ' + Math.round(bytesUploaded / 1048576) + ' / ' + Math.round(bytesTotal / 1048576) + ' MB');
+            }
+          },
+          onSuccess: function () { hideProgress(); resolve(); },
+          onError: function (err) { hideProgress(); reject(err); }
+        });
+        upload.start();
+      });
+    });
+  }
+
+  function triggerProcessing(videoId) {
+    setStatus('info', 'Processing...');
+    if (!videoId) {
+      // Insert committed but id was not readable (PGRST116) or trigger info missing.
+      setStatus('ok', 'Video saved. Processing will start automatically via the recovery sweeper.');
+      return Promise.resolve(false);
+    }
+    return getFreshToken().then(function (token) {
+      return fetch('/api/video-processing/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ videoId: videoId })
+      }).then(function (r) {
+        if (!r.ok) {
+          // Committed upload is never turned into a failure here; the sweeper recovers.
+          setStatus('info', 'Video saved. Immediate processing trigger failed; the recovery sweeper will process it shortly.');
+          return false;
+        }
+        return true;
+      }).catch(function () {
+        setStatus('info', 'Video saved. Immediate processing trigger failed; the recovery sweeper will process it shortly.');
+        return false;
+      });
+    });
+  }
+
+  function pollProcessing(videoId) {
+    var attempts = 0;
+    return new Promise(function (resolve) {
+      function tick() {
+        attempts += 1;
+        supabase.from('videos').select('processing_status')
+          .eq('id', videoId).maybeSingle()
+          .then(function (r) {
+            var st = r.data && r.data.processing_status;
+            if (st === 'ready') {
+              setStatus('ok', 'Ready — the video is processed and will appear in Bushrann per the normal moderation rules.');
+              return resolve();
+            }
+            if (st === 'failed') {
+              setStatus('err', 'Processing failed on the server. The original upload is preserved; check the Railway logs for this video.');
+              return resolve();
+            }
+            if (attempts >= POLL_MAX_ATTEMPTS) {
+              setStatus('info', 'Processing is taking longer than expected and continues in the background. Check the app later; the recovery sweeper also monitors this video.');
+              return resolve();
+            }
+            setStatus('info', 'Processing... (' + attempts + '/' + POLL_MAX_ATTEMPTS + ' checks)');
+            setTimeout(tick, POLL_INTERVAL_MS);
+          })
+          .catch(function () {
+            // Polling/network errors count as an attempt and never turn a
+            // committed upload into a failure; the outer promise always resolves.
+            if (attempts >= POLL_MAX_ATTEMPTS) {
+              setStatus('info', 'Unable to verify processing status. The video is saved and processing continues in the background; the recovery sweeper also monitors it.');
+              return resolve();
+            }
+            setStatus('info', 'Processing... (status check failed, retrying ' + attempts + '/' + POLL_MAX_ATTEMPTS + ')');
+            setTimeout(tick, POLL_INTERVAL_MS);
+          });
+      }
+      setTimeout(tick, POLL_INTERVAL_MS);
+    });
+  }
+})();
+</script>
+</body>
+</html>
