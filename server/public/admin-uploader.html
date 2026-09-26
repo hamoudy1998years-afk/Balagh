@@ -403,7 +403,7 @@
   }
 
   function uploadVideoTus(file, videoPath) {
-    return getFreshToken().then(function (token) {
+    return getFreshToken().then(function () {
       return new Promise(function (resolve, reject) {
         var upload = new window.tus.Upload(file, {
           endpoint: supabase.supabaseUrl + '/storage/v1/upload/resumable',
@@ -416,9 +416,13 @@
             contentType: file.type || 'video/mp4',
             cacheControl: '3600'
           },
-          headers: { Authorization: 'Bearer ' + token },
+          // Do NOT set Authorization here. XMLHttpRequest combines repeated
+          // setRequestHeader calls into "Bearer <jwt>, Bearer <jwt>", which
+          // Supabase rejects with "Invalid Compact JWS". Authorization is set
+          // exactly once per request in onBeforeRequest, mirroring UploadScreen.
+          headers: { 'x-upsert': 'false' },
           onBeforeRequest: function (req) {
-            // Refresh the access token for every chunk request.
+            // Refresh the access token for every request (including creation).
             return getFreshToken().then(function (fresh) {
               req.setHeader('Authorization', 'Bearer ' + fresh);
             });
