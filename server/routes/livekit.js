@@ -7,6 +7,7 @@ const {
   EgressClient,
   RoomServiceClient,
   EncodedFileType,
+  EgressStatus,
 } = require('livekit-server-sdk');
 
 const supabase = createClient(
@@ -82,6 +83,114 @@ function getRoomServiceClient() {
     process.env.LIVEKIT_API_KEY,
     process.env.LIVEKIT_API_SECRET
   );
+}
+
+// A room-composite egress that has run to completion (or was aborted /
+// failed / limit-reached) can never be stopped again: LiveKit answers
+// stopEgress on such an egress with HTTP 412 (Twirp failed_precondition).
+// Callers must treat these statuses as "already stopped" instead of an
+// error. NOTE: this SDK version names the completed status
+// EGRESS_COMPLETE (there is no EGRESS_ENDED).
+function isEgressTerminal(status) {
+  return (
+    status === EgressStatus.EGRESS_COMPLETE ||
+    status === EgressStatus.EGRESS_FAILED ||
+    status === EgressStatus.EGRESS_ABORTED ||
+    status === EgressStatus.EGRESS_LIMIT_REACHED
+  );
+}
+
+// LiveKit reports "already ended" via Twirp/axios as HTTP 412
+// failed_precondition. Match on the HTTP status (and the Twirp code as a
+// fallback for SDK transport changes) without swallowing unrelated errors.
+function isAlreadyEndedStopError(error) {
+  if (!error) return false;
+
+  if (error.response && error.response.status === 412) {
+    return true;
+  }
+
+  const message = String(error.message || '');
+
+  return (
+    message.includes('status code 412') ||
+    message.includes('failed_precondition')
+  );
+}
+
+// Trusted Storage locator from LiveKit's own egress record.
+function egressFilenameOf(egressInfo) {
+  return (
+    (egressInfo.file &&
+      egressInfo.file.filename) ||
+    (egressInfo.fileResults &&
+      egressInfo.fileResults.length > 0 &&
+      egressInfo.fileResults[
+        egressInfo.fileResults.length - 1
+      ].filename) ||
+    null
+  );
+}
+
+// Start a room-composite MP4 recording for a verified live_streams row.
+// The filename is unique per attempt (stream id + timestamp), so a recovered
+// recording started after a reconnect NEVER overwrites an earlier segment.
+async function startCompositeRecording(roomName, streamRow) {
+  const requiredStorageEnv = [
+    'SUPABASE_S3_KEY_ID',
+    'SUPABASE_S3_SECRET',
+    'SUPABASE_S3_ENDPOINT',
+  ];
+
+  const missingEnv = requiredStorageEnv.filter(
+    key => !process.env[key]
+  );
+
+  if (missingEnv.length > 0) {
+    throw new Error(
+      'Missing Supabase S3 configuration: ' +
+        missingEnv.join(', ')
+    );
+  }
+
+  const egressClient = getEgressClient();
+
+  const filename =
+    `recordings/${streamRow.id}_${Date.now()}.mp4`;
+
+  const fileOutput = {
+    fileType: EncodedFileType.MP4,
+    filepath: filename,
+
+    s3: {
+      accessKey: process.env.SUPABASE_S3_KEY_ID,
+      secret: process.env.SUPABASE_S3_SECRET,
+      region: process.env.SUPABASE_S3_REGION || 'us-east-1',
+      endpoint: process.env.SUPABASE_S3_ENDPOINT,
+      bucket: 'livestreams',
+      forcePathStyle: true,
+    },
+  };
+
+  const info =
+    await egressClient.startRoomCompositeEgress(
+      roomName,
+      {
+        file: fileOutput,
+      }
+    );
+
+  if (!info?.egressId) {
+    throw new Error('LiveKit returned no egressId');
+  }
+
+  console.log(
+    '[EGRESS] Recording started:',
+    info.egressId,
+    filename
+  );
+
+  return { egressId: info.egressId, filename };
 }
 
 // ─── STALE LIVESTREAM / ORPHANED EGRESS SWEEPER ─────────────────
@@ -1009,6 +1118,34 @@ async function sweepReplayRecovery() {
         continue;
       }
 
+      // Merged multi-segment replays: the file is produced by a background
+      // merge that may have died with a Railway restart. The row IS the
+      // durable job — rediscover the segments from LiveKit and rebuild
+      // under this row's exact merged filename. The row stays 'processing'
+      // while rebuilding is impossible; the bounded failure window below
+      // still applies afterwards.
+      if (filename.startsWith('recordings/merged_')) {
+        const rebuilt = await rebuildMergedReplay(
+          candidate
+        );
+
+        if (rebuilt) {
+          console.log(
+            '[RECOVERY] Merged replay rebuilt; finalizing:',
+            candidate.id,
+            filename
+          );
+
+          await finalizeReplay(
+            candidate.id,
+            filename,
+            `recovery-${candidate.id}`
+          );
+        }
+
+        continue;
+      }
+
       // Confirmed missing. Only inside the bounded recovery window the
       // row simply stays pending; past it, declare terminal failure.
       const createdAtMs = Date.parse(
@@ -1089,75 +1226,25 @@ router.post('/egress/start', requireAuth, async (req, res) => {
         .json({ error: 'Not authorized to record this stream' });
     }
 
-    const requiredStorageEnv = [
-      'SUPABASE_S3_KEY_ID',
-      'SUPABASE_S3_SECRET',
-      'SUPABASE_S3_ENDPOINT',
-    ];
-
-    const missingEnv = requiredStorageEnv.filter(
-      key => !process.env[key]
-    );
-
-    if (missingEnv.length > 0) {
-      console.error(
-        '[EGRESS] Missing Supabase S3 configuration:',
-        missingEnv.join(', ')
-      );
-
-      return res
-        .status(500)
-        .json({ error: 'Recording storage is not configured' });
-    }
-
-    const egressClient = getEgressClient();
-
-    const filename =
-      `recordings/${streamRow.id}_${Date.now()}.mp4`;
-
-    const fileOutput = {
-      fileType: EncodedFileType.MP4,
-      filepath: filename,
-
-      s3: {
-        accessKey: process.env.SUPABASE_S3_KEY_ID,
-        secret: process.env.SUPABASE_S3_SECRET,
-        region: process.env.SUPABASE_S3_REGION || 'us-east-1',
-        endpoint: process.env.SUPABASE_S3_ENDPOINT,
-        bucket: 'livestreams',
-        forcePathStyle: true,
-      },
-    };
-
-    const info =
-      await egressClient.startRoomCompositeEgress(
+    try {
+      const started = await startCompositeRecording(
         roomName,
-        {
-          file: fileOutput,
-        }
+        streamRow
       );
 
-    if (!info?.egressId) {
+      return res.json(started);
+    } catch (startError) {
       console.error(
-        '[EGRESS] LiveKit returned no egressId:',
-        info
+        '[EGRESS] Start error:',
+        startError?.response?.data ||
+          startError?.message ||
+          startError
       );
 
       return res
         .status(500)
-        .json({ error: 'Recording did not start' });
+        .json({ error: 'Failed to start recording' });
     }
-
-    console.log(
-      '[EGRESS] Recording started:',
-      info.egressId,
-      filename
-    );
-
-    return res.json({
-      egressId: info.egressId,
-      filename,
-    });
   } catch (error) {
     console.error(
       '[EGRESS] Start error:',
@@ -1171,6 +1258,673 @@ router.post('/egress/start', requireAuth, async (req, res) => {
       .json({ error: 'Failed to start recording' });
   }
 });
+
+// ─── ENSURE ACTIVE RECORDING (post-reconnect recovery) ───────────
+// After a LiveKit reconnect the room may have been torn down and
+// recreated (the old room's composite egress then ends with "Source
+// closed"). The client calls this with its current egressId; the
+// server verifies ownership, re-checks the egress status FROM LIVEKIT
+// (never trusting the client's claim), and:
+//   1. does nothing when that egress (or any active egress for the
+//      room) is still recording, or
+//   2. starts ONE new room-composite recording and returns its id.
+// Every path is safe to call repeatedly and concurrently: LiveKit is
+// the single source of truth for "is something already recording".
+router.post(
+  '/egress/ensure-active',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { roomName, egressId } = req.body || {};
+
+      if (!roomName || typeof roomName !== 'string') {
+        return res
+          .status(400)
+          .json({ error: 'Missing roomName' });
+      }
+
+      const streamRow = await findStreamByRoom(roomName);
+
+      if (!streamRow) {
+        return res
+          .status(404)
+          .json({ error: 'Stream not found' });
+      }
+
+      if (streamRow.user_id !== req.authUserId) {
+        return res
+          .status(403)
+          .json({ error: 'Not authorized' });
+      }
+
+      const egressClient = getEgressClient();
+
+      // 1. The client's current egress may still be recording (the
+      //    room survived the reconnect). Verify against LiveKit.
+      if (egressId && typeof egressId === 'string') {
+        try {
+          const current =
+            await egressClient.listEgress({ egressId });
+
+          const currentInfo =
+            current && current.length > 0
+              ? current[0]
+              : null;
+
+          if (
+            currentInfo &&
+            currentInfo.egressId &&
+            !isEgressTerminal(currentInfo.status)
+          ) {
+            return res.json({
+              egressId: currentInfo.egressId,
+              filename: egressFilenameOf(currentInfo),
+              status: 'active',
+              recovered: false,
+            });
+          }
+        } catch (lookupError) {
+          console.warn(
+            '[EGRESS] Recovery: current egress lookup failed:',
+            lookupError.message
+          );
+
+          return res
+            .status(500)
+            .json({ error: 'Could not verify recording' });
+        }
+      }
+
+      // 2. Another non-terminal egress may already exist for this
+      //    room (e.g. a concurrent recovery attempt won the race).
+      //    Adopt it instead of starting a duplicate.
+      try {
+        const activeForRoom =
+          await egressClient.listEgress({
+            roomName,
+            active: true,
+          });
+
+        const existing =
+          activeForRoom &&
+          activeForRoom.length > 0 &&
+          activeForRoom[0].egressId
+            ? activeForRoom[0]
+            : null;
+
+        if (existing) {
+          console.log(
+            '[EGRESS] Recovery: adopting existing active egress:',
+            existing.egressId
+          );
+
+          return res.json({
+            egressId: existing.egressId,
+            filename: egressFilenameOf(existing),
+            status: 'active',
+            recovered: false,
+          });
+        }
+      } catch (activeLookupError) {
+        console.warn(
+          '[EGRESS] Recovery: active egress lookup failed:',
+          activeLookupError.message
+        );
+
+        return res
+          .status(500)
+          .json({ error: 'Could not verify recording' });
+      }
+
+      // 3. Nothing is recording — start one new segment. The unique
+      //    timestamped filename guarantees the new MP4 never
+      //    overwrites an earlier completed segment.
+      try {
+        const started = await startCompositeRecording(
+          roomName,
+          streamRow
+        );
+
+        console.log(
+          '[EGRESS] Recovery: started new recording after reconnect:',
+          started.egressId
+        );
+
+        return res.json({
+          ...started,
+          status: 'started',
+          recovered: true,
+        });
+      } catch (startError) {
+        console.error(
+          '[EGRESS] Recovery: start failed:',
+          startError?.response?.data ||
+            startError?.message ||
+            startError
+        );
+
+        return res
+          .status(500)
+          .json({ error: 'Failed to restart recording' });
+      }
+    } catch (error) {
+      console.error(
+        '[EGRESS] Recovery error:',
+        error?.message || error
+      );
+
+      return res
+        .status(500)
+        .json({ error: 'Failed to verify recording' });
+    }
+  }
+);
+
+// ─── MULTI-SEGMENT REPLAY MERGE ──────────────────────────────────
+//
+// When a host's LiveKit room is torn down mid-stream and the recording
+// recovers (see /egress/ensure-active), one livestream produces several
+// COMPLETE room-composite MP4 segments in the "livestreams" bucket. At
+// End Stream the segments are discovered FROM LIVEKIT (listEgress by room,
+// sorted by startedAt) and concatenated with FFmpeg stream copy — no
+// re-encoding — into ONE replay. Original segments are NEVER modified or
+// deleted here. Any failure falls back to replaying the newest segment.
+
+function storagePublicUrl(filename) {
+  return (
+    `${process.env.SUPABASE_URL}` +
+    `/storage/v1/object/public/livestreams/${filename}`
+  );
+}
+
+// Poll Supabase Storage until an object is downloadable. LiveKit may still
+// be finalizing/uploading a segment for a while after its egress completes.
+async function waitForStorageFile(
+  url,
+  label,
+  attempts = 30,
+  delayMs = 20000
+) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await fetch(url, {
+        method: 'HEAD',
+      });
+
+      if (response.ok) {
+        console.log(
+          `[MERGE] Segment available after ${i * delayMs}ms:`,
+          label
+        );
+        return;
+      }
+    } catch (e) {
+      // Not ready yet.
+    }
+
+    await new Promise(resolve =>
+      setTimeout(resolve, delayMs)
+    );
+  }
+
+  throw new Error(
+    `Segment never became available: ${label}`
+  );
+}
+
+// Duration in seconds via ffprobe (null when unprobeable).
+async function probeVideoDuration(filePath) {
+  const ffmpeg = require('fluent-ffmpeg');
+
+  ffmpeg.setFfprobePath(
+    require('ffprobe-static').path
+  );
+
+  return new Promise(resolve => {
+    ffmpeg(filePath).ffprobe((error, data) => {
+      if (error) {
+        return resolve(null);
+      }
+
+      const duration = Number(
+        data?.format?.duration
+      );
+
+      resolve(
+        Number.isFinite(duration) && duration > 0
+          ? duration
+          : null
+      );
+    });
+  });
+}
+
+// Stream a remote object to a local file. Never buffers the whole
+// file in memory.
+async function downloadToFile(url, destPath) {
+  const fs = require('fs');
+  const { Readable } = require('stream');
+
+  const response = await fetch(url);
+
+  if (!response.ok || !response.body) {
+    throw new Error(
+      `Download failed with HTTP ${response.status}: ${url}`
+    );
+  }
+
+  await new Promise((resolve, reject) => {
+    const writeStream =
+      fs.createWriteStream(destPath);
+
+    writeStream.on('finish', resolve);
+    writeStream.on('error', reject);
+
+    Readable
+      .fromWeb(response.body)
+      .pipe(writeStream);
+  });
+}
+
+// FFmpeg concat demuxer with stream copy (no re-encode). Safe because all
+// segments come from the same LiveKit room-composite encoding settings.
+function runConcatCopy(listPath, outPath) {
+  const ffmpeg = require('fluent-ffmpeg');
+
+  ffmpeg.setFfmpegPath(
+    require('ffmpeg-static')
+  );
+
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(listPath)
+      .inputOptions(['-f concat', '-safe 0'])
+      .addOption('-c', 'copy')
+      .save(outPath)
+      .on('end', () => resolve())
+      .on('error', (error) => reject(error));
+  });
+}
+
+// Merge chronological segments [{egressId, filename, startedAt}] into one
+// MP4. When targetFilename is provided (the durable restart-recovery path)
+// the merged output is written under that EXACT name; otherwise a new unique
+// name is generated. If the target already exists in Storage — e.g. a
+// previous attempt uploaded it and then Railway died — it is reused as-is
+// (its duration was verified before that upload) instead of merging again.
+// Returns the merged Storage filename, or null when anything fails (callers
+// fall back safely). Only Railway /tmp files are removed; original segments
+// are untouched.
+async function mergeRecordingSegments(
+  streamRowId,
+  segments,
+  targetFilename = null
+) {
+  const fs = require('fs');
+
+  const jobId =
+    `${streamRowId}_${Date.now()}_` +
+    Math.random().toString(36).slice(2, 8);
+
+  const tmpPaths = [];
+
+  const mergedFilename =
+    targetFilename ||
+    `recordings/merged_${streamRowId}_${Date.now()}.mp4`;
+
+  try {
+    try {
+      const existing = await fetch(
+        storagePublicUrl(mergedFilename),
+        { method: 'HEAD' }
+      );
+
+      if (existing.ok) {
+        console.log(
+          '[MERGE] Merged output already exists; reusing:',
+          mergedFilename
+        );
+
+        return mergedFilename;
+      }
+    } catch (reuseCheckError) {
+      // Transient check failure — proceed with a normal merge attempt.
+      console.warn(
+        '[MERGE] Reuse check failed; merging anyway:',
+        reuseCheckError.message
+      );
+    }
+
+    let totalDuration = 0;
+    const concatLines = [];
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const url = storagePublicUrl(
+        segment.filename
+      );
+
+      await waitForStorageFile(
+        url,
+        segment.filename
+      );
+
+      const tmpPath =
+        `/tmp/merge_${jobId}_seg${i}.mp4`;
+      tmpPaths.push(tmpPath);
+
+      await downloadToFile(url, tmpPath);
+
+      const duration =
+        await probeVideoDuration(tmpPath);
+
+      if (duration === null) {
+        throw new Error(
+          `Segment ${i} is not a valid video: ${segment.filename}`
+        );
+      }
+
+      totalDuration += duration;
+
+      concatLines.push(
+        `file '${tmpPath.replace(/'/g, `'\\''`)}'`
+      );
+
+      console.log(
+        `[MERGE] Segment ${i + 1}/${segments.length} ready (${duration}s):`,
+        segment.filename
+      );
+    }
+
+    const listPath = `/tmp/merge_${jobId}.txt`;
+    tmpPaths.push(listPath);
+    fs.writeFileSync(
+      listPath,
+      concatLines.join('\n')
+    );
+
+    const outPath =
+      `/tmp/merge_${jobId}_out.mp4`;
+    tmpPaths.push(outPath);
+
+    await runConcatCopy(listPath, outPath);
+
+    const mergedDuration =
+      await probeVideoDuration(outPath);
+
+    if (mergedDuration === null) {
+      throw new Error(
+        'Merged output is not a valid video'
+      );
+    }
+
+    // Tolerate container/timestamp drift at segment boundaries.
+    const tolerance =
+      Math.max(5, totalDuration * 0.02);
+
+    if (
+      Math.abs(mergedDuration - totalDuration) >
+      tolerance
+    ) {
+      throw new Error(
+        `Merged duration ${mergedDuration}s differs ` +
+          `from segment total ${totalDuration}s ` +
+          `beyond tolerance ${tolerance.toFixed(1)}s`
+      );
+    }
+
+    // Stream from disk — never load the MP4 into memory. upsert:true so a
+    // retried merge after a crash can replace its own partial artifact;
+    // original segments are never the upload target here.
+    const { error: uploadError } =
+      await supabase.storage
+        .from('livestreams')
+        .upload(
+          mergedFilename,
+          fs.createReadStream(outPath),
+          {
+            contentType: 'video/mp4',
+            upsert: true,
+          }
+        );
+
+    if (uploadError) {
+      throw new Error(
+        `Merged upload failed: ${uploadError.message}`
+      );
+    }
+
+    // Verify the uploaded object exists before letting callers publish it.
+    const verifyResponse = await fetch(
+      storagePublicUrl(mergedFilename),
+      { method: 'HEAD' }
+    );
+
+    if (!verifyResponse.ok) {
+      throw new Error(
+        `Merged object missing after upload: ${mergedFilename}`
+      );
+    }
+
+    console.log(
+      '[MERGE] Merged replay ready:',
+      mergedFilename,
+      `(${mergedDuration}s from ${segments.length} segments)`
+    );
+
+    return mergedFilename;
+  } catch (error) {
+    console.error(
+      '[MERGE] Failed:',
+      error?.message || error
+    );
+
+    return null;
+  } finally {
+    for (const tmpPath of tmpPaths) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch (e) {}
+    }
+  }
+}
+
+// Background continuation for the multi-segment End Stream path: merge,
+// then create the single replay row and hand off to the existing
+// processRecording/finalizeReplay pipeline (which is restart-resilient and
+// single-winner). On merge failure, falls back to the newest segment so the
+// Background continuation for the multi-segment End Stream path. The
+// replay row is created synchronously by /egress/stop BEFORE this runs so
+// the job survives a Railway restart (the row is the durable job record).
+// Merges into the row's exact merged filename; on merge failure, retargets
+// the still-'processing' row at the newest segment so the host's replay is
+// never lost entirely. Original segments are never touched.
+async function processMultiSegmentReplay(
+  recordId,
+  streamRow,
+  segments,
+  stoppedEgressId,
+  mergedTargetFilename
+) {
+  try {
+    const mergedFilename =
+      await mergeRecordingSegments(
+        streamRow.id,
+        segments,
+        mergedTargetFilename
+      );
+
+    if (mergedFilename) {
+      // The MP4 is already in Supabase Storage. processRecording waits for
+      // it, creates the thumbnail, and publishes the replay metadata.
+      processRecording(
+        recordId,
+        mergedFilename,
+        stoppedEgressId
+      );
+      return;
+    }
+
+    // Merge failed — fall back to the newest complete segment as the replay.
+    const newestSegment =
+      segments[segments.length - 1];
+
+    if (!newestSegment?.filename) {
+      console.error(
+        '[MERGE] No usable recording for replay; nothing was deleted, manual recovery possible'
+      );
+      return;
+    }
+
+    console.warn(
+      '[MERGE] Falling back to newest segment as replay:',
+      newestSegment.filename
+    );
+
+    // Retarget only while the row is still unpublished ('processing').
+    const { error: retargetError } =
+      await supabase
+        .from('livestreams')
+        .update({
+          recording_filename:
+            newestSegment.filename,
+        })
+        .eq('id', recordId)
+        .eq('video_url', 'processing');
+
+    if (retargetError) {
+      console.error(
+        '[MERGE] Fallback retarget failed:',
+        retargetError.message
+      );
+      return;
+    }
+
+    processRecording(
+      recordId,
+      newestSegment.filename,
+      stoppedEgressId
+    );
+  } catch (error) {
+    console.error(
+      '[MERGE] Replay processing error:',
+      error?.message || error
+    );
+  }
+}
+
+// ─── RESTART RECOVERY FOR MERGED REPLAYS ─────────────────────────
+//
+// The merged filename embeds the live_streams id
+// (recordings/merged_<streamId>_<ts>.mp4) and every original segment is
+// named recordings/<streamId>_<ts>.mp4, so after a Railway restart the
+// segment list can be rediscovered FROM LIVEKIT alone — even though the
+// live_streams row is long deleted — by filename prefix. This powers the
+// sweeper branch that rebuilds a merged replay whose file is still missing.
+
+// In-flight rebuilds, so a slow merge is never started twice concurrently
+// (in-process; the unique target filename makes retries idempotent anyway).
+const mergeRebuildInProgress = new Set();
+
+async function rediscoverSegmentsForStream(
+  streamRowId
+) {
+  const egressClient = getEgressClient();
+
+  const allEgresses =
+    await egressClient.listEgress();
+
+  const prefix = `recordings/${streamRowId}_`;
+
+  const segmentsById = new Map();
+
+  for (const item of allEgresses || []) {
+    if (!item || !item.egressId) {
+      continue;
+    }
+
+    if (item.status !== EgressStatus.EGRESS_COMPLETE) {
+      continue;
+    }
+
+    const filename = egressFilenameOf(item);
+
+    // Prefix match keeps the original segments; merged_ files never match.
+    if (!filename || !filename.startsWith(prefix)) {
+      continue;
+    }
+
+    segmentsById.set(item.egressId, {
+      egressId: item.egressId,
+      filename,
+      startedAt:
+        typeof item.startedAt === 'number'
+          ? item.startedAt
+          : 0,
+    });
+  }
+
+  return [...segmentsById.values()].sort(
+    (a, b) => a.startedAt - b.startedAt
+  );
+}
+
+// Returns true when the merged file for this row now exists (reused or
+// rebuilt), false when rebuilding is not possible yet (sweeper retries).
+async function rebuildMergedReplay(candidate) {
+  const filename = candidate?.recording_filename;
+
+  const match =
+    filename &&
+    filename.match(
+      /^recordings\/merged_(.+)_\d{10,}\.mp4$/
+    );
+
+  if (!match || !match[1]) {
+    return false;
+  }
+
+  const streamRowId = match[1];
+
+  if (mergeRebuildInProgress.has(candidate.id)) {
+    return false;
+  }
+
+  mergeRebuildInProgress.add(candidate.id);
+
+  try {
+    const segments =
+      await rediscoverSegmentsForStream(
+        streamRowId
+      );
+
+    if (!segments || segments.length === 0) {
+      console.warn(
+        '[RECOVERY] No segments rediscovered yet for merged replay:',
+        candidate.id
+      );
+      return false;
+    }
+
+    const merged = await mergeRecordingSegments(
+      streamRowId,
+      segments,
+      filename
+    );
+
+    return merged !== null;
+  } catch (error) {
+    console.warn(
+      '[RECOVERY] Merged replay rebuild failed:',
+      candidate.id,
+      error.message
+    );
+
+    return false;
+  } finally {
+    mergeRebuildInProgress.delete(candidate.id);
+  }
+}
 
 // ─── STOP EGRESS AND SAVE REPLAY ─────────────────────────────────
 router.post('/egress/stop', requireAuth, async (req, res) => {
@@ -1234,17 +1988,38 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
     }
 
     // Trusted file locator from LiveKit's own egress record.
-    const trustedFilename =
-      (egressInfo.file &&
-        egressInfo.file.filename) ||
-      (egressInfo.fileResults &&
-        egressInfo.fileResults.length > 0 &&
-        egressInfo.fileResults[
-          egressInfo.fileResults.length - 1
-        ].filename) ||
-      null;
+    const trustedFilename = egressFilenameOf(egressInfo);
 
-    await egressClient.stopEgress(egressId);
+    // An egress that already reached a terminal status (e.g. its room was
+    // closed by LiveKit — "Source closed" — during a host reconnect) can no
+    // longer be stopped: LiveKit answers with HTTP 412. Treat that as
+    // "already stopped" and continue the replay path; only genuinely active
+    // egresses are stopped here. EGRESS_ENDING is intentionally NOT
+    // terminal: finalization may still need the stop request.
+    if (!isEgressTerminal(egressInfo.status)) {
+      try {
+        await egressClient.stopEgress(egressId);
+      } catch (stopError) {
+        // Race window: the egress may have ended between the status check
+        // above and this stop request. Only that specific LiveKit 412 is
+        // tolerated; every other error is a real failure.
+        if (!isAlreadyEndedStopError(stopError)) {
+          throw stopError;
+        }
+
+        console.log(
+          '[EGRESS] Egress already ended before stop (412 race); continuing:',
+          egressId
+        );
+      }
+    } else {
+      console.log(
+        '[EGRESS] Egress already in terminal status; skipping stop:',
+        egressId,
+        'status:',
+        egressInfo.status
+      );
+    }
 
     console.log('[EGRESS] Stopped:', egressId);
 
@@ -1268,6 +2043,141 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           '[EGRESS CLEANUP] Recording has no replay and no trusted filename; nothing can be safely removed'
         );
       }
+
+      return res.json({ success: true });
+    }
+
+    // Multi-segment detection: when the room died mid-stream and recording
+    // recovered, LiveKit holds several COMPLETE egresses for this room —
+    // that is the authoritative, chronologically ordered segment ledger.
+    // A single segment keeps the existing simple path (no FFmpeg merge).
+    let multiSegments = null;
+
+    try {
+      const roomEgresses =
+        await egressClient.listEgress({
+          roomName: actualRoomName,
+        });
+
+      const segmentsById = new Map();
+
+      for (const item of roomEgresses || []) {
+        if (!item || !item.egressId) {
+          continue;
+        }
+
+        // Only fully completed recordings with a real uploaded file are
+        // valid merge inputs.
+        if (item.status !== EgressStatus.EGRESS_COMPLETE) {
+          continue;
+        }
+
+        const segmentFilename =
+          egressFilenameOf(item);
+
+        if (!segmentFilename) {
+          continue;
+        }
+
+        segmentsById.set(item.egressId, {
+          egressId: item.egressId,
+          filename: segmentFilename,
+          startedAt:
+            typeof item.startedAt === 'number'
+              ? item.startedAt
+              : 0,
+        });
+      }
+
+      // The egress stopped just now may still be ENDING (not yet COMPLETE)
+      // in this listing. It IS the newest segment — include it from the
+      // trusted pre-stop record so it is never dropped from the merge.
+      if (
+        !segmentsById.has(egressId) &&
+        trustedFilename
+      ) {
+        segmentsById.set(egressId, {
+          egressId,
+          filename: trustedFilename,
+          startedAt:
+            typeof egressInfo.startedAt ===
+            'number'
+              ? egressInfo.startedAt
+              : Number.MAX_SAFE_INTEGER,
+        });
+      }
+
+      const orderedSegments = [
+        ...segmentsById.values(),
+      ].sort((a, b) => a.startedAt - b.startedAt);
+
+      if (orderedSegments.length > 1) {
+        multiSegments = orderedSegments;
+      }
+    } catch (discoveryError) {
+      // Discovery failure must never break the normal end flow.
+      console.warn(
+        '[MERGE] Segment discovery failed; using single-segment path:',
+        discoveryError.message
+      );
+    }
+
+    if (multiSegments) {
+      console.log(
+        '[MERGE] Multiple recording segments detected:',
+        multiSegments.length,
+        '— merging in background'
+      );
+
+      // Create the durable replay row NOW (before merging) so the job
+      // survives a Railway restart: video_url='processing' +
+      // recording_filename=<merged target> is exactly the contract
+      // sweepReplayRecovery already resumes. The merged filename embeds
+      // streamRow.id so the segments can be rediscovered from LiveKit
+      // after a restart even though the live_streams row is deleted.
+      const mergedTargetFilename =
+        `recordings/merged_${streamRow.id}_${Date.now()}.mp4`;
+
+      const {
+        data: mergedRecord,
+        error: mergedDbError,
+      } = await supabase
+        .from('livestreams')
+        .insert({
+          user_id: streamRow.user_id,
+          video_url: 'processing',
+          recording_filename:
+            mergedTargetFilename,
+          thumbnail_url:
+            streamRow.thumbnail_url || null,
+          title:
+            streamRow.title || 'Live Stream',
+          is_public: true,
+        })
+        .select()
+        .single();
+
+      if (mergedDbError || !mergedRecord) {
+        // Without the durable row there is nothing for the recovery
+        // sweeper to resume. The stream still ends successfully; the
+        // original segments remain safe in Storage.
+        console.error(
+          '[MERGE] Replay row creation failed; merge aborted (segments preserved):',
+          mergedDbError?.message
+        );
+
+        return res.json({ success: true });
+      }
+
+      // Background: merging large MP4s can exceed any HTTP timeout, and a
+      // merge failure must never prevent the host from ending the stream.
+      processMultiSegmentReplay(
+        mergedRecord.id,
+        streamRow,
+        multiSegments,
+        egressId,
+        mergedTargetFilename
+      );
 
       return res.json({ success: true });
     }
