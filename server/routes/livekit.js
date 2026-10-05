@@ -7,7 +7,6 @@ const {
   EgressClient,
   RoomServiceClient,
   EncodedFileType,
-  EgressStatus,
 } = require('livekit-server-sdk');
 
 const supabase = createClient(
@@ -89,14 +88,28 @@ function getRoomServiceClient() {
 // failed / limit-reached) can never be stopped again: LiveKit answers
 // stopEgress on such an egress with HTTP 412 (Twirp failed_precondition).
 // Callers must treat these statuses as "already stopped" instead of an
-// error. NOTE: this SDK version names the completed status
-// EGRESS_COMPLETE (there is no EGRESS_ENDED).
+// error.
+//
+// The status VALUES are referenced NUMERICALLY on purpose. The installed
+// livekit-server-sdk (v1.2.7) exposes EgressStatus only as a lazily
+// initialized namespace getter, which can be undefined at require() time —
+// observed on Railway as "Cannot read properties of undefined (reading
+// 'EGRESS_COMPLETE')". Values below are the SDK's own proto enum:
+//   3 = EGRESS_COMPLETE  4 = EGRESS_FAILED
+//   5 = EGRESS_ABORTED   6 = EGRESS_LIMIT_REACHED
+const EGRESS_STATUS_COMPLETE = 3;
+
+const EGRESS_STATUS_TERMINAL = new Set([
+  EGRESS_STATUS_COMPLETE,
+  4, // EGRESS_FAILED
+  5, // EGRESS_ABORTED
+  6, // EGRESS_LIMIT_REACHED
+]);
+
 function isEgressTerminal(status) {
   return (
-    status === EgressStatus.EGRESS_COMPLETE ||
-    status === EgressStatus.EGRESS_FAILED ||
-    status === EgressStatus.EGRESS_ABORTED ||
-    status === EgressStatus.EGRESS_LIMIT_REACHED
+    typeof status === 'number' &&
+    EGRESS_STATUS_TERMINAL.has(status)
   );
 }
 
@@ -1843,7 +1856,7 @@ async function rediscoverSegmentsForStream(
       continue;
     }
 
-    if (item.status !== EgressStatus.EGRESS_COMPLETE) {
+    if (item.status !== EGRESS_STATUS_COMPLETE) {
       continue;
     }
 
@@ -2068,7 +2081,7 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
 
         // Only fully completed recordings with a real uploaded file are
         // valid merge inputs.
-        if (item.status !== EgressStatus.EGRESS_COMPLETE) {
+        if (item.status !== EGRESS_STATUS_COMPLETE) {
           continue;
         }
 
