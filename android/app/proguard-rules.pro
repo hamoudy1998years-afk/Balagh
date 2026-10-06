@@ -12,3 +12,7 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# Expo SDK 55 compatibility — unused legacy/native code paths
+-dontwarn expo.modules.core.interfaces.services.KeepAwakeManager
+-dontwarn expo.modules.kotlin.RuntimeContext

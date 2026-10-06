@@ -245,11 +245,16 @@ export default function ProfileScreen({ route, navigation }) {
 
   // Track timeouts for cleanup
   const timeoutsRef = useRef([]);
+  // Realtime subscription + debounce for livestreams replay updates
+  // (processing → ready transition) while this profile is focused.
+  const livestreamRtChannelRef = useRef(null);
+  const livestreamRtDebounceRef = useRef(null);
 
   // Check for cached user when globalUser is null (offline scenario)
   const [cachedUser, setCachedUser] = useState(null);
   const [isOffline, setIsOffline] = useState(false);
   const [deleteModal, setDeleteModal] = useState({ visible: false, video: null });
+  const [deletingVideoId, setDeletingVideoId] = useState(null);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [loadingVideo, setLoadingVideo] = useState(false);
   const [dialog, setDialog] = useState({ 
@@ -279,6 +284,55 @@ export default function ProfileScreen({ route, navigation }) {
       const viewingId = targetUserId ?? user?.id;
       if (viewingId && !isOffline) {
         loadLivestreams(viewingId);
+
+        // Realtime: when a replay row for this profile is inserted or
+        // updated (video_url processing → ready), debounce-refetch instead
+        // of waiting for the short poll burst below. loadLivestreams keeps
+        // its existing stale-profile guard.
+        const handleLivestreamRtEvent = (payload) => {
+          console.log(
+            '[ProfileScreen] livestreams realtime event:',
+            payload?.eventType,
+            payload?.new?.id
+          );
+          if (livestreamRtDebounceRef.current) {
+            clearTimeout(livestreamRtDebounceRef.current);
+          }
+          livestreamRtDebounceRef.current = setTimeout(() => {
+            livestreamRtDebounceRef.current = null;
+            loadLivestreams(viewingId);
+          }, 400);
+        };
+
+        if (livestreamRtChannelRef.current) {
+          supabase.removeChannel(livestreamRtChannelRef.current);
+          livestreamRtChannelRef.current = null;
+        }
+
+        livestreamRtChannelRef.current = supabase
+          .channel(`profile_livestreams_${viewingId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'livestreams',
+              filter: `user_id=eq.${viewingId}`,
+            },
+            handleLivestreamRtEvent
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'livestreams',
+              filter: `user_id=eq.${viewingId}`,
+            },
+            handleLivestreamRtEvent
+          )
+          .subscribe();
+
         // Poll a few times to catch processing → ready transition
         // Clear any existing timeouts first
         timeoutsRef.current.forEach(clearTimeout);
@@ -325,6 +379,15 @@ export default function ProfileScreen({ route, navigation }) {
         // Clear all livestream polling timeouts
         timeoutsRef.current.forEach(clearTimeout);
         timeoutsRef.current = [];
+        // Tear down the livestreams realtime subscription + debounce
+        if (livestreamRtDebounceRef.current) {
+          clearTimeout(livestreamRtDebounceRef.current);
+          livestreamRtDebounceRef.current = null;
+        }
+        if (livestreamRtChannelRef.current) {
+          supabase.removeChannel(livestreamRtChannelRef.current);
+          livestreamRtChannelRef.current = null;
+        }
       };
     }, [targetUserId, globalUser?.id, cachedUser?.id])
   );
@@ -757,6 +820,8 @@ export default function ProfileScreen({ route, navigation }) {
   async function handleDeleteVideo(video) {
     const skipAlert = await AsyncStorage.getItem('skip_delete_alert');
     if (skipAlert === 'true') {
+      if (deletingVideoId) return;
+      setDeletingVideoId(video.id);
       try {
         const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
         console.log('[DELETE] fast path - table:', table, 'video id:', video.id);
@@ -782,6 +847,8 @@ export default function ProfileScreen({ route, navigation }) {
       } catch (e) {
         console.log('[DELETE] fast path - CATCH ERROR:', e);
         setDialog({ visible: true, title: 'Error', message: 'Could not delete video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+      } finally {
+        setDeletingVideoId(null);
       }
     } else {
       setDontShowAgain(false);
@@ -792,7 +859,8 @@ export default function ProfileScreen({ route, navigation }) {
   async function confirmDelete() {
     const { video } = deleteModal;
     console.log('[DELETE] confirmDelete called, video:', video?.id);
-    setDeleteModal({ visible: false, video: null });
+    if (!video || deletingVideoId) return;
+    setDeletingVideoId(video.id);
     try {
       const table = livestreamIdsRef.current.has(video.id) ? 'livestreams' : 'videos';
       if (table === 'videos') {
@@ -807,6 +875,7 @@ export default function ProfileScreen({ route, navigation }) {
       dispatchVideo({ type: 'REMOVE_VIDEO', id: video.id });
       console.log('[DELETE] dontShowAgain:', dontShowAgain);
       if (dontShowAgain) await AsyncStorage.setItem('skip_delete_alert', 'true');
+      setDeleteModal({ visible: false, video: null });
       setTimeout(() => {
         console.log('[DELETE] firing toast now');
         dispatchUI({ type: 'SET_TOAST', toast: { message: 'Done', type: 'success' } });
@@ -815,6 +884,8 @@ export default function ProfileScreen({ route, navigation }) {
     } catch (e) {
       console.log('[DELETE] catch error:', e);
       setDialog({ visible: true, title: 'Error', message: 'Could not delete video. Please try again.', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+    } finally {
+      setDeletingVideoId(null);
     }
   }
 
@@ -1539,13 +1610,13 @@ export default function ProfileScreen({ route, navigation }) {
         </Pressable>
       </Modal>
 
-        <Modal visible={deleteModal.visible} transparent animationType="fade" onRequestClose={() => setDeleteModal({ visible: false, video: null })}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setDeleteModal({ visible: false, video: null })} />
+        <Modal visible={deleteModal.visible} transparent animationType="fade" onRequestClose={() => { if (!deletingVideoId) setDeleteModal({ visible: false, video: null }); }}>
+          <Pressable style={styles.modalBackdrop} onPress={() => { if (!deletingVideoId) setDeleteModal({ visible: false, video: null }); }} />
           <View style={styles.deleteModalBox}>
             <Text style={styles.deleteModalTitle}>Delete Video</Text>
             <Text style={styles.deleteModalMsg}>Are you sure? This cannot be undone.</Text>
 
-            <TouchableOpacity style={styles.deleteCheckRow} onPress={() => setDontShowAgain(p => !p)} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.deleteCheckRow} onPress={() => { if (!deletingVideoId) setDontShowAgain(p => !p); }} activeOpacity={0.7} disabled={!!deletingVideoId}>
               <View style={[styles.deleteCheckBox, dontShowAgain && styles.deleteCheckBoxChecked]}>
                 {dontShowAgain && <Text style={styles.deleteCheckMark}>✓</Text>}
               </View>
@@ -1553,12 +1624,30 @@ export default function ProfileScreen({ route, navigation }) {
             </TouchableOpacity>
 
             <View style={styles.deleteModalButtons}>
-              <TouchableOpacity style={styles.deleteCancelBtn} onPress={() => setDeleteModal({ visible: false, video: null })}>
+              <TouchableOpacity style={styles.deleteCancelBtn} onPress={() => { if (!deletingVideoId) setDeleteModal({ visible: false, video: null }); }} disabled={!!deletingVideoId}>
                 <Text style={styles.deleteCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmDelete}>
-                <Text style={styles.deleteConfirmText}>Delete</Text>
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmDelete} disabled={!!deletingVideoId}>
+                {deletingVideoId ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.deleteConfirmText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.deleteConfirmText}>Delete</Text>
+                )}
               </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={!!deletingVideoId && !deleteModal.visible} transparent animationType="fade">
+          <View style={styles.modalBackdrop}>
+            <View style={styles.deleteModalBox}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+                <ActivityIndicator size="small" color="#111" />
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#111' }}>Deleting...</Text>
+              </View>
             </View>
           </View>
         </Modal>

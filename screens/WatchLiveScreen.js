@@ -18,8 +18,10 @@ import AnimatedButton from './AnimatedButton';
 import { useViewerTracking } from '../hooks/useViewerTracking';
 import { useViewerCount } from '../hooks/useViewerCount';
 import { COLORS } from '../constants/theme';
+import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 import { fetchWithTimeout } from '../utils/apiClient';
+import { useKeepAwake } from 'expo-keep-awake';
 
 const { width, height } = Dimensions.get('window');
 const TOKEN_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
@@ -47,6 +49,10 @@ async function getAccessToken() {
 }
 
 export default function WatchLiveScreen({ navigation, route }) {
+  // Keep the device screen awake while this livestream screen is mounted;
+  // useKeepAwake releases automatically on unmount.
+  useKeepAwake();
+
   const insets = useSafeAreaInsets();
   const { stream } = route.params ?? {};
 
@@ -145,7 +151,28 @@ export default function WatchLiveScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!joining && !hostJoined && !hostTimeoutReached && !streamEnded) {
-      hostWaitTimeoutRef.current = setTimeout(() => {
+      hostWaitTimeoutRef.current = setTimeout(async () => {
+        // The 30s no-host grace period has elapsed. Before showing the
+        // "Connection Timed Out" UI, verify the stream's DB state once: the
+        // host commits the live_streams DELETE before disconnecting, so a
+        // missing/ended row here means an intentional End Stream whose
+        // realtime event was missed — show "Stream has ended" instead.
+        // A still-live row (temporary host/network loss) or a failed query
+        // (unknown state) falls through to the existing timeout UI.
+        try {
+          const { data, error } = await supabase
+            .from('live_streams')
+            .select('is_live')
+            .eq('id', stream.id)
+            .maybeSingle();
+          if (isCleaningUp.current) return;
+          if (!error && (!data || data.is_live !== true)) {
+            setStreamEnded(true);
+            return;
+          }
+        } catch (e) {
+          if (isCleaningUp.current) return;
+        }
         setHostTimeoutReached(true);
       }, HOST_TIMEOUT_MS);
     }
@@ -169,12 +196,16 @@ export default function WatchLiveScreen({ navigation, route }) {
     const isStale = () => setupIdRef.current !== setupId || isCleaningUp.current;
 
     if (!currentUser) {
+      setJoining(false);
       setDialog({
         visible: true,
-        title: 'Error',
-        message: 'Please login to watch streams',
-        type: 'error',
-        buttons: [{ text: 'OK', onPress: () => { setDialog(d => ({ ...d, visible: false })); navigation.goBack(); } }]
+        title: 'Join Bushrann',
+        message: 'Login or create an account to interact with content.',
+        type: 'info',
+        buttons: [
+          { text: 'Cancel', style: 'cancel', onPress: () => navigation.goBack() },
+          { text: 'Login', onPress: () => navigation.navigate(ROUTES.LOGIN) },
+        ]
       });
       return;
     }
@@ -199,7 +230,20 @@ export default function WatchLiveScreen({ navigation, route }) {
       const accessToken = await getAccessToken();
       if (isStale()) return;
       if (!accessToken) {
-        throw new Error('No auth session');
+        // Stale cached user but no live session — prompt login instead of
+        // attempting a token request that would 401.
+        setJoining(false);
+        setDialog({
+          visible: true,
+          title: 'Join Bushrann',
+          message: 'Login or create an account to interact with content.',
+          type: 'info',
+          buttons: [
+            { text: 'Cancel', style: 'cancel', onPress: () => navigation.goBack() },
+            { text: 'Login', onPress: () => navigation.navigate(ROUTES.LOGIN) },
+          ]
+        });
+        return;
       }
       const response = await fetchWithTimeout(`${TOKEN_SERVER_URL}/api/livekit/token`, {
         method: 'POST',

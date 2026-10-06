@@ -1,4 +1,4 @@
-﻿import * as Notifications from 'expo-notifications';
+import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
@@ -227,8 +227,12 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
         const savedAdhanStyle = await AsyncStorage.getItem('adhanStyle');
         const styleIndex = savedAdhanStyle ? parseInt(savedAdhanStyle) : 0;
 
-        // Per-day timings — each future date gets its own prayer times
-        const dailyTimings = await buildDailyTimings(timings, 14);
+        // Per-day timings — each future date gets its own prayer times.
+        // 31 days (today + next 30) so the window spans a month boundary;
+        // buildDailyTimings resolves each target date via the monthly cache
+        // and fetches the next month's timetable when the target lands there.
+        const SCHEDULE_WINDOW_DAYS = 31;
+        const dailyTimings = await buildDailyTimings(timings, SCHEDULE_WINDOW_DAYS);
 
         // Persist per-date timings (keyed by YYYY-MM-DD) so AdhanBootReceiver
         // restores each date's own times after reboot instead of replaying
@@ -242,7 +246,7 @@ export async function schedulePrayerNotifications(timings, withSound = true) {
         const notifsEnabled = notifsEnabledRaw !== 'false';
         AdhanModule.savePrayerData(timingsJson, prefsJson, styleIndex, notifsEnabled);
 
-        for (let day = 0; day < 14; day++) {
+        for (let day = 0; day < SCHEDULE_WINDOW_DAYS; day++) {
           const dayTimings = dailyTimings[day];
           if (!dayTimings) continue; // that date's timetable unavailable — skip it
           for (const prayer of PRAYERS) {

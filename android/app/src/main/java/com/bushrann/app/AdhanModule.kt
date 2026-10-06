@@ -40,27 +40,16 @@ class AdhanModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaM
 
     private val adhanPrefs = AdhanPreferences(reactApplicationContext)
 
+    init {
+        AdhanDiagnostics.init(reactApplicationContext)
+    }
+
 override fun getName() = "AdhanModule"
 
     @ReactMethod
     fun scheduleAdhan(prayer: String, hours: Int, minutes: Int, dayOffset: Int, styleIndex: Int) {
         val context = reactApplicationContext
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        
-        val intent = Intent(context, AdhanAlarmReceiver::class.java).apply {
-            putExtra("prayer", prayer)
-            putExtra("hours", hours)
-            putExtra("minutes", minutes)
-            putExtra("styleIndex", styleIndex)
-        }
-        
-        val requestCode = prayer.hashCode() + dayOffset
-        val pendingIntent = PendingIntent.getBroadcast(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
         
         val calendar = Calendar.getInstance().apply {
             add(Calendar.DAY_OF_YEAR, dayOffset)
@@ -69,6 +58,27 @@ override fun getName() = "AdhanModule"
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
+
+        val requestCode = prayer.hashCode() + dayOffset
+
+        val intent = Intent(context, AdhanAlarmReceiver::class.java).apply {
+            putExtra("prayer", prayer)
+            putExtra("hours", hours)
+            putExtra("minutes", minutes)
+            putExtra("styleIndex", styleIndex)
+            // Exact armed timestamp — lets the receiver reject stale deliveries
+            // (OEMs can deliver exact alarms hours late).
+            putExtra("scheduledTimeMillis", calendar.timeInMillis)
+            // Diagnostic correlation only — does NOT affect PendingIntent identity.
+            putExtra("requestCode", requestCode)
+        }
+
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         
         // Past prayer time: skip this alarm entirely — never roll it forward.
         // Each alarm belongs to a specific date/dayOffset, and the next
@@ -101,13 +111,27 @@ override fun getName() = "AdhanModule"
         } catch (e: SecurityException) {
         } catch (e: IllegalStateException) {
         }
+
+        // Diagnostic only: intended prayer time vs actual arm moment.
+        AdhanDiagnostics.log("SCHEDULE", mapOf(
+            "prayer" to prayer,
+            "requestCode" to requestCode,
+            "dayOffset" to dayOffset,
+            "source" to "NORMAL",
+            "intendedMs" to calendar.timeInMillis,
+            "intendedHuman" to AdhanDiagnostics.humanTime(calendar.timeInMillis),
+            "armedMs" to System.currentTimeMillis(),
+            "armedHuman" to AdhanDiagnostics.humanTime(System.currentTimeMillis()),
+            "canScheduleExact" to AdhanDiagnostics.canScheduleExact(context)
+        ))
     }
 
     @ReactMethod
     fun cancelAllAdhans() {
         val context = reactApplicationContext
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        
+
+        var cancelled = 0
         for (prayer in arrayOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")) {
             for (dayOffset in 0..30) {
                 val intent = Intent(context, AdhanAlarmReceiver::class.java)
@@ -121,9 +145,14 @@ override fun getName() = "AdhanModule"
                 if (pendingIntent != null) {
                     alarmManager.cancel(pendingIntent)
                     pendingIntent.cancel()
+                    cancelled++
                 }
             }
         }
+        AdhanDiagnostics.log("CANCEL", mapOf(
+            "cancelledCount" to cancelled,
+            "source" to "NORMAL"
+        ))
     }
 
     @ReactMethod
@@ -137,7 +166,7 @@ override fun getName() = "AdhanModule"
             putExtra("minutes", 0)
             putExtra("styleIndex", styleIndex)
         }
-        
+
         val requestCode = "test_adhan".hashCode()
         val pendingIntent = PendingIntent.getBroadcast(
             context,
@@ -145,9 +174,20 @@ override fun getName() = "AdhanModule"
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        
+
         // Schedule 5 seconds from now — survives app kill
         val triggerTime = System.currentTimeMillis() + 5000
+
+        AdhanDiagnostics.log("SCHEDULE", mapOf(
+            "prayer" to prayer,
+            "requestCode" to requestCode,
+            "dayOffset" to 0,
+            "source" to "TEST",
+            "intendedMs" to triggerTime,
+            "intendedHuman" to AdhanDiagnostics.humanTime(triggerTime),
+            "armedMs" to System.currentTimeMillis(),
+            "armedHuman" to AdhanDiagnostics.humanTime(System.currentTimeMillis())
+        ))
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!alarmManager.canScheduleExactAlarms()) {
@@ -257,6 +297,23 @@ override fun getName() = "AdhanModule"
             }
         } catch (e: Exception) {
             promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun getAdhanDiagnosticLogs(promise: com.facebook.react.bridge.Promise) {
+        try {
+            promise.resolve(AdhanDiagnostics.getLogs())
+        } catch (e: Exception) {
+            promise.resolve("(error reading diagnostics)")
+        }
+    }
+
+    @ReactMethod
+    fun clearAdhanDiagnosticLogs() {
+        try {
+            AdhanDiagnostics.clear()
+        } catch (e: Exception) {
         }
     }
 }

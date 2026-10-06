@@ -247,18 +247,71 @@ export default function AdminScreen({ navigation }) {
 
   const loadReports = useCallback(async (refreshToken) => {
     try {
-      const { data, error } = await supabase
+      // Fetch reports and the video relationship that actually exists.
+      const { data: reportData, error: reportsError } = await supabase
         .from('reports')
-        .select('*, reporter:profiles!reporter_id(username), reported_user:profiles!reported_user_id(username, rejection_count), video:videos!video_id(thumbnail_url, caption)')
+        .select('*, video:videos!video_id(thumbnail_url, caption)')
         .order('created_at', { ascending: false })
         .limit(50);
 
-      if (error) throw error;
+      if (reportsError) throw reportsError;
+
+      const rows = reportData || [];
+
+      // Collect all reporter + reported-user IDs.
+      const profileIds = [
+        ...new Set(
+          rows
+            .flatMap(report => [
+              report.reporter_id,
+              report.reported_user_id,
+            ])
+            .filter(Boolean)
+        ),
+      ];
+
+      let profilesById = new Map();
+
+      if (profileIds.length > 0) {
+        const { data: profileData, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, username, rejection_count')
+          .in('id', profileIds);
+
+        if (profilesError) throw profilesError;
+
+        profilesById = new Map(
+          (profileData || []).map(profile => [profile.id, profile])
+        );
+      }
+
+      // Preserve the object shape expected by renderReport().
+      const enrichedReports = rows.map(report => ({
+        ...report,
+        reporter: profilesById.get(report.reporter_id) || null,
+        reported_user: profilesById.get(report.reported_user_id) || null,
+      }));
+
       if (!isMountedRef.current) return;
-      setReports(data || []);
+      setReports(enrichedReports);
     } catch (error) {
+      console.error('Error loading reports:', error);
+
       if (!isMountedRef.current) return;
-      setDialog({ visible: true, title: 'Error', message: 'Failed to load reports', type: 'error', buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }] });
+
+      setDialog({
+        visible: true,
+        title: 'Error',
+        message: 'Failed to load reports',
+        type: 'error',
+        buttons: [
+          {
+            text: 'OK',
+            onPress: () =>
+              setDialog(d => ({ ...d, visible: false })),
+          },
+        ],
+      });
     } finally {
       finishRefresh(refreshToken);
     }

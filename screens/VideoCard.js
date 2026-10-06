@@ -21,6 +21,10 @@ import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import { COLORS } from '../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  hasCountedVideoView,
+  recordVideoView,
+} from '../utils/videoViewTracker';
 
 const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress, preparing }) {
   if (!visible) return null;
@@ -167,6 +171,9 @@ function VideoCard({
   const [showFullCaption, setShowFullCaption] = useState(false);
   const manualPauseRef = useRef(false);
   const isFollowLoading = useRef(false);
+  const viewWatchTimeRef = useRef(0);
+  const lastViewProgressRef = useRef(null);
+  const viewCountTriggeredRef = useRef(false);
 
   const isUserBlocked = blockedUsers?.has(item.user_id);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -257,6 +264,15 @@ function VideoCard({
     setDuration(0);
     durationRef.current = 0;
   }, [item.id]);
+  useEffect(() => {
+    viewWatchTimeRef.current = 0;
+    lastViewProgressRef.current = null;
+
+    viewCountTriggeredRef.current = hasCountedVideoView(
+      item.id,
+      currentUserId
+    );
+  }, [item.id, currentUserId]);
   useEffect(() => { durationRef.current = duration; }, [duration]);
   useEffect(() => {
     if (player?.current) {
@@ -577,6 +593,61 @@ function VideoCard({
   }, [requireAuth]);
 
   const handleOpenReportSheet = useCallback(() => setShowReportSheet(true), []);
+  const trackVideoViewProgress = useCallback((current) => {
+    if (!Number.isFinite(current)) return;
+
+    if (item.type === 'livestream' || item.video_url?.includes('.m3u8')) {
+      return;
+    }
+
+    if (currentUserId && currentUserId === item.user_id) {
+      return;
+    }
+
+    if (
+      !isActive ||
+      !isTabActive ||
+      paused ||
+      isSeeking.current ||
+      viewCountTriggeredRef.current
+    ) {
+      lastViewProgressRef.current = current;
+      return;
+    }
+
+    const previous = lastViewProgressRef.current;
+    lastViewProgressRef.current = current;
+
+    if (previous === null) return;
+
+    const delta = current - previous;
+
+    if (delta > 0 && delta <= 1) {
+      viewWatchTimeRef.current += delta;
+    }
+
+    if (viewWatchTimeRef.current < 3) return;
+
+    viewCountTriggeredRef.current = true;
+
+    recordVideoView(item.id, currentUserId).then((success) => {
+      if (!success) {
+        viewCountTriggeredRef.current = hasCountedVideoView(
+          item.id,
+          currentUserId
+        );
+      }
+    });
+  }, [
+    item.id,
+    item.user_id,
+    item.type,
+    item.video_url,
+    currentUserId,
+    isActive,
+    isTabActive,
+    paused,
+  ]);
 
   const avatarLetter = username[0]?.toUpperCase() ?? '?';
   const hashtags = item.caption?.match(/#\w+/g) ?? [];
@@ -631,10 +702,12 @@ function VideoCard({
             }
           }}
           onProgress={(data) => {
-          
+
             if (isSeeking.current) return;
 
             const current = Number(data?.currentTime);
+
+            trackVideoViewProgress(current);
             const seekableDuration = Number(data?.seekableDuration);
             let effectiveDuration = durationRef.current;
 

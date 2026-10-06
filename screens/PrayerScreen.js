@@ -1,6 +1,8 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, ActivityIndicator, Vibration, TextInput, Linking, Platform, AppState
+  Switch, ActivityIndicator, Vibration, TextInput, Linking, Platform, AppState,
+  Modal
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import Animated, {
   useSharedValue,
@@ -283,6 +285,45 @@ export default function PrayerScreen() {
   const [hijriAdjustment, setHijriAdjustment]   = useState(0);
   const [isOffline, setIsOffline] = useState(false);
   const [exactAlarmGranted, setExactAlarmGranted] = useState(true);
+  // Hidden Adhan diagnostics (7 taps on the Adhan card title)
+  const [showAdhanDiag, setShowAdhanDiag]       = useState(false);
+  const [adhanDiagLogs, setAdhanDiagLogs]       = useState('');
+  const adhanDiagTapCount = useRef(0);
+  const adhanDiagTapTimer = useRef(null);
+
+  const handleAdhanTitleTap = useCallback(() => {
+    adhanDiagTapCount.current += 1;
+    if (adhanDiagTapTimer.current) clearTimeout(adhanDiagTapTimer.current);
+    adhanDiagTapTimer.current = setTimeout(() => { adhanDiagTapCount.current = 0; }, 2500);
+    if (adhanDiagTapCount.current >= 7) {
+      adhanDiagTapCount.current = 0;
+      if (adhanDiagTapTimer.current) clearTimeout(adhanDiagTapTimer.current);
+      (async () => {
+        try {
+          const { NativeModules } = require('react-native');
+          const logs = await NativeModules.AdhanModule?.getAdhanDiagnosticLogs?.();
+          setAdhanDiagLogs(logs || '(no diagnostics available)');
+        } catch (e) {
+          setAdhanDiagLogs('(failed to load diagnostics)');
+        }
+        setShowAdhanDiag(true);
+      })();
+    }
+  }, []);
+
+  const copyAdhanDiagLogs = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(adhanDiagLogs);
+    } catch (e) {}
+  }, [adhanDiagLogs]);
+
+  const clearAdhanDiagLogs = useCallback(async () => {
+    try {
+      const { NativeModules } = require('react-native');
+      await NativeModules.AdhanModule?.clearAdhanDiagnosticLogs?.();
+      setAdhanDiagLogs('(cleared)');
+    } catch (e) {}
+  }, []);
 
   // Location mode
   const [locationMode, setLocationMode]             = useState(null);
@@ -1730,7 +1771,9 @@ export default function PrayerScreen() {
 
             <View style={[styles.card, styles.halfCard]}>
               <View style={styles.iconRing}><Text style={{ fontSize: 22 }}>🔊</Text></View>
-              <Text style={styles.cardTitle}>Adhan</Text>
+              <TouchableOpacity onPress={handleAdhanTitleTap} activeOpacity={0.7}>
+                <Text style={styles.cardTitle}>Adhan</Text>
+              </TouchableOpacity>
               <Switch
                 value={adhanEnabled} onValueChange={toggleAdhan}
                 trackColor={{ false: 'rgba(0,0,0,0.1)', true: COLORS.gold + '80' }}
@@ -1802,12 +1845,42 @@ export default function PrayerScreen() {
             </View>
           )}
         </View>
+
+        <Modal visible={showAdhanDiag} transparent animationType="fade" onRequestClose={() => setShowAdhanDiag(false)}>
+          <View style={styles.diagBackdrop}>
+            <View style={styles.diagBox}>
+              <Text style={styles.diagTitle}>Adhan Diagnostic Log</Text>
+              <ScrollView style={styles.diagScroll}>
+                <Text style={styles.diagText}>{adhanDiagLogs}</Text>
+              </ScrollView>
+              <View style={styles.diagButtons}>
+                <TouchableOpacity style={styles.diagBtn} onPress={copyAdhanDiagLogs}>
+                  <Text style={styles.diagBtnText}>Copy Logs</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.diagBtn} onPress={clearAdhanDiagLogs}>
+                  <Text style={styles.diagBtnText}>Clear</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.diagBtn} onPress={() => setShowAdhanDiag(false)}>
+                  <Text style={styles.diagBtnText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  diagBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  diagBox: { backgroundColor: '#fff', borderRadius: 12, padding: 16, maxHeight: '80%' },
+  diagTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 8 },
+  diagScroll: { maxHeight: 380 },
+  diagText: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 10, color: '#222' },
+  diagButtons: { flexDirection: 'row', gap: 8, marginTop: 12, justifyContent: 'flex-end' },
+  diagBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#b8860b' },
+  diagBtnText: { color: '#b8860b', fontWeight: '700', fontSize: 13 },
   center: { flex: 1, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: '#666', fontSize: 14, marginTop: 8 },
   errorIcon: { fontSize: 40 },

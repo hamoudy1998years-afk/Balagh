@@ -17,6 +17,12 @@ class AdhanBootReceiver : BroadcastReceiver() {
             return
         }
 
+        AdhanDiagnostics.init(context)
+        AdhanDiagnostics.log("BOOT_RESCHEDULE", mapOf(
+            "action" to intent.action,
+            "bootCount" to AdhanDiagnostics.bootCount(context)
+        ))
+
         // If exact alarm permission was revoked (can happen after updates),
         // alarms can't fire — warn the user instead of silently failing.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -88,15 +94,19 @@ class AdhanBootReceiver : BroadcastReceiver() {
                     // Never bump it to tomorrow — tomorrow has its own entry.
                     if (calendar.timeInMillis <= System.currentTimeMillis()) continue
 
+                    // Same request-code scheme as AdhanModule.scheduleAdhan()
+                    val requestCode = prayer.hashCode() + dayOffset
                     val alarmIntent = Intent(context, AdhanAlarmReceiver::class.java).apply {
                         putExtra("prayer", prayer)
                         putExtra("hours", hours)
                         putExtra("minutes", minutes)
                         putExtra("styleIndex", styleIndex)
+                        // Exact armed timestamp — lets the receiver reject
+                        // stale deliveries after reboot too.
+                        putExtra("scheduledTimeMillis", calendar.timeInMillis)
+                        // Diagnostic correlation only — does NOT affect identity.
+                        putExtra("requestCode", requestCode)
                     }
-
-                    // Same request-code scheme as AdhanModule.scheduleAdhan()
-                    val requestCode = prayer.hashCode() + dayOffset
                     val pendingIntent = PendingIntent.getBroadcast(
                         context,
                         requestCode,
@@ -117,6 +127,16 @@ class AdhanBootReceiver : BroadcastReceiver() {
                             pendingIntent
                         )
                     }
+                    AdhanDiagnostics.log("SCHEDULE", mapOf(
+                        "prayer" to prayer,
+                        "requestCode" to requestCode,
+                        "dayOffset" to dayOffset,
+                        "source" to "BOOT",
+                        "intendedMs" to calendar.timeInMillis,
+                        "intendedHuman" to AdhanDiagnostics.humanTime(calendar.timeInMillis),
+                        "armedMs" to System.currentTimeMillis(),
+                        "armedHuman" to AdhanDiagnostics.humanTime(System.currentTimeMillis())
+                    ))
                 }
             }
         }

@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 object AdhanPersistentNotification {
@@ -37,7 +39,8 @@ object AdhanPersistentNotification {
     }
 
     private fun formatTime(time: String): String {
-        val parts = time.split(":")
+        // Times may carry a TZ suffix ("04:30 (PST)") — strip it before parsing
+        val parts = time.split(" ")[0].split(":")
         if (parts.size != 2) return time
         val h = parts[0].toIntOrNull() ?: return time
         val m = parts[1].toIntOrNull() ?: return time
@@ -55,7 +58,8 @@ object AdhanPersistentNotification {
         val nowMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
         for (prayer in PRAYERS) {
             val t = timings[prayer] ?: continue
-            val parts = t.split(":")
+            // Times may carry a TZ suffix ("05:12 (UTC+03:00)") — strip it
+            val parts = t.split(" ")[0].split(":")
             if (parts.size != 2) continue
             val h = parts[0].toIntOrNull() ?: continue
             val m = parts[1].toIntOrNull() ?: continue
@@ -76,7 +80,7 @@ object AdhanPersistentNotification {
                 prayer == "Sunrise" -> "🌄"
                 prayer == next -> "⏰"
                 else -> {
-                    val parts = t.split(":")
+                    val parts = t.split(" ")[0].split(":")
                     val mins = (parts[0].toIntOrNull() ?: 0) * 60 + (parts[1].toIntOrNull() ?: 0)
                     if (mins <= nowMinutes) "✅" else "🔲"
                 }
@@ -86,10 +90,20 @@ object AdhanPersistentNotification {
         return sb.toString().trim()
     }
 
+    // Today's entry from the per-date daily_timings store, falling back to the
+    // flat prayer_timings when there is no dated entry for today.
+    private fun todaysTimings(prefs: AdhanPreferences): Map<String, String>? {
+        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val daily = prefs.getDailyTimings()
+        val todays = daily?.get(todayKey)
+        if (todays != null) return todays
+        return prefs.getTimings()
+    }
+
     fun post(context: Context) {
         val prefs = AdhanPreferences(context)
         if (!prefs.areNotificationsEnabled()) return
-        val timings = prefs.getTimings() ?: return
+        val timings = todaysTimings(prefs) ?: return
         ensureChannel(context)
 
         val next = nextPrayer(timings)
@@ -169,66 +183,125 @@ object AdhanPersistentNotification {
         try {
             val prefs = AdhanPreferences(context)
             if (!prefs.areNotificationsEnabled()) return
-            val timings = prefs.getTimings() ?: return
             val prayerPrefs = prefs.getPrayerPrefs()
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
             cancelRefreshAlarms(context)
 
-            // 7 days is enough — the weekly reschedule and 21-day fallback keep this topped up
+            // Per-date actual times from daily_timings, covering the full stored
+            // window (today + ~30 days). Falls back to the flat today-times 7-day
+            // replay only when no dated data exists (older app versions).
+            val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val daily = prefs.getDailyTimings()
+            val todayCal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            if (daily != null && daily.isNotEmpty()) {
+                for ((dateKey, timings) in daily) {
+                    val date = dateFmt.parse(dateKey) ?: continue
+                    // Calendar-day difference, not elapsed ms: each add(DAY_OF_YEAR, 1)
+                    // moves exactly one local calendar day, so 23h/25h DST days count once.
+                    val target = Calendar.getInstance().apply {
+                        time = date
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    var dayOffset = 0
+                    while (target.after(todayCal)) {
+                        target.add(Calendar.DAY_OF_YEAR, -1)
+                        dayOffset++
+                    }
+                    while (target.before(todayCal)) {
+                        target.add(Calendar.DAY_OF_YEAR, 1)
+                        dayOffset--
+                    }
+                    if (dayOffset < 0) continue // past date — its refresh times are past anyway
+                    for (prayer in PRAYERS) {
+                        if (prayerPrefs?.get(prayer) == false) continue
+                        val time = timings[prayer] ?: continue
+                        // Times may carry a TZ suffix ("05:12 (UTC+03:00)") — strip it
+                        val parts = time.split(" ")[0].split(":")
+                        if (parts.size != 2) continue
+                        val hours = parts[0].toIntOrNull() ?: continue
+                        val minutes = parts[1].toIntOrNull() ?: continue
+                        if (!scheduleRefresh(context, alarmManager, prayer, dayOffset, hours, minutes)) return
+                    }
+                }
+                return
+            }
+
+            val timings = prefs.getTimings() ?: return
+            // No per-date data available — replay today's flat times for the
+            // coming week (the weekly reschedule keeps this topped up).
             for (dayOffset in 0..6) {
                 for (prayer in PRAYERS) {
                     if (prayerPrefs?.get(prayer) == false) continue
                     val time = timings[prayer] ?: continue
-                    val parts = time.split(":")
+                    val parts = time.split(" ")[0].split(":")
                     if (parts.size != 2) continue
                     val hours = parts[0].toIntOrNull() ?: continue
                     val minutes = parts[1].toIntOrNull() ?: continue
-
-                    val intent = Intent(context, AdhanPersistentRefreshReceiver::class.java)
-                    val requestCode = prayer.hashCode() + dayOffset + REQUEST_CODE_OFFSET
-                    val pendingIntent = PendingIntent.getBroadcast(
-                        context, requestCode, intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-
-                    // 30 minutes BEFORE the prayer
-                    val calendar = Calendar.getInstance().apply {
-                        add(Calendar.DAY_OF_YEAR, dayOffset)
-                        set(Calendar.HOUR_OF_DAY, hours)
-                        set(Calendar.MINUTE, minutes)
-                        set(Calendar.SECOND, 0)
-                        set(Calendar.MILLISECOND, 0)
-                        add(Calendar.MINUTE, -30)
-                    }
-
-                    if (calendar.timeInMillis <= System.currentTimeMillis()) continue
-
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            alarmManager.setExactAndAllowWhileIdle(
-                                AlarmManager.RTC_WAKEUP,
-                                calendar.timeInMillis,
-                                pendingIntent
-                            )
-                        } else {
-                            alarmManager.setExact(
-                                AlarmManager.RTC_WAKEUP,
-                                calendar.timeInMillis,
-                                pendingIntent
-                            )
-                        }
-                    } catch (e: SecurityException) {
-                        // permission revoked, skip
-                    } catch (e: IllegalStateException) {
-                        // hit Android's alarm cap — stop trying to schedule more this pass
-                        return
-                    }
+                    if (!scheduleRefresh(context, alarmManager, prayer, dayOffset, hours, minutes)) return
                 }
             }
         } catch (e: Exception) {
             // never let this crash the calling receiver/module
         }
+    }
+
+    private fun scheduleRefresh(
+        context: Context,
+        alarmManager: AlarmManager,
+        prayer: String,
+        dayOffset: Int,
+        hours: Int,
+        minutes: Int
+    ): Boolean {
+        val intent = Intent(context, AdhanPersistentRefreshReceiver::class.java)
+        val requestCode = prayer.hashCode() + dayOffset + REQUEST_CODE_OFFSET
+        val pendingIntent = PendingIntent.getBroadcast(
+            context, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // 30 minutes BEFORE the prayer
+        val calendar = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, dayOffset)
+            set(Calendar.HOUR_OF_DAY, hours)
+            set(Calendar.MINUTE, minutes)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            add(Calendar.MINUTE, -30)
+        }
+
+        if (calendar.timeInMillis <= System.currentTimeMillis()) return true
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    calendar.timeInMillis,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    calendar.timeInMillis,
+                    pendingIntent
+                )
+            }
+        } catch (e: SecurityException) {
+            // permission revoked, skip
+        } catch (e: IllegalStateException) {
+            // hit Android's alarm cap — stop trying to schedule more this pass
+            return false
+        }
+        return true
     }
 
     fun cancel(context: Context) {

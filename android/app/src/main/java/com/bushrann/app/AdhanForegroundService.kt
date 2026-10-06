@@ -7,12 +7,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 
 class AdhanForegroundService : Service() {
@@ -22,6 +24,7 @@ class AdhanForegroundService : Service() {
     private var currentPrayer: String = ""
     private var currentHours: Int = 0
     private var currentMinutes: Int = 0
+    private var vibrationOnlyTimeout: Runnable? = null
 
     companion object {
         const val CHANNEL_ID = "adhan-foreground-service"
@@ -29,10 +32,14 @@ class AdhanForegroundService : Service() {
         const val ACTION_STOP = "com.bushrann.app.STOP_ADHAN"
         private val LAST_ADHAN_CHANNEL_ID = "adhan-history"
         private val LAST_ADHAN_NOTIFICATION_ID = 1004
+
+        // Upper bound for vibration-only adhan (active call in progress).
+        private const val VIBRATION_ONLY_TIMEOUT_MILLIS = 60_000L
     }
 
     override fun onCreate() {
         super.onCreate()
+        AdhanDiagnostics.init(this)
         createNotificationChannel()
         
         vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -46,6 +53,10 @@ class AdhanForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            AdhanDiagnostics.log("PLAYBACK_STOPPED", mapOf(
+                "prayer" to currentPrayer,
+                "reason" to "USER_STOP"
+            ))
             postLastAdhanNote()
             stopAdhan()
             stopSelf()
@@ -60,11 +71,51 @@ class AdhanForegroundService : Service() {
         currentMinutes = minutes
 
         val styleIndex = intent?.getIntExtra("styleIndex", 0) ?: 0
+        // A previous session's pending vibration-only timeout must never
+        // stop/cancel the new session being started here.
+        cancelVibrationOnlyTimeout()
         startForeground(NOTIFICATION_ID, buildNotification(prayer))
+        AdhanDiagnostics.log("SERVICE_STARTED", mapOf(
+            "prayer" to prayer,
+            "callActive" to isCallActive()
+        ))
         startVibration()
-        playAdhan(prayer, styleIndex)
+        if (isCallActive()) {
+            // Active phone/VoIP call: vibrate only, never mix adhan audio
+            // into the call. Bounded vibration, then end the adhan session.
+            scheduleVibrationOnlyTimeout()
+        } else {
+            playAdhan(prayer, styleIndex)
+        }
 
         return START_NOT_STICKY
+    }
+
+    // Schedules the bounded vibration-only timeout, replacing (cancelling)
+    // any previously scheduled one.
+    private fun scheduleVibrationOnlyTimeout() {
+        cancelVibrationOnlyTimeout()
+        val timeout = Runnable {
+            vibrationOnlyTimeout = null
+            vibrator?.cancel()
+            stopSelf()
+        }
+        vibrationOnlyTimeout = timeout
+        handler.postDelayed(timeout, VIBRATION_ONLY_TIMEOUT_MILLIS)
+    }
+
+    private fun cancelVibrationOnlyTimeout() {
+        vibrationOnlyTimeout?.let { handler.removeCallbacks(it) }
+        vibrationOnlyTimeout = null
+    }
+
+    // Privacy-safe call detection: AudioManager mode reflects an active
+    // cellular call (MODE_IN_CALL) or VoIP/video communication session
+    // (MODE_IN_COMMUNICATION). No phone-state permissions required.
+    private fun isCallActive(): Boolean {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        return am.mode == AudioManager.MODE_IN_CALL ||
+            am.mode == AudioManager.MODE_IN_COMMUNICATION
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -93,12 +144,22 @@ class AdhanForegroundService : Service() {
             this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Collapsed-view Stop button: prayer info + labeled Stop button in the
+        // standard 48dp collapsed content area. The expanded notification stays
+        // the standard template with its existing "Stop" action.
+        val collapsedView = RemoteViews(packageName, R.layout.adhan_collapsed).apply {
+            setTextViewText(R.id.adhan_info, "🕌 $prayer Prayer Time")
+            setOnClickPendingIntent(R.id.btn_stop_adhan, stopPendingIntent)
+        }
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🕌 $prayer Prayer Time")
             .setContentText("Adhan is playing... Tap Stop to end.")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(collapsedView)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
     }
@@ -152,6 +213,10 @@ class AdhanForegroundService : Service() {
                     // Stale player (already replaced/released) must never start
                     if (mediaPlayer !== this) return@setOnPreparedListener
                     start()
+                    AdhanDiagnostics.log("PLAYBACK_STARTED", mapOf(
+                        "prayer" to prayer,
+                        "appInForeground" to appOpen
+                    ))
                     // Vibration: 25% of adhan when app open, 50% when app closed/killed
                     val duration = duration.toLong()
                     val vibrationMillis = if (appOpen) (duration / 4) else (duration / 2)
@@ -160,12 +225,14 @@ class AdhanForegroundService : Service() {
                 setOnCompletionListener {
                     // Stale player must never stop/release the current one
                     if (mediaPlayer !== this) return@setOnCompletionListener
+                    AdhanDiagnostics.log("PLAYBACK_COMPLETED", mapOf("prayer" to prayer))
                     postLastAdhanNote()
                     stopAdhan()
                     stopSelf()
                 }
                 setOnErrorListener { _, _, _ ->
                     if (mediaPlayer !== this) return@setOnErrorListener true
+                    AdhanDiagnostics.log("PLAYBACK_ERROR", mapOf("prayer" to prayer))
                     stopSelf()
                     true
                 }
@@ -235,6 +302,7 @@ class AdhanForegroundService : Service() {
     }
 
     private fun stopAdhan() {
+        cancelVibrationOnlyTimeout()
         releaseCurrentPlayer()
         vibrator?.cancel()
     }

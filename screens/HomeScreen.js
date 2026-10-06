@@ -7,6 +7,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VideoCard from './VideoCard';
+import ModernDialog from './ModernDialog';
 import { homeRefreshRef } from '../utils/refs';
 import AnimatedButton from './AnimatedButton';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -22,7 +23,7 @@ import { Alert, Linking } from 'react-native';
 
 
 
-const CURRENT_VERSION_CODE = 58; // CHANGE THIS when you bump versionCode
+const CURRENT_VERSION_CODE = 63; // CHANGE THIS when you bump versionCode
 const VERSION_CHECK_URL = 'https://raw.githubusercontent.com/hamoudy1998years-afk/Balagh/main/version.json';
 const UPDATE_CHECK_KEY = 'lastUpdateCheck';
 
@@ -110,9 +111,11 @@ function isCacheValid(key) {
 function LiveFeed({ navigation, isActive = true }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const { user: currentUser, loading: authLoading } = useUser();
   const [streams, setStreams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dialog, setDialog] = useState({ visible: false, title: '', message: '', type: 'info', buttons: [] });
   // The single stream id allowed to run a live video preview. At most one
   // preview is connected at a time (data/battery/CPU/bandwidth).
   const [activePreviewId, setActivePreviewId] = useState(null);
@@ -301,12 +304,36 @@ function LiveFeed({ navigation, isActive = true }) {
               }
               onPress={
                 item.is_live
-                  ? () => navigation.navigate(ROUTES.WATCH_LIVE, { stream: item })
+                  ? () => {
+                      if (authLoading) return;
+                      if (!currentUser) {
+                        setDialog({
+                          visible: true,
+                          title: 'Join Bushrann',
+                          message: 'Login or create an account to interact with content.',
+                          type: 'info',
+                          buttons: [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Login', onPress: () => navigation.navigate(ROUTES.LOGIN) },
+                          ],
+                        });
+                        return;
+                      }
+                      navigation.navigate(ROUTES.WATCH_LIVE, { stream: item });
+                    }
                   : undefined
               }
             />
           </View>
         )}
+      />
+      <ModernDialog
+        visible={dialog.visible}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        buttons={dialog.buttons}
+        onDismiss={() => setDialog(d => ({ ...d, visible: false }))}
       />
     </View>
   );

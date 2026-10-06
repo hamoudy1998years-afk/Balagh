@@ -5,9 +5,58 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import java.util.Calendar
 
 class AdhanAlarmReceiver : BroadcastReceiver() {
+    // Alarms delivered more than this long after their scheduled instant are
+    // ignored entirely (no service, no vibration, no notifications) — some
+    // OEMs deliver exact alarms hours late, which must not play the Adhan.
+    private val STALE_ALARM_TOLERANCE_MS = 15 * 60 * 1000L
+
     override fun onReceive(context: Context, intent: Intent) {
+        AdhanDiagnostics.init(context)
+
+        // Diagnostic first, before anything can return: receiver timestamp vs
+        // intended scheduled instant (negative diff = EARLY delivery).
+        val receiverMs = System.currentTimeMillis()
+        val rawScheduled = intent.getLongExtra("scheduledTimeMillis", -1L)
+
+        // Resolve the original armed timestamp. Alarms armed by older app
+        // versions lack "scheduledTimeMillis" — fall back to reconstructing
+        // today's HH:MM from the prayer extras and apply the same check.
+        val scheduledTimeMillis = rawScheduled.let {
+            if (it > 0) it else {
+                val hours = intent.getIntExtra("hours", -1)
+                val minutes = intent.getIntExtra("minutes", -1)
+                if (hours < 0 || minutes < 0) -1L else Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, hours)
+                    set(Calendar.MINUTE, minutes)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            }
+        }
+        AdhanDiagnostics.log("RECEIVER_FIRED",
+            mapOf(
+                "prayer" to intent.getStringExtra("prayer"),
+                "requestCode" to intent.getIntExtra("requestCode", -1),
+                "scheduledFromExtra" to (rawScheduled > 0),
+                "canScheduleExact" to AdhanDiagnostics.canScheduleExact(context)
+            ) + AdhanDiagnostics.diffFields(receiverMs, scheduledTimeMillis)
+        )
+        if (scheduledTimeMillis > 0) {
+            val lateMs = receiverMs - scheduledTimeMillis
+            // Only reject lateness well beyond the tolerance — slightly early
+            // or on-time deliveries always play.
+            if (lateMs > STALE_ALARM_TOLERANCE_MS) {
+                AdhanDiagnostics.log("STALE_REJECTED",
+                    mapOf("prayer" to intent.getStringExtra("prayer")) +
+                        AdhanDiagnostics.diffFields(receiverMs, scheduledTimeMillis)
+                )
+                return
+            }
+        }
+
         val prayer = intent.getStringExtra("prayer") ?: return
         val hours = intent.getIntExtra("hours", 0)
         val minutes = intent.getIntExtra("minutes", 0)

@@ -33,6 +33,7 @@ import { COLORS } from '../constants/theme';
 import { useUser } from '../context/UserContext';
 import { filterMessage } from '../utils/moderation';
 import { fetchWithTimeout } from '../utils/apiClient';
+import { useKeepAwake } from 'expo-keep-awake';
 
 const { width, height } = Dimensions.get('window');
 const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
@@ -60,6 +61,10 @@ async function getAccessToken() {
 const intentionalDisconnectRooms = new WeakSet();
 
 export default function LiveStreamScreenLiveKit({ route, navigation }) {
+  // Keep the device screen awake while hosting; useKeepAwake releases
+  // automatically on unmount.
+  useKeepAwake();
+
   const insets = useSafeAreaInsets();
   const { user: currentUser } = useUser();
   const { title = 'Live Stream', maxQuestions = 5 } = route?.params ?? {};
@@ -94,6 +99,12 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   // can await it before deciding whether an egress exists that must be
   // stopped before the live_streams row may be deleted.
   const egressStartPromiseRef = useRef(null);
+  // True while a post-reconnect recording-recovery request is in flight, so
+  // concurrent Reconnected events can never start duplicate recordings.
+  const egressRecoveryInProgressRef = useRef(false);
+  // Ref mirror of the room name so reconnect handlers (registered inside an
+  // earlier render's startStream closure) always see the current room.
+  const roomNameRef = useRef('');
   const [isEnding, setIsEnding] = useState(false);
   const [streamAnalytics, setStreamAnalytics] = useState(null);
   const peakViewersRef = useRef(0);
@@ -137,6 +148,10 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const cameraRetryTimeoutRef = useRef(null);
   // Holds { timeoutId, resolve } for the pending camera-retry delay so cleanup can abort the wait.
   const cameraRetryWaitRef = useRef(null);
+  // True while a camera restartTrack() is running, shared by the Flip
+  // Camera action and the automatic foreground camera resume, so the two
+  // can never restart the camera concurrently.
+  const cameraRestartInProgressRef = useRef(false);
 
   // --- Lifecycle guards (start attempt tracking, double-tap guard, normal-vs-abnormal end) ---
   const startAttemptIdRef = useRef(0);
@@ -156,6 +171,43 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const { recentViewers } = useRecentViewers(streamId);
   const { engagedViewers } = useEngagedViewers(streamId);
   const { enabled: showEngagedTab } = useFeatureFlag('engaged_viewers_tab');
+
+  // Restart the published camera track (no facingMode argument — the
+  // track's current constraints are reused, so whichever camera is selected
+  // stays selected). Ref-only: safe to call from the mount-effect AppState
+  // listener, whose closure predates any render state. Returns true when a
+  // restart actually ran. A failed restart is logged and never affects the
+  // livestream itself.
+  const restartCameraTrackIfNeeded = async () => {
+    if (cameraRestartInProgressRef.current) {
+      return false;
+    }
+    if (
+      !roomRef.current ||
+      !isConnectedRef.current ||
+      streamEndedRef.current
+    ) {
+      return false;
+    }
+
+    const pub = roomRef.current.localParticipant
+      .getTrackPublication(Track.Source.Camera);
+
+    if (!pub?.track || pub.isMuted) {
+      return false;
+    }
+
+    cameraRestartInProgressRef.current = true;
+    try {
+      await pub.track.restartTrack();
+      return true;
+    } catch (e) {
+      console.warn('[LIVEKIT] Camera restart failed:', e);
+      return false;
+    } finally {
+      cameraRestartInProgressRef.current = false;
+    }
+  };
 
   useEffect(() => {
     if (viewerCount > peakViewersRef.current) {
@@ -220,6 +272,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
     const name = `bushrann_${currentUser?.id ?? Date.now()}_${Date.now()}`;
     setRoomName(name);
+    roomNameRef.current = name;
 
     const keyboardDidShow = Keyboard.addListener('keyboardDidShow', (e) => {
       setKeyboardHeight(e.endCoordinates.height);
@@ -238,8 +291,17 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       } else if (nextAppState === 'active' && backgroundTimeRef.current) {
         const timeInBackground = Date.now() - backgroundTimeRef.current;
         backgroundTimeRef.current = null;
-        if (timeInBackground > 30000 && isConnectedRef.current) {
-          console.log('[LIVEKIT] App returned after long background, checking connection...');
+        // Android suspends camera capture while backgrounded; the room
+        // connection survives (audio background mode), so no reconnect /
+        // camera recovery ever fires by itself. After a non-trivial
+        // background stint, restart the camera track to revive capture.
+        // Ref-only checks — no render state is touched from this closure.
+        if (timeInBackground > 5000) {
+          restartCameraTrackIfNeeded().then(restarted => {
+            if (restarted) {
+              console.log('[LIVEKIT] Camera resumed after background');
+            }
+          });
         }
       }
     });
@@ -439,6 +501,137 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     streamEndedRef.current = true;
     currentStreamIdRef.current = null;
     isConnectedRef.current = false;
+  };
+
+  // ─── HEARTBEAT ────────────────────────────────────────────────────────────────
+  // Single 5s heartbeat for the current stream attempt: refreshes last_ping and
+  // writes the fresh (90s-window) viewer count into viewer_count for the home
+  // card. Safe to call when an interval already exists (no-op) — used to
+  // restart the heartbeat after a LiveKit reconnect, where the unexpected-
+  // disconnect path may have cleared it. The stream id is snapshotted per tick
+  // and used in the UPDATE filter, so a slow tick from a previous stream can
+  // never touch a newly started stream's row. A count-query failure only
+  // skips the viewer_count write — last_ping is always refreshed and the
+  // stream never crashes on a transient count error.
+  const startHeartbeatInterval = () => {
+    if (pingInterval.current) return;
+    if (!currentStreamIdRef.current) return;
+
+    pingInterval.current = setInterval(async () => {
+      // Skip this tick while the previous one is still running: setInterval
+      // does not await async callbacks, and without this guard a slow tick
+      // could finish AFTER a newer tick and regress last_ping/viewer_count.
+      if (pingInFlightRef.current) return;
+      const pingStreamId = currentStreamIdRef.current;
+      if (!pingStreamId) return;
+
+      // Token guard: only the tick that owns the ref clears it, so an old
+      // stream's late-finishing tick can't clobber a new stream's guard.
+      const myPingToken = {};
+      pingInFlightRef.current = myPingToken;
+
+      try {
+        let freshViewerCount = null;
+        try {
+          const freshCutoff = new Date(Date.now() - 90_000).toISOString();
+          const { count, error: countError } = await supabase
+            .from('stream_viewers')
+            .select('*', { count: 'exact', head: true })
+            .eq('stream_id', pingStreamId)
+            .gt('last_seen_at', freshCutoff);
+          if (!countError) freshViewerCount = count || 0;
+        } catch (e) {
+          console.warn('[VIEWERS] Heartbeat count query failed:', e);
+        }
+
+        const pingUpdate = { last_ping: new Date().toISOString() };
+        if (freshViewerCount !== null) pingUpdate.viewer_count = freshViewerCount;
+
+        try {
+          const { error: pingError } = await supabase
+            .from('live_streams')
+            .update(pingUpdate)
+            .eq('id', pingStreamId);
+          if (pingError) {
+            console.warn('[VIEWERS] Heartbeat live_streams update failed:', pingError);
+          }
+        } catch (e) {
+          console.warn('[VIEWERS] Heartbeat live_streams update failed:', e);
+        }
+      } finally {
+        if (pingInFlightRef.current === myPingToken) {
+          pingInFlightRef.current = null;
+        }
+      }
+    }, 5000);
+  };
+
+  // ─── POST-RECONNECT RECORDING RECOVERY ───────────────────────────────────────
+  // A LiveKit reconnect can land in a brand-new room instance (the old room
+  // was torn down while the host was disconnected — its room-composite egress
+  // then ends with "Source closed"). Nothing else in the app notices that the
+  // recording died, so ask the server to verify OUR egress id against LiveKit
+  // and start exactly one replacement recording when it is no longer active.
+  // The server re-checks LiveKit itself (listEgress by id, then active egresses
+  // for the room) before starting anything, so duplicate/concurrent calls are
+  // harmless, and the new segment gets a unique filename so an earlier
+  // completed segment is never overwritten.
+  const ensureActiveRecording = async () => {
+    if (egressRecoveryInProgressRef.current) return;
+    const currentEgressId = egressIdRef.current;
+    // No recording was ever started for this stream — nothing to recover.
+    if (!currentEgressId) return;
+    const currentRoomName = roomNameRef.current;
+    if (!currentRoomName) return;
+
+    egressRecoveryInProgressRef.current = true;
+    try {
+      const recoveryToken = await getAccessToken();
+      if (!recoveryToken) {
+        console.warn('[EGRESS] Recovery skipped: no auth session');
+        return;
+      }
+
+      const recoveryRes = await fetchWithTimeout(
+        `${SERVER_URL}/api/livekit/egress/ensure-active`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${recoveryToken}`,
+          },
+          body: JSON.stringify({
+            roomName: currentRoomName,
+            egressId: currentEgressId,
+          }),
+        }
+      );
+
+      if (!recoveryRes.ok) {
+        console.warn('[EGRESS] Recovery check failed:', recoveryRes.status);
+        return;
+      }
+
+      const recoveryData = await recoveryRes.json();
+      if (
+        recoveryData?.egressId &&
+        recoveryData.egressId !== currentEgressId
+      ) {
+        console.log(
+          '[EGRESS] Recording recovered with new egress:',
+          recoveryData.egressId
+        );
+        egressIdRef.current = recoveryData.egressId;
+        egressFilenameRef.current = recoveryData.filename ?? null;
+        if (isMountedRef.current) {
+          setEgressId(recoveryData.egressId);
+        }
+      }
+    } catch (e) {
+      console.warn('[EGRESS] Recovery check failed:', e);
+    } finally {
+      egressRecoveryInProgressRef.current = false;
+    }
   };
 
   // ─── START STREAM ─────────────────────────────────────────────────────────────
@@ -722,6 +915,18 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         if (!isMountedRef.current) return;
         console.log('[LIVEKIT] Reconnected!');
         setConnectionStatus('connected');
+
+        // The unexpected-disconnect path may have cleared the heartbeat
+        // while LiveKit was reconnecting. Restart it (no-op if still
+        // running) so the backend never treats this live stream as stale.
+        startHeartbeatInterval();
+
+        // The room may have been torn down and recreated while we were
+        // disconnected — in that case the old room-composite egress already
+        // ended ("Source closed") and nothing else notices. Ask the server
+        // to verify our egress against LiveKit and start one replacement
+        // recording if it is no longer active (guarded against duplicates).
+        ensureActiveRecording();
       });
 
       room.on(RoomEvent.LocalTrackPublished, (publication) => {
@@ -817,60 +1022,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         setStreamDuration(streamDurationRef.current);
       }, 1000);
 
-      // Single 5s heartbeat for this stream attempt: refreshes last_ping and
-      // writes the fresh (90s-window) viewer count into viewer_count for the
-      // home card. The stream id is snapshotted per tick and used in the
-      // UPDATE filter, so a slow tick from a previous stream can never touch
-      // a newly started stream's row. A count-query failure only skips the
-      // viewer_count write — last_ping is always refreshed and the stream
-      // never crashes on a transient count error.
-      pingInterval.current = setInterval(async () => {
-        // Skip this tick while the previous one is still running: setInterval
-        // does not await async callbacks, and without this guard a slow tick
-        // could finish AFTER a newer tick and regress last_ping/viewer_count.
-        if (pingInFlightRef.current) return;
-        const pingStreamId = currentStreamIdRef.current;
-        if (!pingStreamId) return;
-
-        // Token guard: only the tick that owns the ref clears it, so an old
-        // stream's late-finishing tick can't clobber a new stream's guard.
-        const myPingToken = {};
-        pingInFlightRef.current = myPingToken;
-
-        try {
-          let freshViewerCount = null;
-          try {
-            const freshCutoff = new Date(Date.now() - 90_000).toISOString();
-            const { count, error: countError } = await supabase
-              .from('stream_viewers')
-              .select('*', { count: 'exact', head: true })
-              .eq('stream_id', pingStreamId)
-              .gt('last_seen_at', freshCutoff);
-            if (!countError) freshViewerCount = count || 0;
-          } catch (e) {
-            console.warn('[VIEWERS] Heartbeat count query failed:', e);
-          }
-
-          const pingUpdate = { last_ping: new Date().toISOString() };
-          if (freshViewerCount !== null) pingUpdate.viewer_count = freshViewerCount;
-
-          try {
-            const { error: pingError } = await supabase
-              .from('live_streams')
-              .update(pingUpdate)
-              .eq('id', pingStreamId);
-            if (pingError) {
-              console.warn('[VIEWERS] Heartbeat live_streams update failed:', pingError);
-            }
-          } catch (e) {
-            console.warn('[VIEWERS] Heartbeat live_streams update failed:', e);
-          }
-        } finally {
-          if (pingInFlightRef.current === myPingToken) {
-            pingInFlightRef.current = null;
-          }
-        }
-      }, 5000);
+      // Single 5s heartbeat for this stream attempt (shared helper; also
+      // restarts the heartbeat after a reconnect — see Reconnected handler).
+      startHeartbeatInterval();
 
       // Start egress recording. The secured /egress/start endpoint requires a
       // valid auth token — skip the request entirely when there is no session
@@ -1010,13 +1164,21 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   // ─── SWITCH CAMERA ───────────────────────────────────────────────────────────
   const switchCamera = async () => {
     if (!roomRef.current) return;
+    // Shared guard: never restart concurrently with the automatic
+    // foreground camera resume.
+    if (cameraRestartInProgressRef.current) return;
     try {
       const pub = roomRef.current.localParticipant.getTrackPublication(Track.Source.Camera);
       if (pub?.track) {
         const nextFacing = isFrontCamera ? 'environment' : 'user';
-        await pub.track.restartTrack({ facingMode: nextFacing });
-        setIsFrontCamera(prev => !prev);
-        console.log('[LIVEKIT] Camera switched');
+        cameraRestartInProgressRef.current = true;
+        try {
+          await pub.track.restartTrack({ facingMode: nextFacing });
+          setIsFrontCamera(prev => !prev);
+          console.log('[LIVEKIT] Camera switched');
+        } finally {
+          cameraRestartInProgressRef.current = false;
+        }
       }
     } catch (e) {
       console.error('[LIVEKIT] Switch camera error:', e);
@@ -1029,6 +1191,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   };
 
   const egressStopInProgressRef = useRef(false);
+  // True while a normal End Stream attempt is running, so double taps /
+  // rapid retries can never launch concurrent end flows.
+  const endStreamInProgressRef = useRef(false);
 
   // Awaits an authenticated /egress/stop for the currently stored egress id.
   // Returns true when it is safe to delete the live_streams row afterwards
@@ -1076,6 +1241,12 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   };
 
   const confirmEndStream = useCallback(async () => {
+    // Prevent accidental concurrent End requests (double taps, dialog Retry
+    // racing the modal button). Released on the failure path below and when
+    // the flow finishes.
+    if (endStreamInProgressRef.current) return;
+    endStreamInProgressRef.current = true;
+
     console.log('[END] Starting cleanup - deleting stream to save storage');
     console.log('[END] currentStreamIdRef.current =', currentStreamIdRef.current);
     console.log('[END] Step 1 - Setting isEnding true');
@@ -1162,6 +1333,30 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         console.error('[END] Egress stop failed; aborting stream deletion');
         streamEndedRef.current = false;
         setIsEnding(false);
+        endStreamInProgressRef.current = false;
+        // Surface the failure instead of silently returning the host to the
+        // livestream: explain what happened and offer a safe retry.
+        setDialog({
+          visible: true,
+          title: 'Could not end stream',
+          message:
+            'The recording could not be stopped, so the stream was kept live to avoid losing it. Check your connection and try again.',
+          type: 'error',
+          buttons: [
+            {
+              text: 'Try Again',
+              onPress: () => {
+                setDialog(d => ({ ...d, visible: false }));
+                confirmEndStream();
+              },
+            },
+            {
+              text: 'Keep Streaming',
+              onPress: () =>
+                setDialog(d => ({ ...d, visible: false })),
+            },
+          ],
+        });
         return;
       }
 
@@ -1302,6 +1497,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     }
 
     console.log('[END] Stream ended');
+    endStreamInProgressRef.current = false;
   }, [currentUser?.id, title]);
 
   // ─── CHAT SUBSCRIPTION ───────────────────────────────────────────────────────

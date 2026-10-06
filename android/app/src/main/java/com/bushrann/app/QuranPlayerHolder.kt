@@ -18,8 +18,8 @@ import androidx.media3.session.MediaSession
  */
 object QuranPlayerHolder {
 
-    /** Media notification id for the Quran session. Distinct from Adhan's 1001. */
-    const val NOTIFICATION_ID = 1002
+    /** Media notification id for the Quran session. Distinct from Adhan's 1001/1002/1003/1004. */
+    const val NOTIFICATION_ID = 1005
 
     /** SharedPreferences file for native playback-state persistence. */
     const val PREFS_NAME = "quran_native_player"
