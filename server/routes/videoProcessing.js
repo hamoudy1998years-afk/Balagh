@@ -33,6 +33,7 @@ const VIDEO_BUCKET = 'videos';
 // Supabase Free project currently limits Storage objects to 50 MB.
 // Keep a small safety margin below the hard limit.
 const MAX_UPLOAD_BYTES = 48 * 1024 * 1024;
+const REMUX_MAX_BYTES = 15 * 1024 * 1024;
 const activeJobs = new Set();
 
 let recoverySweepInProgress = false;
@@ -273,29 +274,29 @@ async function transcodeVideo(inputPath, outputPath, duration) {
       ? duration
       : 300;
 
-  // Reserve roughly 96 kbps for AAC audio and calculate the
-  // remaining bitrate from the desired final file size.
   const audioBitrateKbps = 96;
 
-  const totalBitrateKbps =
-    Math.floor(
-      (targetBytes * 8) /
-      safeDuration /
-      1000
-    );
+  // Size cap so long videos still fit the 48 MB Storage limit.
+  const totalBitrateKbps = Math.floor(
+    (targetBytes * 8) / safeDuration / 1000
+  );
 
-  const videoBitrateKbps =
-    Math.max(
-      250,
-      totalBitrateKbps - audioBitrateKbps
-    );
+  // Never go above 3 Mbps, never below 250 kbps.
+  const videoBitrateKbps = Math.min(
+    3000,
+    Math.max(250, totalBitrateKbps - audioBitrateKbps)
+  );
 
   console.log(
     '[VIDEO PROCESS] Compressing:',
-    `target≈44MB`,
+    `max 720p`,
     `video=${videoBitrateKbps}k`,
     `audio=${audioBitrateKbps}k`
   );
+
+  // Shorter side becomes at most 720 px. Never upscales.
+  const scaleFilter =
+    'scale=if(gt(iw\\,ih)\\,-2\\,min(720\\,iw)):if(gt(iw\\,ih)\\,min(720\\,ih)\\,-2)';
 
   await runProcess(ffmpegPath, [
     '-y',
@@ -307,8 +308,14 @@ async function transcodeVideo(inputPath, outputPath, duration) {
     '-map',
     '0:a?',
 
+    '-vf',
+    scaleFilter,
+
     '-c:v',
     'libx264',
+
+    '-profile:v',
+    'main',
 
     '-preset',
     'veryfast',
@@ -647,7 +654,7 @@ async function processVideo(videoId) {
         const remuxStats =
             await fs.promises.stat(remuxPath);
 
-        if (remuxStats.size <= MAX_UPLOAD_BYTES) {
+        if (remuxStats.size <= REMUX_MAX_BYTES) {
             finalPath = remuxPath;
             finalProbe = remuxProbe;
 
