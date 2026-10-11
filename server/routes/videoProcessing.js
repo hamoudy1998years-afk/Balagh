@@ -654,7 +654,13 @@ async function processVideo(videoId) {
         const remuxStats =
             await fs.promises.stat(remuxPath);
 
-        if (remuxStats.size <= REMUX_MAX_BYTES) {
+        const remuxKbps =
+          (remuxStats.size * 8) / remuxProbe.duration / 1000;
+
+        if (
+          remuxStats.size <= MAX_UPLOAD_BYTES &&
+          remuxKbps <= 3500
+        ) {
             finalPath = remuxPath;
             finalProbe = remuxProbe;
 
