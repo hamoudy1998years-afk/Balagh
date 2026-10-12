@@ -39,7 +39,7 @@ const activeJobs = new Set();
 let recoverySweepInProgress = false;
 
 const RECOVERY_INTERVAL_MS = 60 * 1000;
-const MAX_RECOVERY_ROWS = 10;
+const MAX_RECOVERY_ROWS = 3;
 const MAX_WATERMARK_WARM_ROWS = 5;
 
 // ─────────────────────────────────────────────────────────────
