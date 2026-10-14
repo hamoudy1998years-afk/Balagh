@@ -9,6 +9,11 @@ const {
   EncodedFileType,
 } = require('livekit-server-sdk');
 
+const {
+  ImageFileSuffix,
+  ImageCodec,
+} = require('@livekit/protocol');
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -58,7 +63,7 @@ async function requireAuth(req, res, next) {
 async function findStreamByRoom(roomName) {
   const { data: rows, error } = await supabase
     .from('live_streams')
-    .select('id, user_id, title, thumbnail_url')
+    .select('id, user_id, title, thumbnail_url, is_live')
     .eq('channel_name', roomName)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -145,6 +150,44 @@ function egressFilenameOf(egressInfo) {
   );
 }
 
+// Identify only Bushrann's MP4 livestream recordings.
+// Never adopt a thumbnail or another egress job as a recording.
+function isLivestreamRecordingEgress(info, streamId) {
+  const recording =
+    info?.request?.case === 'roomComposite'
+      ? info.request.value
+      : info?.roomComposite;
+
+  if (!recording) return false;
+
+  const outputs = [
+    ...(recording.fileOutputs || []),
+    ...(recording.file ? [recording.file] : []),
+  ];
+
+  return outputs.some(output => {
+    const filename = output.filepath || output.filename || '';
+
+    return (
+      filename.startsWith(`recordings/${streamId}_`) &&
+      filename.endsWith('.mp4')
+    );
+  });
+}
+
+// Identify only Bushrann's participant thumbnail egress jobs.
+function isLivestreamThumbnailEgress(info, streamId) {
+  if (info?.request?.case !== 'participant') return false;
+
+  const outputs = info.request.value?.imageOutputs || [];
+
+  return outputs.some(output => {
+    const prefix = output.filenamePrefix || '';
+
+    return prefix.startsWith(`thumbnails/${streamId}_`);
+  });
+}
+
 // Start a room-composite MP4 recording for a verified live_streams row.
 // The filename is unique per attempt (stream id + timestamp), so a recovered
 // recording started after a reconnect NEVER overwrites an earlier segment.
@@ -175,13 +218,16 @@ async function startCompositeRecording(roomName, streamRow) {
     fileType: EncodedFileType.MP4,
     filepath: filename,
 
-    s3: {
-      accessKey: process.env.SUPABASE_S3_KEY_ID,
-      secret: process.env.SUPABASE_S3_SECRET,
-      region: process.env.SUPABASE_S3_REGION || 'us-east-1',
-      endpoint: process.env.SUPABASE_S3_ENDPOINT,
-      bucket: 'livestreams',
-      forcePathStyle: true,
+    output: {
+      case: 's3',
+      value: {
+        accessKey: process.env.SUPABASE_S3_KEY_ID,
+        secret: process.env.SUPABASE_S3_SECRET,
+        region: process.env.SUPABASE_S3_REGION || 'us-east-1',
+        endpoint: process.env.SUPABASE_S3_ENDPOINT,
+        bucket: 'livestreams',
+        forcePathStyle: true,
+      },
     },
   };
 
@@ -356,6 +402,31 @@ async function sweepRecordingCleanupQueue() {
 
         continue;
       }
+
+      // Never delete a recording referenced by a replay.
+        const { data: replayReferences, error: referenceError } =
+          await supabase
+            .from('livestreams')
+            .select('id')
+            .eq('recording_filename', filename)
+            .limit(1);
+
+        if (referenceError) {
+          console.error(
+            '[EGRESS CLEANUP] Replay ownership check failed; preserving recording:',
+            filename,
+            referenceError.message
+          );
+          continue;
+        }
+
+        if (replayReferences?.length > 0) {
+          console.warn(
+            '[EGRESS CLEANUP] Recording belongs to a replay; preserving:',
+            filename
+          );
+          continue;
+        }
 
       const { error: removeError } = await supabase.storage
         .from('livestreams')
@@ -620,6 +691,7 @@ async function sweepStaleLivestreams() {
         // If ANY stop fails, preserve the live_streams row so ownership
         // information remains available and the next sweep can retry.
         let allEgressesStopped = true;
+        const orphanedRecordingFilenames = new Set();
 
         for (const egress of activeEgresses || []) {
   const orphanedEgressId = egress?.egressId;
@@ -638,15 +710,16 @@ async function sweepStaleLivestreams() {
   // Capture the trusted Storage filename from LiveKit BEFORE stopping.
   // This abnormal/crash path intentionally does not create a replay, so
   // any resulting MP4 must be removed after LiveKit finishes uploading it.
-  const orphanedFilename =
-    (egress.file &&
-      egress.file.filename) ||
-    (egress.fileResults &&
-      egress.fileResults.length > 0 &&
-      egress.fileResults[
-        egress.fileResults.length - 1
-      ].filename) ||
-    null;
+  const orphanedFilename = isLivestreamRecordingEgress(
+    egress,
+    finalCheck.id
+  )
+    ? (
+        egressFilenameOf(egress) ||
+        egress.request?.value?.fileOutputs?.[0]?.filepath ||
+        null
+      )
+    : null;
 
   try {
     await egressClient.stopEgress(orphanedEgressId);
@@ -657,9 +730,7 @@ async function sweepStaleLivestreams() {
     );
 
     if (orphanedFilename) {
-      await scheduleUnreferencedRecordingCleanup(
-        orphanedFilename
-      );
+      orphanedRecordingFilenames.add(orphanedFilename);
     } else {
       console.warn(
         '[EGRESS CLEANUP] Stopped orphaned egress had no trusted filename:',
@@ -769,7 +840,7 @@ async function sweepStaleLivestreams() {
         // therefore prevents this delete even if it happens in this final gap.
         let deleteQuery = supabase
           .from('live_streams')
-          .delete()
+          .update({ is_live: false })
           .eq('id', deleteCheck.id)
           .eq('is_live', true);
 
@@ -782,21 +853,43 @@ async function sweepStaleLivestreams() {
           deleteQuery = deleteQuery.is('last_ping', null);
         }
 
-        const { error: deleteError } = await deleteQuery;
+        const { data: endedRows, error: deleteError } = await deleteQuery
+          .select('id');
 
         if (deleteError) {
           console.warn(
-            '[EGRESS SWEEPER] Failed to delete stale stream:',
+            '[EGRESS SWEEPER] Failed to end stale stream:',
             deleteCheck.id,
             deleteError.message
           );
           continue;
         }
 
+        if (!endedRows?.some(row => row.id === deleteCheck.id)) {
+          console.log(
+            '[EGRESS SWEEPER] Stream changed before termination; preserving recordings:',
+            deleteCheck.id
+          );
+          continue;
+        }
+
+        for (const filename of orphanedRecordingFilenames) {
+          try {
+            await scheduleUnreferencedRecordingCleanup(filename);
+          } catch (cleanupError) {
+            console.warn(
+              '[EGRESS SWEEPER] Could not queue orphaned recording:',
+              filename,
+              cleanupError.message
+            );
+          }
+        }
+
         console.log(
-          '[EGRESS SWEEPER] Removed abandoned livestream:',
+          '[EGRESS SWEEPER] Marked abandoned livestream as ended:',
           deleteCheck.id
         );
+
       } catch (streamError) {
         console.warn(
           '[EGRESS SWEEPER] Cleanup failed for stream:',
@@ -812,6 +905,71 @@ async function sweepStaleLivestreams() {
     );
   } finally {
     staleSweepInProgress = false;
+  }
+}
+
+
+let thumbnailSweepInProgress = false;
+
+async function sweepExpiredThumbnailEgresses() {
+  if (thumbnailSweepInProgress) return;
+  thumbnailSweepInProgress = true;
+
+  try {
+    const egressClient = getEgressClient();
+    const activeEgresses = await egressClient.listEgress({
+      active: true,
+    });
+
+    for (const info of activeEgresses || []) {
+      if (!info?.egressId || info?.request?.case !== 'participant') continue;
+
+      // Only Bushrann's own thumbnail jobs.
+      const outputs = info.request.value?.imageOutputs || [];
+      const isThumbnail = outputs.some(output =>
+        /^thumbnails\/[0-9a-f-]{36}_\d+$/i.test(
+          output.filenamePrefix || ''
+        )
+      );
+
+      if (!isThumbnail) continue;
+
+      // LiveKit EgressInfo.startedAt is in nanoseconds.
+      const startedAt = Number(info.startedAt);
+      if (!Number.isFinite(startedAt) || startedAt <= 0) {
+        console.warn(
+          '[THUMBNAIL CLEANUP] Missing start time:',
+          info.egressId
+        );
+        continue;
+      }
+
+      const ageMs = Date.now() - startedAt / 1e6;
+      if (ageMs < 25000) continue;
+
+      try {
+        await egressClient.stopEgress(info.egressId);
+        console.log(
+          '[THUMBNAIL CLEANUP] Stopped expired job:',
+          info.egressId
+        );
+      } catch (error) {
+        if (!isAlreadyEndedStopError(error)) {
+          console.warn(
+            '[THUMBNAIL CLEANUP] Stop failed:',
+            info.egressId,
+            error.message
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error(
+      '[THUMBNAIL CLEANUP] Sweep failed:',
+      error.message
+    );
+  } finally {
+    thumbnailSweepInProgress = false;
   }
 }
 
@@ -886,6 +1044,19 @@ function startLivestreamSweeper() {
 }
 
 startLivestreamSweeper();
+
+// Clean up thumbnail jobs left behind by a Railway restart.
+// Runs once per server startup, not every 60 seconds.
+const thumbnailStartupCleanup = setTimeout(() => {
+  sweepExpiredThumbnailEgresses().catch(error => {
+    console.warn(
+      '[THUMBNAIL CLEANUP] Startup cleanup failed:',
+      error.message
+    );
+  });
+}, 30000);
+
+thumbnailStartupCleanup.unref?.();
 
 // ─── GENERATE LIVEKIT TOKEN ──────────────────────────────────────
 router.post('/token', requireAuth, async (req, res) => {
@@ -1217,6 +1388,229 @@ async function sweepReplayRecovery() {
   }
 }
 
+const thumbnailStartLocks = new Set();
+
+// TEST ONLY: Capture a scholar's livestream frame.
+// Does not modify the MP4 recording or replay.
+router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
+  try {
+    const { roomName } = req.body || {};
+
+    if (typeof roomName !== 'string' || !roomName.trim()) {
+      return res.status(400).json({ error: 'Missing roomName' });
+    }
+
+    const streamRow = await findStreamByRoom(roomName);
+
+    if (!streamRow) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+
+    if (streamRow.user_id !== req.authUserId) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    if (streamRow.is_live !== true) {
+      return res.status(409).json({
+        error: 'Livestream is not active',
+      });
+    }
+
+    const requiredEnv = [
+      'SUPABASE_S3_KEY_ID',
+      'SUPABASE_S3_SECRET',
+      'SUPABASE_S3_ENDPOINT',
+    ];
+
+    if (requiredEnv.some(key => !process.env[key])) {
+      return res.status(500).json({
+        error: 'Thumbnail storage is not configured',
+      });
+    }
+
+    // Confirm the scholar is actually connected.
+    const participants = await getRoomServiceClient()
+      .listParticipants(roomName);
+
+    const hostConnected = participants.some(
+      participant => participant.identity === streamRow.user_id
+    );
+
+    if (!hostConnected) {
+      return res.status(409).json({
+        error: 'Scholar is not connected',
+      });
+    }
+
+    const host = participants.find(
+      participant => participant.identity === streamRow.user_id
+    );
+
+    const hasCameraVideo = (host?.tracks || []).some(
+      track => track.type === 1 &&
+        track.source === 1 &&
+        !track.muted
+    );
+
+    if (!hasCameraVideo) {
+      return res.status(409).json({
+        error: 'Scholar camera video is not available',
+      });
+    }
+
+    const egressClient = getEgressClient();
+
+    if (thumbnailStartLocks.has(roomName)) {
+      return res.status(409).json({
+        error: 'Thumbnail capture request already in progress',
+      });
+    }
+
+    thumbnailStartLocks.add(roomName);
+
+    try {
+    // Prevent duplicate thumbnail capture jobs for this livestream.
+    const activeEgresses = await egressClient.listEgress({
+      roomName,
+      active: true,
+    });
+
+    const existingThumbnail = (activeEgresses || []).find(
+      info =>
+        info?.egressId &&
+        isLivestreamThumbnailEgress(info, streamRow.id) &&
+        !isEgressTerminal(info.status)
+    );
+
+    if (existingThumbnail) {
+
+      return res.status(409).json({
+        error: 'Thumbnail capture already in progress',
+      });
+    }
+
+    let info;
+
+      info = await egressClient.startParticipantEgress(
+        roomName,
+        streamRow.user_id,
+        {
+          images: {
+            captureInterval: 10,
+            width: 640,
+            height: 360,
+            filenamePrefix: `thumbnails/${streamRow.id}_${Date.now()}`,
+            filenameSuffix: ImageFileSuffix.IMAGE_SUFFIX_INDEX,
+            imageCodec: ImageCodec.IC_JPEG,
+            disableManifest: true,
+            output: {
+              case: 's3',
+              value: {
+                accessKey: process.env.SUPABASE_S3_KEY_ID,
+                secret: process.env.SUPABASE_S3_SECRET,
+                region: process.env.SUPABASE_S3_REGION || 'us-east-1',
+                endpoint: process.env.SUPABASE_S3_ENDPOINT,
+                bucket: 'livestreams',
+                forcePathStyle: true,
+              },
+            },
+          },
+        }
+      );
+
+    } finally {
+      thumbnailStartLocks.delete(roomName);
+    }
+
+    if (!info?.egressId) {
+      throw new Error('LiveKit returned no thumbnail egressId');
+    }
+
+    // Test-only: stop after first image, with a 25-second safety limit.
+    const thumbnailEgressId = info.egressId;
+
+    let finished = false;
+    let checking = false;
+
+    const stopThumbnail = async (reason) => {
+      if (finished) return;
+      finished = true;
+
+      clearInterval(imageCheckTimer);
+      clearTimeout(stopTimer);
+
+      try {
+        await egressClient.stopEgress(thumbnailEgressId);
+        console.log('[THUMBNAIL TEST] Stopped:', reason);
+      } catch (error) {
+        if (!isAlreadyEndedStopError(error)) {
+          console.error(
+            '[THUMBNAIL TEST] Stop failed:',
+            error?.message || error
+          );
+        }
+      }
+    };
+
+    const imageCheckTimer = setInterval(async () => {
+      if (finished || checking) return;
+      checking = true;
+
+      try {
+        const results = await egressClient.listEgress({
+          egressId: thumbnailEgressId,
+        });
+
+        if (finished) return;
+
+        const current = results?.[0];
+        if (!current) return;
+
+        const imageCount = (current.imageResults || []).reduce(
+          (total, result) => total + (result.imageCount || 0),
+          0
+        );
+
+        if (isEgressTerminal(current.status)) {
+          finished = true;
+          clearInterval(imageCheckTimer);
+          clearTimeout(stopTimer);
+          console.log('[THUMBNAIL TEST] Egress already ended:', imageCount);
+        } else if (imageCount > 0) {
+          await stopThumbnail('first image captured');
+        }
+      } catch (error) {
+        console.warn('[THUMBNAIL TEST] Image check failed:', error.message);
+      } finally {
+        checking = false;
+      }
+    }, 2000);
+
+    imageCheckTimer.unref?.();
+
+    const stopTimer = setTimeout(() => {
+      stopThumbnail('25-second safety timeout').catch(console.error);
+    }, 25000);
+
+    stopTimer.unref?.();
+
+    return res.json({
+      status: 'started',
+      egressId: info.egressId,
+    });
+  } catch (error) {
+    console.error(
+      '[THUMBNAIL TEST] Error:',
+      error?.response?.data || error?.message || error
+    );
+
+    return res.status(500).json({
+      error: 'Thumbnail test failed',
+    });
+  }
+});
+
+
 // ─── START EGRESS RECORDING ──────────────────────────────────────
 router.post('/egress/start', requireAuth, async (req, res) => {
   try {
@@ -1327,6 +1721,8 @@ router.post(
           if (
             currentInfo &&
             currentInfo.egressId &&
+            currentInfo.roomName === roomName &&
+            isLivestreamRecordingEgress(currentInfo, streamRow.id) &&
             !isEgressTerminal(currentInfo.status)
           ) {
             return res.json({
@@ -1358,12 +1754,14 @@ router.post(
             active: true,
           });
 
-        const existing =
-          activeForRoom &&
-          activeForRoom.length > 0 &&
-          activeForRoom[0].egressId
-            ? activeForRoom[0]
-            : null;
+        const existing = Array.isArray(activeForRoom)
+          ? activeForRoom.find(
+              info =>
+                info?.egressId &&
+                isLivestreamRecordingEgress(info, streamRow.id) &&
+                !isEgressTerminal(info.status)
+            ) || null
+          : null;
 
         if (existing) {
           console.log(
@@ -2000,6 +2398,19 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         });
     }
 
+    // Only MP4 room-composite recordings may enter the replay workflow.
+    // Never allow participant thumbnail egress to be stopped here.
+    if (!isLivestreamRecordingEgress(egressInfo, streamRow.id)) {
+      console.warn(
+        '[EGRESS] Rejected non-recording egress:',
+        egressId
+      );
+
+      return res.status(409).json({
+        error: 'Egress is not a Bushrann MP4 recording',
+      });
+    }
+
     // Trusted file locator from LiveKit's own egress record.
     const trustedFilename = egressFilenameOf(egressInfo);
 
@@ -2079,6 +2490,11 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           continue;
         }
 
+        // Exclude thumbnail jobs and unrelated egresses.
+        if (!isLivestreamRecordingEgress(item, streamRow.id)) {
+          continue;
+        }
+
         // Only fully completed recordings with a real uploaded file are
         // valid merge inputs.
         if (item.status !== EGRESS_STATUS_COMPLETE) {
@@ -2096,9 +2512,9 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           egressId: item.egressId,
           filename: segmentFilename,
           startedAt:
-            typeof item.startedAt === 'number'
+            typeof item.startedAt === 'bigint'
               ? item.startedAt
-              : 0,
+              : BigInt(0),
         });
       }
 
@@ -2113,16 +2529,17 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           egressId,
           filename: trustedFilename,
           startedAt:
-            typeof egressInfo.startedAt ===
-            'number'
+            typeof egressInfo.startedAt === 'bigint'
               ? egressInfo.startedAt
-              : Number.MAX_SAFE_INTEGER,
+              : BigInt(Number.MAX_SAFE_INTEGER),
         });
       }
 
       const orderedSegments = [
         ...segmentsById.values(),
-      ].sort((a, b) => a.startedAt - b.startedAt);
+      ].sort((a, b) =>
+        a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0
+      );
 
       if (orderedSegments.length > 1) {
         multiSegments = orderedSegments;
@@ -2570,9 +2987,9 @@ async function finalizeReplay(
         title:
           updatedReplay.title ||
           'Live Stream Replay',
-        type: 'livestream',
+        is_live_stream: true,
         status: 'approved',
-        is_public: true,
+        is_private: false,
       });
 
     if (videoInsertError) {
