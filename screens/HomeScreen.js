@@ -6,7 +6,7 @@ import { TabView } from 'react-native-tab-view';
 import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import VideoCard from './VideoCard';
+import VideoCard, { activeVideoHolder } from './VideoCard';
 import ModernDialog from './ModernDialog';
 import { homeRefreshRef } from '../utils/refs';
 import AnimatedButton from './AnimatedButton';
@@ -428,6 +428,18 @@ const VideoFeed = forwardRef(
     }
 
     const flatListRef = useRef(null);
+    const videosRef = useRef(videos);
+      videosRef.current = videos;
+
+      const handleBlocked = useCallback((blockedIndex) => {
+        const nextIndex = blockedIndex + 1;
+        if (nextIndex < videosRef.current.length) {
+          flatListRef.current?.scrollToIndex({
+            index: nextIndex,
+            animated: false,
+          });
+        }
+      }, []);
     const loadVideosRequestIdRef = useRef(0);
     const loadInteractionsRequestIdRef = useRef(0);
     const loadingMoreRef = useRef(false);
@@ -854,13 +866,28 @@ const VideoFeed = forwardRef(
 
     const onViewableItemsChanged = useRef(({ viewableItems }) => {
       if (viewableItems.length > 0) {
+        const first = viewableItems[0];
+        const h = activeVideoHolder;
+        try {
+          if (first.item?.id !== h.itemId) {
+            if (h.player) {
+              h.player.pause();
+              h.pausedByUs = true;
+            }
+          } else if (h.pausedByUs) {
+            // Swipe was cancelled and we are back on the same video
+            h.player?.resume();
+            h.pausedByUs = false;
+          }
+        } catch (e) {}
+        __DEV__ && console.log(`[VIDEO DIAG] t=${Date.now()} viewableItemsChanged activeIndex -> ${viewableItems[0].index}`);
         setActiveIndex(viewableItems[0].index);
       }
     }).current;
 
     const renderItem = useCallback(
       ({ item, index }) => {
-        const isVisible = Math.abs(index - activeIndex) <= 5;
+        const isVisible = Math.abs(index - activeIndex) <= 2;
 
         if (!isVisible) {
           return <View style={{ height: listHeight }} />;
@@ -892,16 +919,7 @@ const VideoFeed = forwardRef(
             username={item.profiles?.username ?? 'user'}
             avatarUrl={item.profiles?.avatar_url ?? null}
             scrollOpacity={scrollOpacityAnim}
-            onBlocked={(blockedIndex) => {
-              const nextIndex = blockedIndex + 1;
-
-              if (nextIndex < videos.length) {
-                flatListRef.current?.scrollToIndex({
-                  index: nextIndex,
-                  animated: false,
-                });
-              }
-            }}
+            onBlocked={handleBlocked}
           />
         );
       },
@@ -916,6 +934,7 @@ const VideoFeed = forwardRef(
         navigation,
         videos,
         flatListRef,
+        handleBlocked,
       ]
     );
 
@@ -999,6 +1018,7 @@ const VideoFeed = forwardRef(
               index,
             })}
             onScrollBeginDrag={() => {
+              __DEV__ && console.log(`[VIDEO DIAG] t=${Date.now()} scrollBeginDrag activeIndex=${activeIndex}`);
               scrollStartYRef.current = activeIndex * listHeight;
 
               Animated.timing(scrollOpacityAnim, {
@@ -1040,8 +1060,10 @@ const VideoFeed = forwardRef(
                   }
                 }
               }
+              __DEV__ && console.log(`[VIDEO DIAG] t=${Date.now()} scrollEndDrag from=${activeIndex} target=${targetIndex} vel=${velocity.toFixed(2)}`);
 
               setTimeout(() => {
+                __DEV__ && console.log(`[VIDEO DIAG] t=${Date.now()} snap scrollToOffset target=${targetIndex}`);
                 flatListRef.current?.scrollToOffset({
                   offset: targetIndex * listHeight,
                   animated: false,
@@ -1053,6 +1075,9 @@ const VideoFeed = forwardRef(
                 duration: 200,
                 useNativeDriver: true,
               }).start();
+            }}
+            onMomentumScrollEnd={() => {
+              __DEV__ && console.log(`[VIDEO DIAG] t=${Date.now()} momentumScrollEnd`);
             }}
             refreshControl={
               <RefreshControl

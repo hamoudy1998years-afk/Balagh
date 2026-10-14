@@ -1,5 +1,5 @@
 import Video from 'react-native-video';
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import CommentsModal from './CommentsModal';
 import { useDownload } from '../context/DownloadContext';
@@ -14,9 +14,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { s, ms } from '../utils/responsive';
+import { downloadLivestreamReplayToGallery } from '../utils/videoDownload';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system/legacy';
 import AnimatedButton from './AnimatedButton';
+import { logAnalyticsEvent } from '../services/analytics';
 import ModernDialog from './ModernDialog';
 import { ROUTES } from '../constants/routes';
 import { COLORS } from '../constants/theme';
@@ -25,6 +27,18 @@ import {
   hasCountedVideoView,
   recordVideoView,
 } from '../utils/videoViewTracker';
+
+// __DEV__-only playback diagnostics: timestamped, keyed by video id.
+const vdiag = (msg) => {
+  __DEV__ && console.log(`[VIDEO DIAG] t=${Date.now()} ${msg}`);
+};
+const uriKind = (uri) =>
+  typeof uri === 'string' && uri.startsWith('file://')
+    ? `CACHE:${uri.split('/').pop()}`
+    : 'REMOTE';
+
+// Remembers which card is playing now, so HomeScreen can pause it instantly.
+export const activeVideoHolder = { player: null, itemId: null, pausedByUs: false };
 
 const DownloadProgressOverlay = React.memo(function DownloadProgressOverlay({ visible, progress, preparing }) {
   if (!visible) return null;
@@ -71,17 +85,41 @@ function VideoCard({
 
   // Always start with the video URL immediately — no null, no black frame
   const [videoUri, setVideoUri] = useState(() => item.video_url ?? null);
+  // Protect cached files while this card references them.
+  useEffect(() => {
+    if (!videoUri?.startsWith('file://')) return;
+
+    videoCache.retainCachedVideo(videoUri);
+
+    return () => {
+      videoCache.releaseCachedVideo(videoUri);
+    };
+  }, [videoUri]);
 
   // isReady: false = show thumbnail overlay, true = show video
   const [isReady, setIsReady] = useState(false);
   const [isLoadingSignedUrl, setIsLoadingSignedUrl] = useState(false);
 
   const isVideoReadyRef = useRef(false);
+  // True once playback has actually begun. Async cache lookups must never
+  // swap the source (remote → local) underneath a running player.
+  const playbackStartedRef = useRef(false);
+  const pendingCacheUrlRef = useRef(null);
+  // Last genuine progress position, for backward-jump detection.
+  const lastProgressTimeRef = useRef(null);
+  // One-shot flag: log only the FIRST onProgress tick per item.
+  const firstProgressLoggedRef = useRef(false);
+  // True once this card's current item has been activated at least once.
+  // Unlike playbackStartedRef (which preloaded paused cards can set via
+  // onProgress), this only flips on real activation — the correct signal
+  // for "revisit: seek to 0 for intentional replay".
+  const wasActivatedRef = useRef(false);
   const currentItemIdRef = useRef(item.id);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
     currentItemIdRef.current = item.id;
+    wasActivatedRef.current = false;
   }, [item.id]);
 
   useEffect(() => {
@@ -96,6 +134,7 @@ function VideoCard({
     // Sync immediately so a recycled card never keeps showing a previous
     // item's video while the cache lookup below is still in flight.
     setVideoUri(item.video_url ?? null);
+    pendingCacheUrlRef.current = null;
 
     const loadVideoUri = async () => {
       if (item.video_url?.includes('?')) return;
@@ -107,6 +146,10 @@ function VideoCard({
         const fileInfo = await FileSystem.getInfoAsync(cachedUri);
         if (cancelled) return;
         if (fileInfo.exists) {
+          // If playback already started on the remote URL, keep it — a
+          // source swap would restart ExoPlayer from position 0. The cache
+          // remains valid for the next time this video mounts.
+          if (playbackStartedRef.current) return;
           setVideoUri(cachedUri);
           return;
         }
@@ -114,7 +157,7 @@ function VideoCard({
         if (cancelled) return;
         setVideoUri(item.video_url);
       }
-      videoCache.cacheVideo(item.video_url);
+      pendingCacheUrlRef.current = item.video_url;
     };
 
     if (item.id && item.video_url) {
@@ -127,6 +170,7 @@ function VideoCard({
   const previousVideoUriRef = useRef(videoUri);
   useEffect(() => {
     if (previousVideoUriRef.current !== videoUri) {
+      vdiag(`videoId=${item.id} sourceChange ${uriKind(previousVideoUriRef.current)} -> ${uriKind(videoUri)}`);
       previousVideoUriRef.current = videoUri;
       isVideoReadyRef.current = false;
       setIsReady(false);
@@ -174,6 +218,27 @@ function VideoCard({
   const viewWatchTimeRef = useRef(0);
   const lastViewProgressRef = useRef(null);
   const viewCountTriggeredRef = useRef(false);
+  const analyticsSentMsRef = useRef(0);   // watch time already reported to Firebase (non-overlapping)
+  const viewedFiredRef = useRef(false);   // Firebase video_viewed dedup
+  const analyticsVideoIdRef = useRef(item.id); // video id the current refs belong to
+
+  // Bounded automatic recovery from ExoPlayer source errors (e.g. EOFException).
+  const playbackRetryCountRef = useRef(0);
+  const playbackRetryTimeoutRef = useRef(null);
+  // Watch-time marker: retries re-arm only after ≥3s of genuinely accumulated
+  // playback since the last recovery, never merely from onReadyForDisplay.
+  const playbackRecoveredAtRef = useRef(0);
+  const isActiveRef = useRef(isActive);
+  const isTabActiveRef = useRef(isTabActive);
+  const pausedRef = useRef(paused);
+  const [playbackReloadKey, setPlaybackReloadKey] = useState(0);
+  // TEMPORARY __DEV__-only native playback/stall diagnostics.
+  const nativeBufferingDiagRef = useRef(null);
+  const nativePlaybackDiagRef = useRef({ isPlaying: null, isSeeking: null });
+  const stallProbeRef = useRef({ lastPos: null, lastAdvanceAt: 0, startedAt: 0, stalled: false });
+  const PLAYBACK_MAX_RETRIES = 2;
+  const PLAYBACK_RETRY_DELAY_MS = 1500;
+  const RETRY_REARM_PLAY_SECONDS = 3;
 
   const isUserBlocked = blockedUsers?.has(item.user_id);
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -182,26 +247,57 @@ function VideoCard({
 
   useEffect(() => {
     if (!isActive) {
+      vdiag(`videoId=${item.id} isActive=false (deactivated)`);
       manualPauseRef.current = false;
       setPaused(true);
       setCurrentTime(0);
       progressAnim.setValue(0);
       // DO NOT reset isReady — prevents flicker when scrolling back
     } else {
+      const revisit = wasActivatedRef.current;
+      vdiag(`videoId=${item.id} isActive=true reason=activate seek0=${revisit} (wasActivated)`);
       manualPauseRef.current = false;
-      try {
-        if (player?.current?.seek) {
-          player.current.seek(0);
-        }
-      } catch (e) {}
+      // Seek to 0 only when this item was activated before (revisit): the
+      // pooled player may hold a nonzero position and replay is intended.
+      // On first activation a fresh player already starts at 0, and a
+      // redundant seek can race playback on slow devices (late restart).
+      if (revisit) {
+        try {
+          if (player?.current?.seek) {
+            player.current.seek(0);
+          }
+        } catch (e) {}
+      }
+      wasActivatedRef.current = true;
+      activeVideoHolder.player = player?.current ?? null;
+      activeVideoHolder.itemId = item.id;
+      activeVideoHolder.pausedByUs = false;
       setPaused(false);
     }
+  }, [isActive]);
+
+  // TEMPORARY __DEV__ handoff timing (A→B delay investigation).
+  // Same wall clock (Date.now) as all other [VIDEO DIAG] lines.
+  // renderStart fires when a render with a CHANGED isActive begins
+  // (transition-guarded to avoid per-render flooding). COMMIT fires in
+  // useLayoutEffect, synchronously after React's host-tree mutation for
+  // this commit — it marks the JS-side commit boundary and the moment the
+  // paused prop batch has been ENQUEUED to native, not when ExoPlayer has
+  // applied anything (native pause completion is NOT measurable here).
+  const renderProbeIsActiveRef = useRef(isActive);
+  if (renderProbeIsActiveRef.current !== isActive) {
+    renderProbeIsActiveRef.current = isActive;
+    vdiag(`videoId=${item.id} renderStart isActive=${isActive}`);
+  }
+  useLayoutEffect(() => {
+    vdiag(`videoId=${item.id} COMMIT isActive=${isActive} effPaused=${!isActive || !isTabActive || paused}`);
   }, [isActive]);
 
   useEffect(() => {
     __DEV__ && console.log('[LEAK DEBUG] VideoCard isTabActive changed:', isTabActive, 'item:', item.id, 'isActive:', isActive);
     if (isTabActive) {
       if (isActive) {
+        vdiag(`videoId=${item.id} isTabActive=true isActive=true reason=tab-activate seek0`);
         manualPauseRef.current = false;
         setPaused(false);
         try {
@@ -210,10 +306,12 @@ function VideoCard({
           }
         } catch (e) {}
       } else {
+        vdiag(`videoId=${item.id} isTabActive=true isActive=false resume-without-seek`);
         manualPauseRef.current = false;
         setPaused(false);
       }
     } else {
+      vdiag(`videoId=${item.id} isTabActive=false (tab hidden)`);
       setPaused(true);
       if (isActive) {
         try {
@@ -225,13 +323,24 @@ function VideoCard({
     }
   }, [isTabActive]);
 
+  // Player slot reassignment (player pool rotation) — no seek here by design.
+  useEffect(() => {
+    vdiag(`videoId=${item.id} playerRefChanged hasRef=${!!player}`);
+  }, [player]);
+
   useFocusEffect(
     useCallback(() => {
+      // Resume the active video when returning to the feed.
+      if (isActive && isTabActive) {
+        manualPauseRef.current = false;
+        setPaused(false);
+      }
+
       return () => {
         setPaused(true);
         manualPauseRef.current = false;
       };
-    }, [])
+    }, [isActive, isTabActive])
   );
 
   useEffect(() => {
@@ -265,9 +374,87 @@ function VideoCard({
     durationRef.current = 0;
   }, [item.id]);
   useEffect(() => {
+    // Flush any unreported watch time under the OLD video id before reset.
+    flushAnalyticsWatchTime(analyticsVideoIdRef.current);
+
     viewWatchTimeRef.current = 0;
     lastViewProgressRef.current = null;
+    analyticsSentMsRef.current = 0;
+    viewedFiredRef.current = false;
+    analyticsVideoIdRef.current = item.id;
+    // Firebase video_viewed dedup is keyed to the video, not the user, so a
+    // mid-session login cannot make it fire twice for the same viewing.
+  }, [item.id]);
 
+  // Playback-error recovery: reset per video, cancel when the card stops being
+  // the active playback surface, and never leak the retry timer.
+  const clearPlaybackRetry = useCallback(() => {
+    if (playbackRetryTimeoutRef.current) {
+      clearTimeout(playbackRetryTimeoutRef.current);
+      playbackRetryTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    playbackRetryCountRef.current = 0;
+    playbackRecoveredAtRef.current = 0;
+    playbackStartedRef.current = false;
+    lastProgressTimeRef.current = null;
+    firstProgressLoggedRef.current = false;
+    setPlaybackReloadKey(0);
+    clearPlaybackRetry();
+  }, [item.id, clearPlaybackRetry]);
+
+  // Keep fire-time-checkable copies of the playback surface state.
+  useEffect(() => {
+    isActiveRef.current = isActive;
+    isTabActiveRef.current = isTabActive;
+    pausedRef.current = paused;
+  });
+
+  useEffect(() => {
+    if (!isActive || !isTabActive || paused) {
+      clearPlaybackRetry();
+    }
+  }, [isActive, isTabActive, paused, clearPlaybackRetry]);
+
+  useEffect(() => () => clearPlaybackRetry(), [clearPlaybackRetry]);
+
+  // Effective pause is the exact value passed to <Video paused={...}>.
+  useEffect(() => {
+    if (!__DEV__) return;
+    vdiag(`videoId=${item.id} commandedPause=${!isActive || !isTabActive || paused} isActive=${isActive} isTabActive=${isTabActive} localPaused=${paused} source=${uriKind(videoUri)}`);
+  }, [item.id, isActive, isTabActive, paused, videoUri]);
+
+  // Poll only the genuinely active playing card. No native commands are issued.
+  useEffect(() => {
+    if (!__DEV__) return;
+    nativeBufferingDiagRef.current = null;
+    nativePlaybackDiagRef.current = { isPlaying: null, isSeeking: null };
+    stallProbeRef.current = { lastPos: null, lastAdvanceAt: 0, startedAt: 0, stalled: false };
+
+    if (!isActive || !isTabActive || paused || !isReady || !videoUri || isDragging) return;
+
+    const intervalId = setInterval(() => {
+      if (isSeeking.current || nativePlaybackDiagRef.current.isSeeking === true) return;
+      const probe = stallProbeRef.current;
+      if (probe.lastAdvanceAt === 0 || probe.stalled) return;
+      const elapsedMs = Date.now() - probe.lastAdvanceAt;
+      if (elapsedMs >= 1500) {
+        probe.stalled = true;
+        probe.startedAt = Date.now();
+        vdiag(`videoId=${item.id} STALL_START elapsedMs=${elapsedMs} pos=${probe.lastPos} buffering=${nativeBufferingDiagRef.current} nativePlaying=${nativePlaybackDiagRef.current.isPlaying} nativeSeeking=${nativePlaybackDiagRef.current.isSeeking} source=${uriKind(videoUri)}`);
+      }
+    }, 250);
+
+    return () => {
+      clearInterval(intervalId);
+      stallProbeRef.current = { lastPos: null, lastAdvanceAt: 0, startedAt: 0, stalled: false };
+    };
+  }, [item.id, videoUri, playbackReloadKey, isActive, isTabActive, paused, isReady, isDragging]);
+  // Supabase view counting stays per-user: re-evaluate the session count
+  // whenever the video or the signed-in identity changes.
+  useEffect(() => {
     viewCountTriggeredRef.current = hasCountedVideoView(
       item.id,
       currentUserId
@@ -408,9 +595,6 @@ function VideoCard({
   useEffect(() => {
     return () => {
       if (tapTimer.current) clearTimeout(tapTimer.current);
-      if (player?.current) {
-        try { player.current.seek(0); } catch (e) {}
-      }
     };
   }, [player]);
 
@@ -515,7 +699,9 @@ function VideoCard({
         setIsDownloading(true);
         setDownloadProgress(0);
       }
-      await downloadWatermarkedVideoToGallery(item, {
+      await (item.type === 'livestream'
+        ? downloadLivestreamReplayToGallery
+        : downloadWatermarkedVideoToGallery)(item, {
         onProgress: (progress) => {
           if (isStillRelevant()) setDownloadProgress(progress);
         },
@@ -593,6 +779,22 @@ function VideoCard({
   }, [requireAuth]);
 
   const handleOpenReportSheet = useCallback(() => setShowReportSheet(true), []);
+  // Reports only watch time accumulated since the last flush, so summing
+  // video_watch_time events never double-counts a millisecond.
+  const flushAnalyticsWatchTime = useCallback((videoId) => {
+    const totalMs = Math.round(viewWatchTimeRef.current * 1000);
+    const deltaMs = totalMs - analyticsSentMsRef.current;
+    if (!videoId || deltaMs <= 0) return;
+    analyticsSentMsRef.current = totalMs;
+    logAnalyticsEvent('video_watch_time', {
+      video_id: String(videoId),
+      watched_ms: deltaMs,
+    });
+  }, []);
+
+  // Final flush when the card is truly unmounted.
+  useEffect(() => () => flushAnalyticsWatchTime(analyticsVideoIdRef.current), [flushAnalyticsWatchTime]);
+
   const trackVideoViewProgress = useCallback((current) => {
     if (!Number.isFinite(current)) return;
 
@@ -608,8 +810,7 @@ function VideoCard({
       !isActive ||
       !isTabActive ||
       paused ||
-      isSeeking.current ||
-      viewCountTriggeredRef.current
+      isSeeking.current
     ) {
       lastViewProgressRef.current = current;
       return;
@@ -626,18 +827,25 @@ function VideoCard({
       viewWatchTimeRef.current += delta;
     }
 
-    if (viewWatchTimeRef.current < 3) return;
+    // Supabase view counter — unchanged: fires once at >=3s of actual playback.
+    if (!viewCountTriggeredRef.current && viewWatchTimeRef.current >= 3) {
+      viewCountTriggeredRef.current = true;
 
-    viewCountTriggeredRef.current = true;
+      recordVideoView(item.id, currentUserId).then((success) => {
+        if (!success) {
+          viewCountTriggeredRef.current = hasCountedVideoView(
+            item.id,
+            currentUserId
+          );
+        }
+      });
+    }
 
-    recordVideoView(item.id, currentUserId).then((success) => {
-      if (!success) {
-        viewCountTriggeredRef.current = hasCountedVideoView(
-          item.id,
-          currentUserId
-        );
-      }
-    });
+    // Firebase video_viewed — independent: once at >=5s of actual playback.
+    if (!viewedFiredRef.current && viewWatchTimeRef.current >= 5) {
+      viewedFiredRef.current = true;
+      logAnalyticsEvent('video_viewed', { video_id: String(item.id) });
+    }
   }, [
     item.id,
     item.user_id,
@@ -666,11 +874,17 @@ function VideoCard({
       {/* Video — invisible until onReadyForDisplay fires */}
       {videoUri ? (
         <Video
+          key={playbackReloadKey}
           ref={player}
           source={{ uri: videoUri }}
           onReadyForDisplay={() => {
             isVideoReadyRef.current = true;
             setIsReady(true);
+            // Confirmed ready: mark the watch-time baseline for re-arming
+            // retries. The counter itself is NOT reset here — it re-arms in
+            // onError only after ≥3s of genuinely accumulated playback.
+            playbackRecoveredAtRef.current = viewWatchTimeRef.current;
+            clearPlaybackRetry();
           }}
           style={[styles.video, { zIndex: 2, opacity: isReady ? 1 : 0 }]}
           resizeMode="contain"
@@ -680,16 +894,83 @@ function VideoCard({
           playInBackground={false}
           playWhenInactive={false}
           ignoreSilentSwitch="ignore"
-          progressUpdateInterval={250}
+          progressUpdateInterval={500}
           bufferConfig={{
-            minBufferMs: 15000,
-            maxBufferMs: 50000,
-            bufferForPlaybackMs: 2500,
-            bufferForPlaybackAfterRebufferMs: 5000,
+            minBufferMs: 5000,
+            maxBufferMs: 10000,
+            bufferForPlaybackMs: 500,
+            bufferForPlaybackAfterRebufferMs: 3000,
+          }}
+          onBuffer={(event) => {
+            if (!__DEV__) return;
+            const value = event?.isBuffering;
+            if (typeof value !== 'boolean' || nativeBufferingDiagRef.current === value) return;
+            nativeBufferingDiagRef.current = value;
+            vdiag(`videoId=${item.id} nativeBuffering=${value} active=${isActiveRef.current} commandedPause=${!isActiveRef.current || !isTabActiveRef.current || pausedRef.current} source=${uriKind(videoUri)}`);
+          }}
+          onPlaybackStateChanged={(event) => {
+            if (!__DEV__) return;
+            const nextPlaying = typeof event?.isPlaying === 'boolean' ? event.isPlaying : null;
+            const nextSeeking = typeof event?.isSeeking === 'boolean' ? event.isSeeking : null;
+            const prior = nativePlaybackDiagRef.current;
+            if (prior.isPlaying === nextPlaying && prior.isSeeking === nextSeeking) return;
+            nativePlaybackDiagRef.current = { isPlaying: nextPlaying, isSeeking: nextSeeking };
+            vdiag(`videoId=${item.id} nativePlaying=${nextPlaying} nativeSeeking=${nextSeeking} buffering=${nativeBufferingDiagRef.current} commandedPause=${!isActiveRef.current || !isTabActiveRef.current || pausedRef.current} source=${uriKind(videoUri)}`);
           }}
           onError={(e) => {
             __DEV__ && console.log('Video error:', e);
+            __DEV__ && (() => {
+              const isCached = typeof videoUri === 'string' && videoUri.startsWith('file://');
+              const basename = isCached ? videoUri.split('/').pop() : null;
+              const errCode = e?.error?.errorCode ?? e?.error?.code ?? 'unknown';
+              const errMsg = e?.error?.errorString ?? e?.error?.message ?? JSON.stringify(e?.error ?? e);
+              console.log(
+                `[VIDEO DIAG] onError videoId=${item.id} source=${isCached ? 'CACHE' : 'REMOTE'}` +
+                (basename ? ` file=${basename}` : '') +
+                ` code=${errCode} msg=${errMsg} retryCount=${playbackRetryCountRef.current}`
+              );
+            })();
             isVideoReadyRef.current = false;
+            // Bounded recovery: only for the active, playing surface, max 2
+            // retries per failure sequence with a short delay. Remounting via
+            // key releases the failed native player as the replacement mounts.
+            if (!isActive || !isTabActive || paused || !videoUri) return;
+            clearPlaybackRetry();
+            // Re-arm only after genuinely sustained playback (≥3s accumulated
+            // watch time since the last recovery), at most once per period.
+            if (
+              viewWatchTimeRef.current - playbackRecoveredAtRef.current >=
+              RETRY_REARM_PLAY_SECONDS
+            ) {
+              playbackRetryCountRef.current = 0;
+              playbackRecoveredAtRef.current = viewWatchTimeRef.current;
+            }
+            if (playbackRetryCountRef.current >= PLAYBACK_MAX_RETRIES) return;
+            playbackRetryCountRef.current += 1;
+            playbackRetryTimeoutRef.current = setTimeout(() => {
+              playbackRetryTimeoutRef.current = null;
+              if (!isMountedRef.current) return;
+              // Fire-time guard against stale closures: skip if the surface
+              // became paused/inactive during the delay window.
+              if (
+                !isActiveRef.current ||
+                !isTabActiveRef.current ||
+                pausedRef.current
+              ) {
+                return;
+              }
+              // If the failed source was the cached local file, fall back to
+              // the remote URL so the same invalid file is never retried.
+              if (
+                videoUri !== item.video_url &&
+                item.video_url &&
+                !item.video_url.includes('?')
+              ) {
+                setVideoUri(item.video_url);
+              }
+              setPlaybackReloadKey((k) => k + 1);
+              vdiag(`videoId=${item.id} remount reason=error-retry retryCount=${playbackRetryCountRef.current}`);
+            }, PLAYBACK_RETRY_DELAY_MS);
           }}
           onLoad={(data) => {
 
@@ -701,11 +982,28 @@ function VideoCard({
               isVideoReadyRef.current = true;
             }
           }}
+          onSeek={(e) => {
+            vdiag(`videoId=${item.id} onSeek current=${e?.currentTime} seekTo=${e?.seekTime} isActive=${isActiveRef.current} paused=${pausedRef.current}`);
+          }}
           onProgress={(data) => {
 
             if (isSeeking.current) return;
 
             const current = Number(data?.currentTime);
+            if (__DEV__ && isActive && isTabActive && !paused && isReady && !isDragging && !isSeeking.current && Number.isFinite(current)) {
+              const probe = stallProbeRef.current;
+              const now = Date.now();
+              const progressed = probe.lastPos === null || current > probe.lastPos + 0.03 || current < probe.lastPos - 0.5;
+              if (progressed) {
+                if (probe.stalled) {
+                  vdiag(`videoId=${item.id} STALL_END durationMs=${now - probe.startedAt} totalNoAdvanceMs=${now - probe.lastAdvanceAt} pos=${current} buffering=${nativeBufferingDiagRef.current} nativePlaying=${nativePlaybackDiagRef.current.isPlaying} source=${uriKind(videoUri)}`);
+                }
+                probe.lastPos = current;
+                probe.lastAdvanceAt = now;
+                probe.startedAt = 0;
+                probe.stalled = false;
+              }
+            }
 
             trackVideoViewProgress(current);
             const seekableDuration = Number(data?.seekableDuration);
@@ -738,6 +1036,33 @@ function VideoCard({
               current >= 0 &&
               effectiveDuration > 0
             ) {
+              // Detect backward jumps during the first seconds of playback
+              // (0.1–5s window), threshold 0.1s, without per-tick logging.
+              if (
+                lastProgressTimeRef.current !== null &&
+                lastProgressTimeRef.current >= 0.1 &&
+                lastProgressTimeRef.current <= 5 &&
+                current < lastProgressTimeRef.current - 0.1
+              ) {
+                vdiag(`videoId=${item.id} backwardJump from=${lastProgressTimeRef.current.toFixed(2)} to=${current.toFixed(2)}`);
+              }
+              lastProgressTimeRef.current = current;
+              if (!firstProgressLoggedRef.current) {
+                firstProgressLoggedRef.current = true;
+                vdiag(`videoId=${item.id} firstProgress pos=${current.toFixed(2)} isActive=${isActive} paused=${paused || !isActive || !isTabActive} source=${uriKind(videoUri)}`);
+              }
+              playbackStartedRef.current = true;
+              if (
+                pendingCacheUrlRef.current &&
+                isActive &&
+                isTabActive &&
+                !paused &&
+                current >= 2
+              ) {
+                const urlToCache = pendingCacheUrlRef.current;
+                pendingCacheUrlRef.current = null;
+                videoCache.cacheVideo(urlToCache);
+              }
               setCurrentTime(current);
 
               const progress = Math.max(
@@ -895,13 +1220,15 @@ function VideoCard({
         onDismiss={() => setShowReportSheet(false)}
       />
 
-      <CommentsModal
-        visible={showComments}
-        onClose={() => setShowComments(false)}
-        videoId={item.id}
-        navigation={navigation}
-        isCreator={currentUserId === item.user_id}
-      />
+      {showComments && (
+        <CommentsModal
+          visible={showComments}
+          onClose={() => setShowComments(false)}
+          videoId={item.id}
+          navigation={navigation}
+          isCreator={currentUserId === item.user_id}
+        />
+      )}
 
       <DownloadProgressOverlay visible={isDownloading} progress={downloadProgress} preparing={downloadPreparing} />
 
