@@ -138,15 +138,22 @@ function isAlreadyEndedStopError(error) {
 
 // Trusted Storage locator from LiveKit's own egress record.
 function egressFilenameOf(egressInfo) {
+  const recording =
+    egressInfo?.request?.case === 'roomComposite'
+      ? egressInfo.request.value
+      : egressInfo?.roomComposite;
+
+  const requestedFilename =
+    recording?.fileOutputs?.[0]?.filepath ||
+    recording?.file?.filepath ||
+    null;
+
   return (
-    (egressInfo.file &&
-      egressInfo.file.filename) ||
-    (egressInfo.fileResults &&
-      egressInfo.fileResults.length > 0 &&
-      egressInfo.fileResults[
-        egressInfo.fileResults.length - 1
-      ].filename) ||
-    null
+    egressInfo?.file?.filename ||
+    egressInfo?.fileResults?.find(
+      result => result.filename
+    )?.filename ||
+    requestedFilename
   );
 }
 
