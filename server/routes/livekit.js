@@ -1497,6 +1497,8 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
       });
     }
 
+    const thumbnailPrefix = `thumbnails/${streamRow.id}_${Date.now()}`;
+
       info = await egressClient.startParticipantEgress(
         roomName,
         streamRow.user_id,
@@ -1505,7 +1507,7 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
             captureInterval: 10,
             width: 640,
             height: 360,
-            filenamePrefix: `thumbnails/${streamRow.id}_${Date.now()}`,
+            filenamePrefix: thumbnailPrefix,
             filenameSuffix: ImageFileSuffix.IMAGE_SUFFIX_INDEX,
             imageCodec: ImageCodec.IC_JPEG,
             disableManifest: true,
@@ -1589,10 +1591,24 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
           })),
         });
 
-        const imageCount = (current.imageResults || []).reduce(
-          (total, result) => total + Number(result.imageCount ?? 0),
-          0
-        );
+        const prefixFilename = thumbnailPrefix.split('/').pop();
+
+        const { data: uploadedImages, error: storageError } =
+          await supabase.storage
+            .from('livestreams')
+            .list('thumbnails', {
+              limit: 1,
+              search: prefixFilename,
+            });
+
+        if (storageError) {
+          throw storageError;
+        }
+
+        const imageCount = (uploadedImages || []).filter(file =>
+          file.name.startsWith(prefixFilename) &&
+          /\.jpe?g$/i.test(file.name)
+        ).length;
 
         if (isEgressTerminal(current.status)) {
           finished = true;
