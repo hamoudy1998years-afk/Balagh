@@ -980,6 +980,121 @@ async function sweepExpiredThumbnailEgresses() {
   }
 }
 
+const LIVE_THUMBNAIL_ORPHAN_GRACE_MS = 10 * 60 * 1000;
+let liveThumbnailOrphanSweepRunning = false;
+
+async function sweepOrphanLiveThumbnails() {
+  if (liveThumbnailOrphanSweepRunning) return;
+  liveThumbnailOrphanSweepRunning = true;
+
+  try {
+    const bucket = supabase.storage.from('livestreams');
+    const cutoff = Date.now() - LIVE_THUMBNAIL_ORPHAN_GRACE_MS;
+    let offset = 0;
+    const pageSize = 100;
+    const candidates = [];
+
+    // List only JPEGs under livestreams/thumbnails.
+    // Never inspect or delete MP4 recordings.
+    while (true) {
+      const { data: files, error } = await bucket.list('thumbnails', {
+        limit: pageSize,
+        offset,
+        sortBy: { column: 'name', order: 'asc' },
+      });
+
+      if (error) throw error;
+
+      if (!files?.length) break;
+
+      for (const file of files) {
+        const match = file.name.match(
+          /^([0-9a-f-]{36})_(\d+)_\d+\.jpe?g$/i
+        );
+
+        if (!match) continue;
+
+        const createdAt = Number(match[2]);
+
+        if (
+          !Number.isSafeInteger(createdAt) ||
+          createdAt > cutoff ||
+          createdAt < 1600000000000
+        ) {
+          continue;
+        }
+
+        candidates.push({
+          name: file.name,
+          streamId: match[1],
+        });
+      }
+
+      if (files.length < pageSize) break;
+      offset += pageSize;
+    }
+
+    for (const candidate of candidates) {
+      const storagePath = `thumbnails/${candidate.name}`;
+      const { data: publicData } = bucket.getPublicUrl(storagePath);
+      const publicUrl = publicData.publicUrl;
+
+      // Preserve images still referenced by an active livestream.
+      const { data: liveRows, error: liveError } = await supabase
+        .from('live_streams')
+        .select('id')
+        .eq('thumbnail_url', publicUrl)
+        .limit(1);
+
+      if (liveError) throw liveError;
+      if (liveRows?.length) continue;
+
+      // Preserve any JPEG referenced by a replay.
+      const { data: replayRows, error: replayError } = await supabase
+        .from('livestreams')
+        .select('id')
+        .eq('thumbnail_url', publicUrl)
+        .limit(1);
+
+      if (replayError) throw replayError;
+      if (replayRows?.length) continue;
+
+      const { data: videoRows, error: videoError } = await supabase
+        .from('videos')
+        .select('id')
+        .eq('thumbnail_url', publicUrl)
+        .limit(1);
+
+      if (videoError) throw videoError;
+      if (videoRows?.length) continue;
+
+      // Protect any currently active stream even if its thumbnail
+      // has not yet been linked to the database.
+      const { data: activeRows, error: activeError } = await supabase
+        .from('live_streams')
+        .select('id')
+        .eq('id', candidate.streamId)
+        .eq('is_live', true)
+        .limit(1);
+
+      if (activeError) throw activeError;
+      if (activeRows?.length) continue;
+
+      const { error: removeError } = await bucket.remove([storagePath]);
+
+      if (removeError) throw removeError;
+
+      console.log('[AUTO THUMBNAIL] Removed orphan:', storagePath);
+    }
+  } catch (error) {
+    console.warn(
+      '[AUTO THUMBNAIL] Orphan sweep failed:',
+      error.message
+    );
+  } finally {
+    liveThumbnailOrphanSweepRunning = false;
+  }
+}
 function startLivestreamSweeper() {
   // Avoid duplicate timers if this module is accidentally initialized
   // more than once inside the same Node process.
@@ -1007,6 +1122,12 @@ function startLivestreamSweeper() {
       );
     });
 
+    sweepOrphanLiveThumbnails().catch(error => {
+      console.warn(
+        '[AUTO THUMBNAIL] Scheduled orphan cleanup failed:',
+        error.message
+      );
+    });
     sweepReplayRecovery().catch(error => {
       console.error(
         '[RECOVERY] Initial replay recovery sweep failed:',
@@ -1033,6 +1154,12 @@ function startLivestreamSweeper() {
       );
     });
 
+    sweepOrphanLiveThumbnails().catch(error => {
+      console.warn(
+        '[AUTO THUMBNAIL] Scheduled orphan cleanup failed:',
+        error.message
+      );
+    });
     sweepReplayRecovery().catch(error => {
       console.error(
         '[RECOVERY] Scheduled replay recovery sweep failed:',
@@ -1397,6 +1524,232 @@ async function sweepReplayRecovery() {
 
 const thumbnailStartLocks = new Set();
 
+function needsLiveThumbnail(streamRow) {
+  return (
+    streamRow?.is_live === true &&
+    !streamRow.thumbnail_url
+  );
+}
+
+async function captureAutomaticLiveThumbnail(roomName, streamRow) {
+  if (!needsLiveThumbnail(streamRow)) return;
+
+  const streamId = streamRow.id;
+  if (thumbnailStartLocks.has(roomName)) return;
+
+  thumbnailStartLocks.add(roomName);
+
+  let egressId = null;
+  let prefix = null;
+
+  let egressClient;
+
+  try {
+    egressClient = getEgressClient();
+
+    const latest = await findStreamByRoom(roomName);
+    if (!latest || latest.id !== streamId || !needsLiveThumbnail(latest)) {
+      return;
+    }
+
+    const existingFiles = await supabase.storage
+      .from('livestreams')
+      .list('thumbnails', {
+        limit: 100,
+        search: `${streamId}_`,
+      });
+
+    if (existingFiles.error) throw existingFiles.error;
+
+    let filename = (existingFiles.data || [])
+      .filter(file =>
+        file.name.startsWith(`${streamId}_`) &&
+        /\.jpe?g$/i.test(file.name)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name))[0]?.name;
+
+    if (!filename) {
+      const activeEgresses = await egressClient.listEgress({
+        roomName,
+        active: true,
+      });
+
+      if ((activeEgresses || []).some(info =>
+        isLivestreamThumbnailEgress(info, streamId) &&
+        !isEgressTerminal(info.status)
+      )) {
+        return;
+      }
+
+      const participants = await getRoomServiceClient()
+        .listParticipants(roomName);
+
+      const host = (participants || []).find(
+        participant => participant.identity === streamRow.user_id
+      );
+
+      const cameraAvailable = (host?.tracks || []).some(
+        track => track.type === 1 &&
+          track.source === 1 &&
+          !track.muted
+      );
+
+      if (!cameraAvailable) return;
+
+      prefix = `thumbnails/${streamId}_${Date.now()}`;
+
+      const info = await egressClient.startParticipantEgress(
+        roomName,
+        streamRow.user_id,
+        {
+          images: {
+            captureInterval: 10,
+            width: 640,
+            height: 360,
+            filenamePrefix: prefix,
+            filenameSuffix: ImageFileSuffix.IMAGE_SUFFIX_INDEX,
+            imageCodec: ImageCodec.IC_JPEG,
+            disableManifest: true,
+            output: {
+              case: 's3',
+              value: {
+                accessKey: process.env.SUPABASE_S3_KEY_ID,
+                secret: process.env.SUPABASE_S3_SECRET,
+                region: process.env.SUPABASE_S3_REGION || 'us-east-1',
+                endpoint: process.env.SUPABASE_S3_ENDPOINT,
+                bucket: 'livestreams',
+                forcePathStyle: true,
+              },
+            },
+          },
+        }
+      );
+
+      if (!info?.egressId) {
+        throw new Error('No thumbnail egressId returned');
+      }
+
+      egressId = info.egressId;
+      const prefixName = prefix.split('/').pop();
+
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        const result = await supabase.storage
+          .from('livestreams')
+          .list('thumbnails', {
+            limit: 100,
+            search: prefixName,
+          });
+
+        if (result.error) throw result.error;
+
+        filename = (result.data || []).find(file =>
+          file.name.startsWith(prefixName) &&
+          /\.jpe?g$/i.test(file.name)
+        )?.name;
+
+        if (filename) break;
+      }
+    }
+
+    if (!filename) {
+      console.warn('[AUTO THUMBNAIL] No JPEG captured:', streamId);
+      return;
+    }
+
+    const storagePath = `thumbnails/${filename}`;
+    const { data: urlData } = supabase.storage
+      .from('livestreams')
+      .getPublicUrl(storagePath);
+
+    const { data: updated, error: updateError } = await supabase
+      .from('live_streams')
+      .update({ thumbnail_url: urlData.publicUrl })
+      .eq('id', streamId)
+      .eq('is_live', true)
+      .is('thumbnail_url', null)
+      .select('id');
+
+    if (updateError) throw updateError;
+
+    if (!updated?.length) {
+      const { data: current } = await supabase
+        .from('live_streams')
+        .select('thumbnail_url')
+        .eq('id', streamId)
+        .maybeSingle();
+
+      if (current?.thumbnail_url !== urlData.publicUrl) {
+        const { error: removeError } = await supabase.storage
+          .from('livestreams')
+          .remove([storagePath]);
+
+        if (removeError) {
+          console.warn('[AUTO THUMBNAIL] Cleanup failed:', removeError.message);
+        }
+      }
+      return;
+    }
+
+    console.log('[AUTO THUMBNAIL] Saved:', streamId, storagePath);
+  } catch (error) {
+    console.warn('[AUTO THUMBNAIL] Failed:', error.message);
+  } finally {
+    if (egressId) {
+      try {
+        await egressClient.stopEgress(egressId);
+      } catch (error) {
+        if (!isAlreadyEndedStopError(error)) {
+          console.warn('[AUTO THUMBNAIL] Stop failed:', error.message);
+        }
+      }
+    }
+
+    // AUTO THUMBNAIL ORPHAN CLEANUP V2
+    if (prefix) {
+      try {
+        const prefixName = prefix.split('/').pop();
+        const { data: files, error: listError } = await supabase.storage
+          .from('livestreams')
+          .list('thumbnails', { limit: 100, search: prefixName });
+
+        if (listError) throw listError;
+
+        const { data: row, error: rowError } = await supabase
+          .from('live_streams')
+          .select('thumbnail_url')
+          .eq('id', streamId)
+          .maybeSingle();
+
+        if (rowError) throw rowError;
+
+        for (const file of files || []) {
+          if (!file.name.startsWith(prefixName) || !/\.jpe?g$/i.test(file.name)) {
+            continue;
+          }
+
+          const storagePath = `thumbnails/${file.name}`;
+          const { data: publicData } = supabase.storage
+            .from('livestreams')
+            .getPublicUrl(storagePath);
+
+          if (row?.thumbnail_url !== publicData.publicUrl) {
+            const { error: removeError } = await supabase.storage
+              .from('livestreams')
+              .remove([storagePath]);
+
+            if (removeError) throw removeError;
+          }
+        }
+      } catch (cleanupError) {
+        console.warn('[AUTO THUMBNAIL] Orphan cleanup failed:', cleanupError.message);
+      }
+    }
+
+    thumbnailStartLocks.delete(roomName);
+  }
+}
 // TEST ONLY: Capture a scholar's livestream frame.
 // Does not modify the MP4 recording or replay.
 router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
@@ -1678,6 +2031,15 @@ router.post('/egress/start', requireAuth, async (req, res) => {
         roomName,
         streamRow
       );
+
+      // Capture a live preview without blocking MP4 recording.
+      void captureAutomaticLiveThumbnail(roomName, streamRow)
+        .catch(error => {
+          console.warn(
+            '[AUTO THUMBNAIL] Background capture failed:',
+            error.message
+          );
+        });
 
       return res.json(started);
     } catch (startError) {
