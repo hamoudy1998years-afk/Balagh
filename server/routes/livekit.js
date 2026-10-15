@@ -1594,6 +1594,18 @@ async function captureAutomaticLiveThumbnail(roomName, streamRow) {
           !track.muted
       );
 
+      console.log('[AUTO THUMBNAIL] Camera check:', {
+        roomName,
+        streamId,
+        hostFound: !!host,
+        tracks: host?.tracks?.map(track => ({
+          type: track.type,
+          source: track.source,
+          muted: track.muted,
+        })) || [],
+        cameraAvailable,
+      });
+
       if (!cameraAvailable) return;
 
       prefix = `thumbnails/${streamId}_${Date.now()}`;
