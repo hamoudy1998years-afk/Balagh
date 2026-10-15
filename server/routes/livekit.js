@@ -1467,6 +1467,7 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
     }
 
     thumbnailStartLocks.add(roomName);
+    let info;
 
     try {
     // Prevent duplicate thumbnail capture jobs for this livestream.
