@@ -1527,7 +1527,7 @@ const thumbnailStartLocks = new Set();
 function needsLiveThumbnail(streamRow) {
   return (
     streamRow?.is_live === true &&
-    !streamRow.thumbnail_url
+    !String(streamRow.thumbnail_url || '').includes('/livestreams/thumbnails/')
   );
 }
 
@@ -1675,13 +1675,18 @@ async function captureAutomaticLiveThumbnail(roomName, streamRow) {
       .from('livestreams')
       .getPublicUrl(storagePath);
 
-    const { data: updated, error: updateError } = await supabase
+    let updateQuery = supabase
       .from('live_streams')
       .update({ thumbnail_url: urlData.publicUrl })
       .eq('id', streamId)
-      .eq('is_live', true)
-      .is('thumbnail_url', null)
-      .select('id');
+      .eq('is_live', true);
+
+    updateQuery = latest.thumbnail_url == null
+      ? updateQuery.is('thumbnail_url', null)
+      : updateQuery.eq('thumbnail_url', latest.thumbnail_url);
+
+    const { data: updated, error: updateError } =
+      await updateQuery.select('id');
 
     if (updateError) throw updateError;
 
