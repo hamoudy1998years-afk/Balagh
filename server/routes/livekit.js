@@ -1475,6 +1475,7 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
 
     thumbnailStartLocks.add(roomName);
     let info;
+    let thumbnailPrefix;
 
     try {
     // Prevent duplicate thumbnail capture jobs for this livestream.
@@ -1497,7 +1498,7 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
       });
     }
 
-    const thumbnailPrefix = `thumbnails/${streamRow.id}_${Date.now()}`;
+    thumbnailPrefix = `thumbnails/${streamRow.id}_${Date.now()}`;
 
       info = await egressClient.startParticipantEgress(
         roomName,
