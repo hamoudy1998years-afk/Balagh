@@ -566,32 +566,30 @@ app.get('/video/:id', async (req, res) => {
         return res.redirect(302, PLAY_STORE_URL);
       }
 
-      let username = 'Bushrann';
+      let displayName = 'Bushrann';
 
       if (stream.user_id) {
         const { data: profile, error } = await supabase
           .from('profiles')
-          .select('username')
+          .select('full_name, username')
           .eq('id', stream.user_id)
           .maybeSingle();
 
-        if (
-          !error &&
-          typeof profile?.username === 'string' &&
-          profile.username.trim()
-        ) {
-          username = `@${profile.username.trim()}`;
+        if (!error && profile) {
+          displayName =
+            profile.full_name?.trim() ||
+            profile.username?.trim() ||
+            'Bushrann';
         }
       }
 
       const shareUrl =
         `${SHARE_BASE_URL}/live/${encodeURIComponent(stream.id)}`;
 
-      const title =
-        `${stream.title?.trim() || 'Live Q&A'} — Live on Bushrann`;
+      const title = `${displayName} is LIVE on Bushrann`;
 
       const description =
-        `Watch ${username} live on Bushrann. ` +
+        `Watch ${displayName} live on Bushrann. ` +
         'Join the livestream and ask questions.';
 
       const safeTitle = escapeHtml(title);
