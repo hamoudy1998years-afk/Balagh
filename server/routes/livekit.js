@@ -1580,6 +1580,15 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
         const current = results?.[0];
         if (!current) return;
 
+        console.log('[THUMBNAIL DIAG]', {
+          egressId: thumbnailEgressId,
+          status: String(current.status),
+          imageResults: (current.imageResults || []).map(result => ({
+            imageCount: String(result.imageCount ?? 0),
+            filenamePrefix: result.filenamePrefix,
+          })),
+        });
+
         const imageCount = (current.imageResults || []).reduce(
           (total, result) => total + Number(result.imageCount ?? 0),
           0
