@@ -1524,6 +1524,14 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
     }
 
     if (!info?.egressId) {
+      console.error('[THUMBNAIL TEST] Missing egressId:', {
+        responsePresent: !!info,
+        responseType: typeof info,
+        responseKeys: info ? Object.keys(info) : [],
+        status: info?.status,
+        error: info?.error,
+      });
+
       throw new Error('LiveKit returned no thumbnail egressId');
     }
 
