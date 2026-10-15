@@ -1490,8 +1490,6 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
       });
     }
 
-    let info;
-
       info = await egressClient.startParticipantEgress(
         roomName,
         streamRow.user_id,
