@@ -1574,7 +1574,7 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
         if (!current) return;
 
         const imageCount = (current.imageResults || []).reduce(
-          (total, result) => total + (result.imageCount || 0),
+          (total, result) => total + Number(result.imageCount ?? 0),
           0
         );
 
