@@ -432,6 +432,229 @@ app.get('/video/:id', async (req, res) => {
   }
 });
 
+  // Public social preview for active Bushrann livestreams.
+  // Separate from video sharing and LiveKit recording.
+  function isAllowedLiveThumbnailUrl(value) {
+    if (typeof value !== 'string' || !process.env.SUPABASE_URL) return false;
+
+    try {
+      const url = new URL(value);
+      const base = new URL(process.env.SUPABASE_URL);
+
+      return (
+        url.protocol === 'https:' &&
+        url.origin === base.origin &&
+        url.pathname.startsWith(
+          '/storage/v1/object/public/livestreams/thumbnails/'
+        ) &&
+        !url.username &&
+        !url.password
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function getShareableLiveStream(id) {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    ) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('live_streams')
+      .select('id, user_id, title, thumbnail_url, is_live')
+      .eq('id', id)
+      .eq('is_live', true)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  app.get('/live/:id/social-preview.jpg', async (req, res) => {
+    const id = String(req.params.id || '').trim();
+
+    try {
+      const stream = await getShareableLiveStream(id);
+
+      if (!stream || !isAllowedLiveThumbnailUrl(stream.thumbnail_url)) {
+        return res.status(404).end();
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
+      try {
+        const response = await fetch(stream.thumbnail_url, {
+          signal: controller.signal,
+        });
+
+        if (
+          !response.ok ||
+          !(response.headers.get('content-type') || '')
+            .toLowerCase()
+            .startsWith('image/')
+        ) {
+          return res.status(502).end();
+        }
+
+        const contentLength = Number(
+          response.headers.get('content-length') || 0
+        );
+
+        if (contentLength > 8 * 1024 * 1024) {
+          return res.status(502).end();
+        }
+
+        const bytes = Buffer.from(await response.arrayBuffer());
+
+        if (!bytes.length || bytes.length > 8 * 1024 * 1024) {
+          return res.status(502).end();
+        }
+
+        const background = await sharp(bytes)
+          .rotate()
+          .resize(1200, 630, { fit: 'cover' })
+          .blur(25)
+          .jpeg()
+          .toBuffer();
+
+        const foreground = await sharp(bytes)
+          .rotate()
+          .ensureAlpha()
+          .resize(1200, 630, {
+            fit: 'contain',
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+          })
+          .png()
+          .toBuffer();
+
+        const preview = await sharp(background)
+          .composite([{ input: foreground, gravity: 'center' }])
+          .jpeg({ quality: 88, progressive: true })
+          .toBuffer();
+
+        res.set({
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'public, max-age=300',
+        });
+
+        return res.status(200).send(preview);
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      console.error(
+        '[LIVE SHARE] Image preview failed:',
+        id,
+        error?.message || error
+      );
+
+      return res.status(500).end();
+    }
+  });
+
+  app.get('/live/:id', async (req, res) => {
+    const id = String(req.params.id || '').trim();
+
+    try {
+      const stream = await getShareableLiveStream(id);
+
+      if (!stream) {
+        return res.redirect(302, PLAY_STORE_URL);
+      }
+
+      let username = 'Bushrann';
+
+      if (stream.user_id) {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('id', stream.user_id)
+          .maybeSingle();
+
+        if (
+          !error &&
+          typeof profile?.username === 'string' &&
+          profile.username.trim()
+        ) {
+          username = `@${profile.username.trim()}`;
+        }
+      }
+
+      const shareUrl =
+        `${SHARE_BASE_URL}/live/${encodeURIComponent(stream.id)}`;
+
+      const title =
+        `${stream.title?.trim() || 'Live Q&A'} — Live on Bushrann`;
+
+      const description =
+        `Watch ${username} live on Bushrann. ` +
+        'Join the livestream and ask questions.';
+
+      const safeTitle = escapeHtml(title);
+      const safeDescription = escapeHtml(description);
+      const safeUrl = escapeHtml(shareUrl);
+      const safeStore = escapeHtml(PLAY_STORE_URL);
+
+      const imageUrl = `${shareUrl}/social-preview.jpg`;
+
+      const imageMetadata = isAllowedLiveThumbnailUrl(stream.thumbnail_url)
+        ? `<meta property="og:image" content="${escapeHtml(imageUrl)}" />
+  <meta property="og:image:secure_url" content="${escapeHtml(imageUrl)}" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:image" content="${escapeHtml(imageUrl)}" />`
+        : '';
+
+      const crawler =
+        /facebookexternalhit|Facebot|Twitterbot|LinkedInBot|WhatsApp|TelegramBot|Discordbot|Slackbot/i.test(
+          String(req.get('user-agent') || '')
+        );
+
+      const fallback = crawler
+        ? ''
+        : `<meta http-equiv="refresh" content="0;url=${safeStore}" />`;
+
+      res.set('Cache-Control', 'no-store');
+
+      return res.status(200).type('html').send(`<!doctype html>
+  <html lang="en">
+  <head>
+  <meta charset="utf-8" />
+  <title>${safeTitle}</title>
+  <meta name="description" content="${safeDescription}" />
+  <link rel="canonical" href="${safeUrl}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Bushrann" />
+  <meta property="og:title" content="${safeTitle}" />
+  <meta property="og:description" content="${safeDescription}" />
+  <meta property="og:url" content="${safeUrl}" />
+  ${imageMetadata}
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${safeTitle}" />
+  <meta name="twitter:description" content="${safeDescription}" />
+  ${fallback}
+  </head>
+  <body>
+  <p>Opening Bushrann…
+  <a href="${safeStore}">Continue to Google Play</a></p>
+  </body>
+  </html>`);
+    } catch (error) {
+      console.error(
+        '[LIVE SHARE] Preview page failed:',
+        id,
+        error?.message || error
+      );
+
+      return res.redirect(302, PLAY_STORE_URL);
+    }
+  });
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({

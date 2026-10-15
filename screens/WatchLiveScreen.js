@@ -22,6 +22,7 @@ import { ROUTES } from '../constants/routes';
 import { useUser } from '../context/UserContext';
 import { fetchWithTimeout } from '../utils/apiClient';
 import { useKeepAwake } from 'expo-keep-awake';
+import { logAnalyticsEvent } from '../services/analytics';
 
 const { width, height } = Dimensions.get('window');
 const TOKEN_SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
@@ -104,6 +105,7 @@ export default function WatchLiveScreen({ navigation, route }) {
   const submittingQuestionRef = useRef(false); // guards rapid duplicate question submits
   const sendingMessageRef = useRef(false); // guards rapid duplicate chat sends
   const lastReactionAtRef = useRef(0); // shared client throttle for emoji + heart reaction writes
+  const liveAnalyticsRef = useRef({ streamId: null, joinedAt: 0, leaveSent: false }); // Firebase live_join/live_leave dedup
   // Own-question notification: tracks last seen flag states per question id so
   // we only notify on a real false -> true transition of is_answered/is_dismissed.
   const ownQuestionStatesRef = useRef({});
@@ -350,6 +352,8 @@ export default function WatchLiveScreen({ navigation, route }) {
 
       roomRef.current = room;
       setJoining(false);
+      liveAnalyticsRef.current = { streamId: stream.id, joinedAt: Date.now(), leaveSent: false };
+      logAnalyticsEvent('live_join', { stream_id: String(stream.id), role: 'viewer' });
 
       // Check if host is already in the room and has video
       for (const participant of room.remoteParticipants.values()) {
@@ -449,6 +453,16 @@ export default function WatchLiveScreen({ navigation, route }) {
     }
 
     if (roomRef.current) {
+      // Firebase live_leave for the abandoned attempt before reconnecting.
+      const la = liveAnalyticsRef.current;
+      if (la.streamId && !la.leaveSent) {
+        la.leaveSent = true;
+        logAnalyticsEvent('live_leave', {
+          stream_id: String(la.streamId),
+          role: 'viewer',
+          duration_ms: Math.max(0, Date.now() - la.joinedAt),
+        });
+      }
       try {
         await roomRef.current.disconnect();
       } catch (e) {}
@@ -487,6 +501,17 @@ export default function WatchLiveScreen({ navigation, route }) {
     if (roomRef.current) {
       try { await roomRef.current.disconnect(); } catch (e) {}
       roomRef.current = null;
+    }
+
+    // Firebase live_leave — fires at most once per successful join.
+    const la = liveAnalyticsRef.current;
+    if (la.streamId && !la.leaveSent) {
+      la.leaveSent = true;
+      logAnalyticsEvent('live_leave', {
+        stream_id: String(la.streamId),
+        role: 'viewer',
+        duration_ms: Math.max(0, Date.now() - la.joinedAt),
+      });
     }
   }
 
@@ -823,6 +848,7 @@ export default function WatchLiveScreen({ navigation, route }) {
       if (!error) {
         setQuestionInput('');
         setQuestionsLeft(prev => Math.max(0, prev - 1));
+        logAnalyticsEvent('question_submitted', { stream_id: String(stream.id) });
       } else {
         __DEV__ && console.log('Failed to submit question:', error);
         await reconcileQuestionFailure();
@@ -1034,7 +1060,7 @@ export default function WatchLiveScreen({ navigation, route }) {
 
     try {
       await Share.share({
-        message: `Watch ${stream.title || 'this livestream'} live on Bushrann:\nbushrann://live/${stream.id}`,
+        message: `Watch ${stream.title || 'this livestream'} live on Bushrann:\nhttps://balagh-server-production.up.railway.app/live/${encodeURIComponent(stream.id)}`,
         title: stream.title || 'Bushrann Live',
       });
     } catch (error) {

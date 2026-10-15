@@ -1,9 +1,9 @@
-﻿{
+{
   "expo": {
     "name": "Bushrann",
     "slug": "Balagh",
     "scheme": "bushrann",
-    "version": "1.7.41",
+    "version": "1.7.43",
     "privacyPolicyUrl": "https://sites.google.com/view/bushrann/privacy-policy ",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -27,7 +27,7 @@
       }
     },
     "android": {
-      "versionCode": 63,
+      "versionCode": 65,
       "minSdkVersion": 24,
       "largeHeap": true,
       "navigationBar": {
@@ -50,7 +50,12 @@
               "scheme": "https",
               "host": "balagh-server-production.up.railway.app",
               "pathPrefix": "/video/"
-            }
+            },
+          {
+            "scheme": "https",
+            "host": "balagh-server-production.up.railway.app",
+            "pathPrefix": "/live/"
+          }
           ],
           "category": [
             "BROWSABLE",
@@ -151,6 +156,14 @@
           "recordAudioAndroid": true,
           "enableBackgroundPlayback": true,
           "enableBackgroundRecording": false
+        }
+      ],
+      [
+        "@react-native-firebase/analytics",
+        {
+          "ios": {
+            "withoutAdIdSupport": true
+          }
         }
       ]
     ],
