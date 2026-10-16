@@ -516,6 +516,9 @@ app.get('/video/:id', async (req, res) => {
 
         const background = await sharp(bytes)
           .rotate()
+          // Remove baked-in black letterbox bars from the stored thumbnail
+          // before resizing, so the blurred backdrop fills the full canvas.
+          .trim({ threshold: 16 })
           .resize(1200, 630, { fit: 'cover' })
           .blur(25)
           .jpeg()
@@ -523,6 +526,9 @@ app.get('/video/:id', async (req, res) => {
 
         const foreground = await sharp(bytes)
           .rotate()
+          // Trim the same baked-in bars so the centered foreground keeps
+          // only the real subject (transparent padding, never black).
+          .trim({ threshold: 16 })
           .ensureAlpha()
           .resize(1200, 630, {
             fit: 'contain',
