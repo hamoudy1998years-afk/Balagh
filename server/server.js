@@ -608,14 +608,8 @@ app.get('/video/:id', async (req, res) => {
   <meta name="twitter:image" content="${escapeHtml(imageUrl)}" />`
         : '';
 
-      const crawler =
-        /facebookexternalhit|Facebot|Twitterbot|LinkedInBot|WhatsApp|TelegramBot|Discordbot|Slackbot/i.test(
-          String(req.get('user-agent') || '')
-        );
-
-      const fallback = crawler
-        ? ''
-        : `<meta http-equiv="refresh" content="0;url=${safeStore}" />`;
+      const deepLink = `bushrann://live/${encodeURIComponent(stream.id)}`;
+      const safeDeepLink = escapeHtml(deepLink);
 
       res.set('Cache-Control', 'no-store');
 
@@ -635,11 +629,13 @@ app.get('/video/:id', async (req, res) => {
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDescription}" />
-  ${fallback}
+
   </head>
   <body>
-  <p>Opening Bushrann…
-  <a href="${safeStore}">Continue to Google Play</a></p>
+    <p>${safeTitle}</p>
+  <p><a href="${safeDeepLink}">Open in Bushrann</a></p>
+  <p><a href="${safeStore}">Install Bushrann from Google Play</a></p>
+
   </body>
   </html>`);
     } catch (error) {
