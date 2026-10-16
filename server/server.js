@@ -629,6 +629,10 @@ app.get('/video/:id', async (req, res) => {
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDescription}" />
+  <meta property="al:android:url" content="${safeDeepLink}" />
+  <meta property="al:android:package" content="com.bushrann.app" />
+  <meta property="al:android:app_name" content="Bushrann" />
+  <meta property="al:web:url" content="${safeUrl}" />
 
   </head>
   <body>
