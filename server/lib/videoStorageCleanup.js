@@ -7,7 +7,7 @@
 
 const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
-const ALLOWED_BUCKETS = new Set(['videos', 'thumbnails']);
+const ALLOWED_BUCKETS = new Set(['videos', 'thumbnails', 'livestreams']);
 
 // ─────────────────────────────────────────────────────────────
 // S3 (same pattern as routes/videoProcessing.js)

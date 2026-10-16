@@ -1336,7 +1336,7 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
   // 1. Fetch the videos row.
   const { data: row, error: fetchError } = await supabase
     .from('videos')
-    .select('id, user_id, video_url, original_video_url, thumbnail_url')
+    .select('id, user_id, video_url, original_video_url, thumbnail_url, is_live_stream')
     .eq('id', videoId)
     .maybeSingle();
 
@@ -1363,8 +1363,41 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
     }
   }
 
-  // 3. Delete the row's storage objects.
-  const cleanup = await cleanupVideoStorage(row);
+  // 3. Livestream replay mirror: a finalized replay has BOTH a canonical
+  //    `livestreams` row and a MIRROR row in `videos` (is_live_stream=true)
+  //    sharing the exact same public livestreams-bucket URL. Detect it and
+  //    look up the canonical row so it can be removed before the mirror.
+  let canonicalRow = null;
+
+  if (
+    row.is_live_stream === true &&
+    typeof row.video_url === 'string' &&
+    row.video_url.includes('/object/public/livestreams/')
+  ) {
+    const { data: found, error: canonicalError } = await supabase
+      .from('livestreams')
+      .select('id, user_id, video_url, thumbnail_url')
+      .eq('video_url', row.video_url)
+      .maybeSingle();
+
+    if (canonicalError) {
+      console.warn('[VIDEOS] Failed to look up livestream row:', videoId, canonicalError.message);
+      return res.status(500).json({ error: 'Failed to delete video' });
+    }
+
+    // A canonical row owned by someone else is not ours — delete mirror only.
+    if (found && found.user_id === row.user_id) {
+      canonicalRow = found;
+    }
+  }
+
+  // Delete the row's storage objects. For a replay mirror, fall back to the
+  // canonical row's thumbnail_url (the MP4 URLs are identical, so objects
+  // dedupe via cleanupVideoStorage's existing Map).
+  const cleanup = await cleanupVideoStorage({
+    ...row,
+    thumbnail_url: row.thumbnail_url || canonicalRow?.thumbnail_url,
+  });
 
   // 4. Delete the videos row ONLY if every recognized storage object was
   //    deleted or already absent, and every non-null URL parsed safely.
@@ -1376,6 +1409,23 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
       storageCleaned: cleanup.objectsCleaned,
       storageFailed: cleanup.storageFailed,
     });
+  }
+
+  // Replay mirror: remove the canonical livestreams row FIRST. If a later
+  // step fails, the videos mirror row (with its video_url) is still present,
+  // so a retry can re-resolve the canonical row and finish the job. (The
+  // reverse order would orphan the canonical row: once the mirror row is
+  // gone, its id no longer resolves to any livestreams row.)
+  if (canonicalRow) {
+    const { error: canonicalDeleteError } = await supabase
+      .from('livestreams')
+      .delete()
+      .eq('id', canonicalRow.id);
+
+    if (canonicalDeleteError) {
+      console.warn('[VIDEOS] Failed to delete livestream row:', canonicalRow.id, canonicalDeleteError.message);
+      return res.status(500).json({ error: 'Failed to delete video' });
+    }
   }
 
   // Child rows (appeals, comments, likes, notifications, reports) cascade
