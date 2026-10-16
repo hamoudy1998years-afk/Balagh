@@ -639,6 +639,11 @@ app.get('/video/:id', async (req, res) => {
     <p>${safeTitle}</p>
   <p><a href="${safeDeepLink}">Open in Bushrann</a></p>
   <p><a href="${safeStore}">Install Bushrann from Google Play</a></p>
+  <script>
+    setTimeout(function () {
+      window.location.replace(${JSON.stringify(PLAY_STORE_URL)});
+    }, 1500);
+  </script>
 
   </body>
   </html>`);
