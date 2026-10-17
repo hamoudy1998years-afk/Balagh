@@ -63,7 +63,7 @@ async function requireAuth(req, res, next) {
 async function findStreamByRoom(roomName) {
   const { data: rows, error } = await supabase
     .from('live_streams')
-    .select('id, user_id, title, thumbnail_url, is_live')
+    .select('id, user_id, title, thumbnail_url, is_live, stream_notified_at')
     .eq('channel_name', roomName)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -2022,6 +2022,87 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
 
 
 // ─── START EGRESS RECORDING ──────────────────────────────────────
+router.post('/stream-active', requireAuth, async (req, res) => {
+  try {
+    const { roomName } = req.body || {};
+
+    if (!roomName || typeof roomName !== 'string') {
+      return res.status(400).json({ error: 'Missing roomName' });
+    }
+
+    const streamRow = await findStreamByRoom(roomName);
+
+    if (!streamRow) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+
+    if (streamRow.user_id !== req.authUserId) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    if (streamRow.stream_notified_at) {
+      return res
+        .status(409)
+        .json({ error: 'Already notified' });
+    }
+
+    // Require the host's unmuted camera track to be present in the room
+    // before notifying followers, so a host stuck on the preview screen
+    // never triggers a notification.
+    const participants = await getRoomServiceClient().listParticipants(
+      roomName
+    );
+
+    const host = (participants || []).find(
+      p => String(p.identity) === String(streamRow.user_id)
+    );
+
+    const hasCamera = (host?.tracks || []).some(
+      t => t.type === 1 && t.source === 1 && !t.muted
+    );
+
+    if (!hasCamera) {
+      return res
+        .status(503)
+        .json({ retryable: true, error: 'Host camera not live yet' });
+    }
+
+    const { data: claimed, error: claimError } = await supabase.rpc(
+      'claim_live_notification',
+      { p_stream_id: streamRow.id }
+    );
+
+    // The RPC may not exist yet if the migration has not been applied.
+    if (claimError) {
+      console.error(
+        '[NOTIFY] claim_live_notification RPC failed:',
+        claimError.message
+      );
+
+      return res
+        .status(503)
+        .json({ retryable: true, error: 'Notification infra unavailable' });
+    }
+
+    if (claimed !== true) {
+      return res
+        .status(409)
+        .json({ error: 'Already notified' });
+    }
+
+    return res.json({ notified: true });
+  } catch (error) {
+    console.error(
+      '[NOTIFY] stream-active error:',
+      error?.message || error
+    );
+
+    return res
+      .status(500)
+      .json({ error: 'Failed to process stream-active' });
+  }
+});
+
 router.post('/egress/start', requireAuth, async (req, res) => {
   try {
     const { roomName } = req.body;

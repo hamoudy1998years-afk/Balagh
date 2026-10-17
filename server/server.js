@@ -24,6 +24,9 @@ const videoRoutes = require('./routes/videos');
 // Importing starts the rejected-video cleanup sweeper (delayed first run).
 require('./lib/rejectedVideoCleanup');
 
+// Start follower notification worker.
+require('./lib/notificationWorker');
+
 // Force HTTPS in production
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
