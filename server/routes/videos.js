@@ -4,8 +4,9 @@ const router = express.Router();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { pipeline } = require('stream/promises');
-const { Readable } = require('stream');
+const { Readable, Transform } = require('stream');
 const { spawn } = require('child_process');
 
 const { createClient } = require('@supabase/supabase-js');
@@ -344,10 +345,15 @@ async function debugProbeStreams(tag, filePath) {
   }
 }
 
-async function downloadToDisk(url, destinationPath) {
+async function downloadToDisk(
+  url,
+  destinationPath,
+  bucket = VIDEO_BUCKET,
+  maxBytes = 0
+) {
   const allowedPrefix =
     `${process.env.SUPABASE_URL}` +
-    `/storage/v1/object/public/${VIDEO_BUCKET}/`;
+    `/storage/v1/object/public/${bucket}/`;
 
   if (
     typeof url !== 'string' ||
@@ -381,10 +387,43 @@ async function downloadToDisk(url, destinationPath) {
 
     const nodeStream = Readable.fromWeb(response.body);
 
-    await pipeline(
-      nodeStream,
-      fs.createWriteStream(destinationPath)
-    );
+    // Enforce the size cap DURING streaming (maxBytes > 0), so a response
+    // without Content-Length — or one that lies — is aborted the moment the
+    // cap is exceeded. pipeline() destroys the source; the partial file is
+    // removed by the caller's temp-directory cleanup.
+    if (maxBytes > 0) {
+      let received = 0;
+
+      const sizeLimiter = new Transform({
+        transform(chunk, _encoding, callback) {
+          received += chunk.length;
+
+          if (received > maxBytes) {
+            callback(
+              new Error(
+                `Download exceeds the ${Math.round(
+                  maxBytes / 1024 / 1024
+                )} MB size cap mid-stream`
+              )
+            );
+            return;
+          }
+
+          callback(null, chunk);
+        },
+      });
+
+      await pipeline(
+        nodeStream,
+        sizeLimiter,
+        fs.createWriteStream(destinationPath)
+      );
+    } else {
+      await pipeline(
+        nodeStream,
+        fs.createWriteStream(destinationPath)
+      );
+    }
 
     const stats = await fs.promises.stat(destinationPath);
 
@@ -1028,6 +1067,976 @@ async function getOrCreateWatermarkJob(videoId, sourceUrl, username) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// REPLAY WATERMARK (livestream replays)
+//
+// Separate pipeline for livestream replay downloads: authenticated
+// endpoint, canonical livestreams row resolved server-side, output stored
+// under the livestreams bucket at watermarked/v1/<canonicalReplayId>.mp4.
+// The original replay MP4 is never modified.
+//
+// Railway disk/memory cannot be verified from the codebase, so processing
+// is bounded by explicit env-tunable caps and FAILS CLOSED rather than
+// assuming the bucket's 15 GB per-file limit implies the host can process
+// a 15 GB file. Temp usage peaks around ~2.5x the source size (source +
+// CRF output + bitrate-fallback output), and only ONE replay watermark
+// job runs at a time.
+// ─────────────────────────────────────────────────────────────
+
+const REPLAY_WATERMARK_BUCKET = 'livestreams';
+const REPLAY_WATERMARK_MAX_CONCURRENT = 1;
+
+// Source-size cap: reject before downloading. Default 512 MB — raise via
+// env ONLY after verifying the host has enough temp disk (~2.5x source).
+const REPLAY_WATERMARK_MAX_SOURCE_BYTES =
+  Number(process.env.REPLAY_WATERMARK_MAX_SOURCE_BYTES) > 0
+    ? Number(process.env.REPLAY_WATERMARK_MAX_SOURCE_BYTES)
+    : 512 * 1024 * 1024;
+
+// Output cap for the watermarked MP4 (CRF pass and bitrate fallback).
+const REPLAY_WATERMARK_MAX_OUTPUT_BYTES =
+  Number(process.env.REPLAY_WATERMARK_MAX_OUTPUT_BYTES) > 0
+    ? Number(process.env.REPLAY_WATERMARK_MAX_OUTPUT_BYTES)
+    : REPLAY_WATERMARK_MAX_SOURCE_BYTES;
+
+// Wall-clock cap for a single replay watermark job (download + FFmpeg).
+const REPLAY_WATERMARK_JOB_TIMEOUT_MS =
+  Number(process.env.REPLAY_WATERMARK_JOB_TIMEOUT_MS) > 0
+    ? Number(process.env.REPLAY_WATERMARK_JOB_TIMEOUT_MS)
+    : 20 * 60 * 1000;
+
+// Per-replay in-flight dedupe (same pattern as watermarkJobs) plus a
+// global concurrency bound so temp disk usage stays predictable.
+const replayWatermarkJobs = new Map();
+let replayWatermarkActiveCount = 0;
+
+function getReplayWatermarkStorageKey(replayId) {
+  return `watermarked/v1/${replayId}.mp4`;
+}
+
+function getPublicLivestreamsUrl(key) {
+  return (
+    `${process.env.SUPABASE_URL}` +
+    `/storage/v1/object/public/${REPLAY_WATERMARK_BUCKET}/` +
+    encodeStorageKey(key)
+  );
+}
+
+async function deleteReplayWatermarkedObject(replayId) {
+  try {
+    const s3 = getS3Client();
+
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: REPLAY_WATERMARK_BUCKET,
+        Key: getReplayWatermarkStorageKey(replayId),
+      })
+    );
+  } catch (error) {
+    console.warn(
+      '[REPLAY-WATERMARK] Failed to remove watermarked object:',
+      replayId,
+      error.message
+    );
+  }
+}
+
+// runProcess variant with a wall-clock timeout: FFmpeg/stall protection for
+// long replay jobs. v8's runProcess is intentionally untouched. stdout/stderr
+// are bounded (tail-only) so a chatty FFmpeg on a long replay cannot grow
+// memory without limit.
+const PROCESS_OUTPUT_TAIL_BYTES = 64 * 1024;
+
+function runProcessWithTimeout(command, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const appendBounded = (current, chunk) => {
+      const next = current + chunk.toString();
+
+      return next.length > PROCESS_OUTPUT_TAIL_BYTES
+        ? next.slice(-PROCESS_OUTPUT_TAIL_BYTES)
+        : next;
+    };
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+
+      try {
+        child.kill('SIGKILL');
+      } catch (_) {
+        // Process may have already exited.
+      }
+
+      reject(
+        new Error(
+          `${path.basename(command)} timed out after ${Math.round(
+            timeoutMs / 1000
+          )}s`
+        )
+      );
+    }, timeoutMs);
+
+    timer.unref?.();
+
+    child.stdout.on('data', chunk => {
+      stdout = appendBounded(stdout, chunk);
+    });
+
+    child.stderr.on('data', chunk => {
+      stderr = appendBounded(stderr, chunk);
+    });
+
+    child.on('error', error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+
+    child.on('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+
+      reject(
+        new Error(
+          `${path.basename(command)} exited with code ${code}: ${stderr.slice(
+            -4000
+          )}`
+        )
+      );
+    });
+  });
+}
+
+async function generateWatermarkedReplay(
+  replayId,
+  sourceUrl,
+  username,
+  workerId = null
+) {
+  const deadline = Date.now() + REPLAY_WATERMARK_JOB_DEADLINE_MS;
+  const remainingMs = () => deadline - Date.now();
+
+  // Fail closed on oversized sources BEFORE committing disk: the bucket
+  // may accept 15 GB files, but this host cannot be proven to process
+  // them within disk/memory limits.
+  let headLength = 0;
+
+  try {
+    const head = await fetch(sourceUrl, { method: 'HEAD', signal: AbortSignal.timeout(30000) });
+
+    if (head.ok) {
+      headLength = Number(head.headers.get('content-length') || 0);
+    }
+  } catch (headError) {
+    // A failed HEAD is not decisive (some gateways omit it); the
+    // downloaded-size check below is the enforcing gate.
+    console.warn(
+      '[REPLAY-WATERMARK] Source HEAD check failed; continuing:',
+      replayId,
+      headError?.message || headError
+    );
+  }
+
+  if (headLength > REPLAY_WATERMARK_MAX_SOURCE_BYTES) {
+    throw new Error(
+      `Replay is too large to process safely (${Math.round(
+        headLength / 1024 / 1024
+      )} MB > ${Math.round(
+        REPLAY_WATERMARK_MAX_SOURCE_BYTES / 1024 / 1024
+      )} MB cap)`
+    );
+  }
+
+  try {
+    await fs.promises.access(WATERMARK_PATH, fs.constants.R_OK);
+  } catch (error) {
+    throw new Error('Watermark asset is missing on the server');
+  }
+
+  let tempDirectory = null;
+
+  try {
+    tempDirectory = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), `bushrann-replay-wm-${replayId}-`)
+    );
+
+    const sourcePath = path.join(tempDirectory, 'source.mp4');
+    const outputPath = path.join(tempDirectory, 'watermarked.mp4');
+
+    await downloadToDisk(
+      sourceUrl,
+      sourcePath,
+      REPLAY_WATERMARK_BUCKET,
+      REPLAY_WATERMARK_MAX_SOURCE_BYTES
+    );
+
+    const sourceSize = (await fs.promises.stat(sourcePath)).size;
+
+    if (sourceSize > REPLAY_WATERMARK_MAX_SOURCE_BYTES) {
+      throw new Error(
+        `Replay exceeds the safe processing size cap (${Math.round(
+          sourceSize / 1024 / 1024
+        )} MB)`
+      );
+    }
+
+    // Overall job deadline: every stage gets at most the remaining time,
+    // so a stalled stage cannot push the job past the budget the client's
+    // polling cap is sized for.
+    if (remainingMs() <= 0) {
+      throw new Error('Replay watermark job exceeded its time budget');
+    }
+
+    const jobTimeout = Math.min(
+      REPLAY_WATERMARK_JOB_TIMEOUT_MS,
+      remainingMs()
+    );
+
+    const sourceProbe = await runProcessWithTimeout(
+      ffprobePath,
+      [
+        '-v',
+        'error',
+        '-select_streams',
+        'v:0',
+        '-show_entries',
+        'stream=width,height,duration',
+        '-of',
+        'json',
+        sourcePath,
+      ],
+      60 * 1000
+    ).then(({ stdout }) => {
+      const parsed = JSON.parse(stdout);
+      const stream = parsed?.streams?.[0];
+
+      if (
+        !stream ||
+        !Number(stream.width) ||
+        !Number(stream.height)
+      ) {
+        throw new Error('Replay has no usable video stream');
+      }
+
+      return {
+        width: Number(stream.width),
+        height: Number(stream.height),
+        duration: Number(stream.duration) || 0,
+      };
+    });
+
+    const watermarkWidthPx = Math.max(
+      2,
+      Math.round(sourceProbe.width * 0.25)
+    );
+
+    const logoHeightPx = Math.max(
+      2,
+      Math.round(
+        Math.round(
+          (watermarkWidthPx * WATERMARK_PNG_HEIGHT) / WATERMARK_PNG_WIDTH
+        ) / 2
+      ) * 2
+    );
+
+    console.log(
+      '[REPLAY-WATERMARK] Source probe:',
+      replayId,
+      sourceProbe,
+      `${Math.round(sourceSize / 1024 / 1024)} MB`,
+      `username=${username ? '@' + username : '(logo only)'}`
+    );
+
+    const usernameImage = username
+      ? await renderUsernameImage(tempDirectory, username, logoHeightPx)
+      : null;
+
+    if (username && !usernameImage) {
+      console.log(
+        '[REPLAY-WATERMARK] Falling back to logo-only watermark:',
+        replayId
+      );
+    }
+
+    await watermarkContentPromise;
+
+    const watermarkArgs = buildWatermarkArgs(
+      sourcePath,
+      WATERMARK_PATH,
+      outputPath,
+      watermarkWidthPx,
+      logoHeightPx,
+      usernameImage
+    );
+
+    await runProcessWithTimeout(ffmpegPath, watermarkArgs, jobTimeout);
+
+    let stats = await fs.promises.stat(outputPath);
+
+    if (stats.size > REPLAY_WATERMARK_MAX_OUTPUT_BYTES) {
+      console.log(
+        '[REPLAY-WATERMARK] CRF output exceeds cap; compressing:',
+        replayId,
+        `${(stats.size / 1024 / 1024).toFixed(2)} MB`
+      );
+
+      const duration = sourceProbe.duration;
+
+      const compressedPath = path.join(
+        tempDirectory,
+        'watermarked-compressed.mp4'
+      );
+
+      const fallbackArgs = buildBitrateLimitedWatermarkArgs(
+        sourcePath,
+        WATERMARK_PATH,
+        compressedPath,
+        duration,
+        watermarkWidthPx,
+        logoHeightPx,
+        usernameImage
+      );
+
+      if (remainingMs() <= 0) {
+        throw new Error('Replay watermark job exceeded its time budget');
+      }
+
+      await runProcessWithTimeout(
+        ffmpegPath,
+        fallbackArgs,
+        Math.min(jobTimeout, remainingMs())
+      );
+
+      const compressedStats = await fs.promises.stat(compressedPath);
+
+      if (compressedStats.size > REPLAY_WATERMARK_MAX_OUTPUT_BYTES) {
+        throw new Error(
+          `Watermarked replay is still too large: ${(
+            compressedStats.size / 1024 / 1024
+          ).toFixed(2)} MB`
+        );
+      }
+
+      await fs.promises.rename(compressedPath, outputPath);
+
+      stats = compressedStats;
+    }
+
+    // Never upload an output that has no video stream.
+    await assertWatermarkedOutputValid(outputPath);
+
+    // Deletion-race guard (safe across multiple Railway instances): the
+    // canonical row is the shared source of truth. Deletion cancels the DB
+    // job claim and removes the row BEFORE the watermark object, so a
+    // missing/changed row or a lost claim here means the replay was
+    // deleted while this job ran and the object must NOT be (re)created.
+    await assertReplayWatermarkTargetValid(replayId, sourceUrl, workerId);
+
+    const storageKey = getReplayWatermarkStorageKey(replayId);
+
+    const s3 = getS3Client();
+
+    const uploadController = new AbortController();
+    const uploadBudgetMs = Math.min(5 * 60 * 1000, remainingMs());
+
+    if (uploadBudgetMs <= 0) {
+      throw new Error('Replay watermark job exceeded its time budget');
+    }
+
+    const uploadTimeout = setTimeout(() => {
+      uploadController.abort();
+    }, uploadBudgetMs);
+
+    uploadTimeout.unref?.();
+
+    try {
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: REPLAY_WATERMARK_BUCKET,
+          Key: storageKey,
+          Body: fs.createReadStream(outputPath),
+          ContentLength: stats.size,
+          ContentType: 'video/mp4',
+          Metadata: {
+            'bushrann-wm-user': replayWatermarkUserTag(username),
+          },
+        }),
+        { abortSignal: uploadController.signal }
+      );
+    } finally {
+      clearTimeout(uploadTimeout);
+    }
+
+    // Verify the replay and job still exist after the upload.
+    // If deletion happened during upload, remove the derived object.
+    try {
+      await assertReplayWatermarkTargetValid(replayId, sourceUrl, workerId);
+    } catch (validationError) {
+      try {
+        await deleteReplayWatermarkedObjectStrict(replayId);
+      } catch (cleanupError) {
+        console.error(
+          '[REPLAY-WATERMARK] Post-upload cleanup failed:',
+          replayId,
+          cleanupError
+        );
+      }
+
+      throw validationError;
+    }
+
+    console.log(
+      '[REPLAY-WATERMARK] Uploaded:',
+      replayId,
+      `${(stats.size / 1024 / 1024).toFixed(2)} MB`
+    );
+
+    return getPublicLivestreamsUrl(storageKey);
+  } finally {
+    if (tempDirectory) {
+      try {
+        await fs.promises.rm(tempDirectory, {
+          recursive: true,
+          force: true,
+        });
+      } catch (cleanupError) {
+        console.warn(
+          '[REPLAY-WATERMARK] Temp cleanup failed:',
+          tempDirectory,
+          cleanupError.message
+        );
+      }
+    }
+  }
+}
+
+// ── Deletion-race and stale-cache helpers ──
+
+function replayWatermarkUserTag(username) {
+  return crypto
+    .createHash('sha256')
+    .update(String(username || ''))
+    .digest('hex')
+    .slice(0, 16);
+}
+
+// Re-verify the canonical replay still exists with the same source URL,
+// and — when coordination is active — that THIS worker still owns the
+// claimed job. Deletion calls dbCancelReplayWatermarkJob() before removing
+// the row, so a cancelled/lost claim aborts the upload. Works across
+// instances: both checks query Postgres, not in-memory state.
+async function assertReplayWatermarkTargetValid(replayId, sourceUrl, workerId) {
+  const { data, error } = await supabase
+    .from('livestreams')
+    .select('id, video_url')
+    .eq('id', replayId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Replay revalidation failed: ${error.message}`);
+  }
+
+  if (!data || data.video_url !== sourceUrl) {
+    throw new Error('Replay no longer exists; watermark generation aborted');
+  }
+
+  if (!workerId || !replayWatermarkCoordinationAvailable) {
+    throw new Error(
+      'Replay watermark job ownership cannot be verified'
+    );
+  }
+
+  {
+    const { data: job, error: jobError } = await supabase
+      .from('replay_watermark_jobs')
+      .select('status, owner')
+      .eq('replay_id', replayId)
+      .maybeSingle();
+
+    if (jobError) {
+      if (isMissingCoordinationObject(jobError)) {
+        replayWatermarkCoordinationAvailable = false;
+        throw new Error('Replay watermark database coordination is unavailable');
+      }
+
+      throw new Error(`Job claim revalidation failed: ${jobError.message}`);
+    }
+
+    if (!job || job.status !== 'running' || job.owner !== workerId) {
+      throw new Error(
+        'Replay watermark job was cancelled (replay deleted); upload aborted'
+      );
+    }
+  }
+}
+
+function isS3NotFound(error) {
+  const statusCode = error?.$metadata?.httpStatusCode;
+
+  return (
+    error?.name === 'NotFound' ||
+    error?.name === 'NoSuchKey' ||
+    statusCode === 404
+  );
+}
+
+// Detectable/retryable cleanup: throws on any S3 error (including a
+// delete failure) so the caller NEVER removes the last metadata reference
+// while the derived object survives. Returns true when an object existed
+// and was deleted, false when none existed.
+async function deleteReplayWatermarkedObjectStrict(replayId) {
+  const s3 = getS3Client();
+  const key = getReplayWatermarkStorageKey(replayId);
+
+  try {
+    await s3.send(
+      new HeadObjectCommand({
+        Bucket: REPLAY_WATERMARK_BUCKET,
+        Key: key,
+      }),
+      { abortSignal: AbortSignal.timeout(60000) }
+    );
+  } catch (error) {
+    if (isS3NotFound(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+
+  await s3.send(
+    new DeleteObjectCommand({
+      Bucket: REPLAY_WATERMARK_BUCKET,
+      Key: key,
+    }),
+    { abortSignal: AbortSignal.timeout(60000) }
+  );
+
+  return true;
+}
+
+
+async function queueReplayWatermarkCleanup(replayId) {
+  const { error } = await supabase
+    .from('replay_watermark_cleanup')
+    .upsert(
+      {
+        replay_id: replayId,
+      },
+      { onConflict: 'replay_id', ignoreDuplicates: true }
+    );
+
+  if (error) {
+    throw new Error(
+      `Failed to queue replay watermark cleanup: ${error.message}`
+    );
+  }
+}
+
+
+
+async function processReplayWatermarkCleanup() {
+  // Each claim gets a unique owner, even within the same Railway instance.
+  const workerPrefix =
+    `${process.env.RAILWAY_REPLICA_ID || os.hostname()}` +
+    `-${process.pid}-${crypto.randomBytes(8).toString('hex')}`;
+
+  for (let i = 0; i < 20; i++) {
+    const owner = `${workerPrefix}-${i}`;
+
+    const { data: replayId, error: claimError } = await supabase.rpc(
+      'claim_replay_watermark_cleanup',
+      { p_owner: owner }
+    );
+
+    if (claimError) {
+      throw new Error(
+        `Replay cleanup claim failed: ${claimError.message}`
+      );
+    }
+
+    // No eligible cleanup records.
+    if (!replayId) break;
+
+    try {
+      const { data: replay, error: lookupError } = await supabase
+        .from('livestreams')
+        .select('id')
+        .eq('id', replayId)
+        .maybeSingle();
+
+      if (lookupError) throw lookupError;
+
+      if (replay) {
+        // Canonical replay still exists. Keep the cleanup record
+        // for a later retry rather than deleting its watermark.
+        throw new Error('Canonical replay still exists');
+      }
+
+      await deleteReplayWatermarkedObjectStrict(replayId);
+
+      const { data: finished, error: finishError } = await supabase.rpc(
+        'finish_replay_watermark_cleanup',
+        {
+          p_replay_id: replayId,
+          p_owner: owner,
+        }
+      );
+
+      if (finishError) throw finishError;
+
+      if (finished !== true) {
+        throw new Error('Cleanup claim ownership was lost');
+      }
+
+      console.log(
+        '[REPLAY-WATERMARK] Deferred cleanup completed:',
+        replayId
+      );
+    } catch (cleanupError) {
+      console.error(
+        '[REPLAY-WATERMARK] Deferred cleanup failed:',
+        replayId,
+        cleanupError?.message || cleanupError
+      );
+
+      try {
+        const { data: released, error: releaseError } =
+          await supabase.rpc('fail_replay_watermark_cleanup', {
+            p_replay_id: replayId,
+            p_owner: owner,
+            p_error: String(
+              cleanupError?.message || cleanupError
+            ).slice(0, 1000),
+          });
+
+        if (releaseError) throw releaseError;
+
+        if (released !== true) {
+          console.warn(
+            '[REPLAY-WATERMARK] Cleanup claim no longer owned:',
+            replayId
+          );
+        }
+      } catch (releaseError) {
+        console.error(
+          '[REPLAY-WATERMARK] Could not release cleanup claim:',
+          replayId,
+          releaseError?.message || releaseError
+        );
+      }
+    }
+  }
+}
+
+let replayCleanupRunning = false;
+
+const replayCleanupTimer = setInterval(async () => {
+  if (replayCleanupRunning) return;
+
+  replayCleanupRunning = true;
+
+  try {
+    await processReplayWatermarkCleanup();
+  } catch (error) {
+    console.error(
+      '[REPLAY-WATERMARK] Cleanup worker error:',
+      error?.message || error
+    );
+  } finally {
+    replayCleanupRunning = false;
+  }
+}, 5 * 60 * 1000);
+
+replayCleanupTimer.unref?.();
+
+// Check the deterministic output object. Returns { exists, url, staleUser }
+// — staleUser is true when the object was generated for a different owner
+// username and must be regenerated.
+async function probeReplayWatermarkObject(replayId, username) {
+  try {
+    const head = await getS3Client().send(
+      new HeadObjectCommand({
+        Bucket: REPLAY_WATERMARK_BUCKET,
+        Key: getReplayWatermarkStorageKey(replayId),
+      })
+    );
+
+    const valid =
+      head?.ContentLength &&
+      head.ContentLength > 0 &&
+      head.ContentLength <= REPLAY_WATERMARK_MAX_OUTPUT_BYTES;
+
+    if (!valid) {
+      return { exists: false, url: null, staleUser: false };
+    }
+
+    const taggedUser = head?.Metadata?.['bushrann-wm-user'];
+    const staleUser =
+      typeof taggedUser === 'string' &&
+      taggedUser !== replayWatermarkUserTag(username);
+
+    return {
+      exists: true,
+      url: getPublicLivestreamsUrl(getReplayWatermarkStorageKey(replayId)),
+      staleUser,
+    };
+  } catch (error) {
+    if (isS3NotFound(error)) {
+      return { exists: false, url: null, staleUser: false };
+    }
+
+    throw error;
+  }
+}
+
+// ── Deferred job model ──
+// POST starts (or finds) a job and returns immediately; the client polls
+// GET. No long-held HTTP request, so platform HTTP timeouts (Railway) do
+// not apply.
+//
+// Coordination: when migration 20261027 is applied, a Postgres row is the
+// single source of truth for claims/status — safe across Railway
+// instances. Until then (RPC missing) every DB helper degrades to
+// 'unavailable' and the in-memory maps below provide same-instance
+// behavior identical to the previous implementation.
+const replayWatermarkStatus = new Map(); // replayId -> {status, url?, error?}
+
+const REPLAY_WATERMARK_WORKER_ID =
+  `${process.env.RAILWAY_REPLICA_ID || os.hostname()}` +
+  `-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+
+// Overall wall-clock budget for one generation job (download + probe +
+// up to two FFmpeg passes + upload). Client polling caps are sized from
+// this constant — keep them in sync (client = deadline + ~4 min margin).
+const REPLAY_WATERMARK_JOB_DEADLINE_MS =
+  Number(process.env.REPLAY_WATERMARK_JOB_DEADLINE_MS) > 0
+    ? Number(process.env.REPLAY_WATERMARK_JOB_DEADLINE_MS)
+    : 50 * 60 * 1000;
+
+let replayWatermarkCoordinationAvailable = true;
+
+function isMissingCoordinationObject(error) {
+  // 42883 undefined_function / 42P01 undefined_table: the migration has
+  // not been applied. Any OTHER error is real and must surface.
+  return (
+    error?.code === '42883' ||
+    error?.code === '42P01' ||
+    /replay_watermark_jobs|claim_replay_watermark_job/.test(
+      error?.message || ''
+    )
+  );
+}
+
+// 'claimed' | 'running' | 'done' | 'failed' | 'unavailable'
+async function dbClaimReplayWatermarkJob(replayId, username, workerId) {
+  if (!replayWatermarkCoordinationAvailable) {
+    throw new Error('Replay watermark database coordination is unavailable');
+  }
+
+  const { data, error } = await supabase.rpc('claim_replay_watermark_job', {
+    p_replay_id: replayId,
+    p_owner: workerId,
+    p_user_tag: replayWatermarkUserTag(username),
+  });
+
+  if (error) {
+    if (isMissingCoordinationObject(error)) {
+      replayWatermarkCoordinationAvailable = false;
+      throw new Error('Replay watermark database coordination is unavailable');
+    }
+
+    throw error;
+  }
+
+  return data;
+}
+
+async function dbFinishReplayWatermarkJob(replayId, status, url, error, workerId) {
+  if (!replayWatermarkCoordinationAvailable) {
+    throw new Error('Replay watermark database coordination is unavailable');
+  }
+
+  const { data: finished, error: rpcError } = await supabase.rpc(
+    'finish_replay_watermark_job',
+    {
+      p_replay_id: replayId,
+      p_owner: workerId,
+      p_status: status,
+      p_result_url: url,
+      p_error: error,
+    }
+  );
+
+  if (rpcError) {
+    if (isMissingCoordinationObject(rpcError)) {
+      replayWatermarkCoordinationAvailable = false;
+    }
+
+    throw new Error(
+      `Replay watermark job completion failed: ${rpcError.message}`
+    );
+  }
+
+  if (finished !== true) {
+    throw new Error(
+      'Replay watermark job completion rejected: worker no longer owns the job'
+    );
+  }
+}
+
+// Deletion-side cancellation must fail closed.
+// Never continue replay deletion if job cancellation cannot be verified.
+async function dbCancelReplayWatermarkJob(replayId) {
+  if (!replayWatermarkCoordinationAvailable) {
+    throw new Error('Replay watermark database coordination is unavailable');
+  }
+
+  const { data, error } = await supabase.rpc('cancel_replay_watermark_job', {
+    p_replay_id: replayId,
+  });
+
+  if (error) {
+    if (isMissingCoordinationObject(error)) {
+      replayWatermarkCoordinationAvailable = false;
+    }
+
+    throw new Error(
+      `Replay watermark job cancellation failed: ${error.message}`
+    );
+  }
+
+  if (data === true) {
+    console.log('[REPLAY-WATERMARK] Cancelled running job for deleted replay:', replayId);
+  }
+
+  return data === true;
+}
+
+// Read-side job row for GET polling. Returns null when coordination is
+// unavailable (pre-migration) or the row does not exist.
+async function dbGetReplayWatermarkJob(replayId) {
+  if (!replayWatermarkCoordinationAvailable) return null;
+
+  const { data, error } = await supabase
+    .from('replay_watermark_jobs')
+    .select('status, result_url, error, updated_at')
+    .eq('replay_id', replayId)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingCoordinationObject(error)) {
+      replayWatermarkCoordinationAvailable = false;
+      return null;
+    }
+
+    throw error;
+  }
+
+  return data;
+}
+
+// Returns { status: 'ready', url } on a cache hit, or { status:
+// 'processing' } after starting the background job. Throws on busy/S3
+// errors. In-flight jobs for the same replay are shared, not duplicated —
+// within this instance via the map, across instances via the DB claim.
+async function startReplayWatermarkJob(replayId, sourceUrl, username) {
+  if (replayWatermarkJobs.has(replayId)) {
+    console.log('[REPLAY-WATERMARK] CACHE IN-FLIGHT:', replayId);
+    return { status: 'processing' };
+  }
+
+  if (replayWatermarkActiveCount >= REPLAY_WATERMARK_MAX_CONCURRENT) {
+    throw new Error(
+      'Replay watermark processing is busy; please try again shortly'
+    );
+  }
+
+  // Give each job attempt its own unique owner ID.
+  const workerId = `${REPLAY_WATERMARK_WORKER_ID}-${crypto.randomUUID()}`;
+
+  const claim = await dbClaimReplayWatermarkJob(
+    replayId,
+    username,
+    workerId
+  );
+
+  if (claim === 'running') {
+    console.log('[REPLAY-WATERMARK] DB CLAIM HELD ELSEWHERE:', replayId);
+    return { status: 'processing' };
+  }
+
+  if (claim !== 'claimed') {
+    throw new Error(
+      `Replay watermark job could not be claimed: ${claim}`
+    );
+  }
+
+  replayWatermarkActiveCount += 1;
+
+  const jobPromise = (async () => {
+    try {
+      const url = await generateWatermarkedReplay(
+        replayId,
+        sourceUrl,
+        username,
+        workerId
+      );
+
+      replayWatermarkStatus.set(replayId, { status: 'done', url });
+      await dbFinishReplayWatermarkJob(replayId, 'done', url, null, workerId);
+      return url;
+    } catch (error) {
+      const message = error?.message || String(error);
+
+      replayWatermarkStatus.set(replayId, { status: 'failed', error: message });
+      await dbFinishReplayWatermarkJob(replayId, 'failed', null, message, workerId);
+      console.error('[REPLAY-WATERMARK] Job failed:', replayId, message);
+
+      // Handled: the promise stored in replayWatermarkJobs never rejects.
+      return null;
+    } finally {
+      replayWatermarkJobs.delete(replayId);
+      replayWatermarkActiveCount -= 1;
+    }
+  })();
+
+  // Belt-and-braces rejection handler: even an unexpected internal throw
+  // before the try above can never surface as an unhandled rejection, and
+  // the failure is recorded for GET polling.
+  jobPromise.catch(error => {
+    console.error(
+      '[REPLAY-WATERMARK] Unhandled job rejection:',
+      replayId,
+      error?.message || error
+    );
+
+    replayWatermarkStatus.set(replayId, {
+      status: 'failed',
+      error: 'internal job error',
+    });
+  });
+
+  replayWatermarkJobs.set(replayId, jobPromise);
+  replayWatermarkStatus.set(replayId, { status: 'running' });
+
+  console.log('[REPLAY-WATERMARK] JOB STARTED:', replayId);
+  return { status: 'processing' };
+}
+
 // Fire-and-forget v8 watermark pre-warm. Called after normal video
 // processing publishes a READY video so the first Share/Download hits the
 // existing watermarked/v8/<id>.mp4 cache instead of waiting on FFmpeg.
@@ -1212,6 +2221,269 @@ router.post('/:videoId/warm-watermark', requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
+// REPLAY WATERMARK (authenticated livestream replay download)
+//
+// POST /api/videos/livestream/:videoId/watermark — resolves the replay
+// (mirror videos.id → canonical livestreams row by exact video_url +
+// user_id; client URLs/usernames never trusted), returns the cached URL
+// when present, otherwise starts a BACKGROUND job and returns 202.
+// GET  /api/videos/livestream/:videoId/watermark — lightweight poll the
+// client calls until the URL is ready. No long-held HTTP request, so
+// platform request timeouts cannot interrupt FFmpeg work. The output is a
+// SEPARATE MP4 at livestreams/watermarked/v1/<canonicalReplayId>.mp4; the
+// original replay is never touched and there is no original fallback.
+// ─────────────────────────────────────────────────────────────
+
+// Shared server-side resolution for the replay-watermark routes: maps the
+// client's feed-mirror videos.id to the canonical livestreams row by exact
+// video_url + user_id. Never trusts client-supplied URLs or usernames.
+// Returns { status, json? , canonical?, username? } where status is an HTTP
+// status code; when status is 200, canonical and username are set.
+async function resolveCanonicalReplay(videoId) {
+  if (!videoId || typeof videoId !== 'string') {
+    return { status: 400, json: { error: 'Missing videoId' } };
+  }
+
+  const { data: mirror, error: mirrorError } = await supabase
+    .from('videos')
+    .select('id, user_id, video_url, is_live_stream, is_private, status')
+    .eq('id', videoId)
+    .maybeSingle();
+
+  if (mirrorError) {
+    console.error(
+      '[REPLAY-WATERMARK] Mirror lookup error:',
+      videoId,
+      mirrorError.message
+    );
+    return { status: 500, json: { error: 'Failed to load replay' } };
+  }
+
+  if (!mirror || mirror.is_live_stream !== true) {
+    return { status: 404, json: { error: 'Livestream replay not found' } };
+  }
+
+  if (mirror.is_private || mirror.status !== 'approved') {
+    return { status: 403, json: { error: 'Replay is not publicly available' } };
+  }
+
+  const livestreamsPrefix =
+    `${process.env.SUPABASE_URL}` +
+    `/storage/v1/object/public/${REPLAY_WATERMARK_BUCKET}/`;
+
+  if (
+    typeof mirror.video_url !== 'string' ||
+    !mirror.video_url.startsWith(livestreamsPrefix) ||
+    mirror.video_url === 'processing' ||
+    !/\.mp4(?:[?#]|$)/i.test(mirror.video_url)
+  ) {
+    return {
+      status: 409,
+      json: { error: 'Livestream replay is not ready for download yet' },
+    };
+  }
+
+  const { data: canonicalRows, error: canonicalError } = await supabase
+    .from('livestreams')
+    .select('id, user_id, video_url, thumbnail_url, is_public')
+    .eq('video_url', mirror.video_url)
+    .eq('user_id', mirror.user_id);
+
+  if (canonicalError) {
+    console.error(
+      '[REPLAY-WATERMARK] Canonical lookup error:',
+      videoId,
+      canonicalError.message
+    );
+    return { status: 500, json: { error: 'Failed to load replay' } };
+  }
+
+  if (!canonicalRows || canonicalRows.length === 0) {
+    return { status: 404, json: { error: 'Livestream replay not found' } };
+  }
+
+  if (canonicalRows.length > 1) {
+    console.error(
+      '[REPLAY-WATERMARK] Ambiguous canonical mapping:',
+      videoId,
+      canonicalRows.length
+    );
+    return {
+      status: 409,
+      json: { error: 'Replay mapping is ambiguous; cannot prepare download' },
+    };
+  }
+
+  const canonical = canonicalRows[0];
+
+  if (canonical.is_public === false) {
+    return { status: 403, json: { error: 'Replay is not publicly available' } };
+  }
+
+  if (
+    typeof canonical.video_url !== 'string' ||
+    !canonical.video_url.startsWith(livestreamsPrefix) ||
+    !/\.mp4(?:[?#]|$)/i.test(canonical.video_url)
+  ) {
+    return {
+      status: 409,
+      json: { error: 'Livestream replay is not ready for download yet' },
+    };
+  }
+
+  const username = await getVideoOwnerUsername(canonical.user_id);
+
+  return { status: 200, canonical, username };
+}
+
+// POST: resolve, then either return the cached watermarked URL (200) or
+// start a background job and return 202. The client polls GET. No request
+// is held open across FFmpeg work, so platform HTTP timeouts cannot kill a
+// generation mid-run.
+router.post('/livestream/:videoId/watermark', requireAuth, async (req, res) => {
+  try {
+    const { videoId } = req.params;
+
+    console.log('[REPLAY-WATERMARK] REQUEST:', videoId);
+
+    const resolved = await resolveCanonicalReplay(videoId);
+
+    if (resolved.status !== 200) {
+      return res.status(resolved.status).json(resolved.json);
+    }
+
+    const { canonical, username } = resolved;
+
+    // Cache hit (including username-staleness validation)? Return at once.
+    const cached = await probeReplayWatermarkObject(canonical.id, username);
+
+    if (cached.exists && !cached.staleUser) {
+      console.log('[REPLAY-WATERMARK] CACHE HIT:', canonical.id);
+      return res
+        .status(200)
+        .json({ success: true, status: 'ready', watermarkedUrl: cached.url });
+    }
+
+    const started = await startReplayWatermarkJob(
+      canonical.id,
+      canonical.video_url,
+      username
+    );
+
+    if (started.status === 'ready') {
+      return res.status(200).json({
+        success: true,
+        status: 'ready',
+        watermarkedUrl: started.url,
+      });
+    }
+
+    return res.status(202).json({ success: true, status: 'processing' });
+  } catch (error) {
+    console.error(
+      '[REPLAY-WATERMARK] Start failed:',
+      req.params.videoId,
+      error.message
+    );
+
+    if (String(error.message).includes('busy')) {
+      return res.status(429).json({ error: error.message });
+    }
+
+    return res.status(500).json({
+      error: 'Failed to prepare watermarked replay',
+    });
+  }
+});
+
+// GET: lightweight poll. A URL is returned ONLY after verifying the
+// Storage object exists AND its username watermark metadata is current —
+// never from job state alone. DB job status (cross-instance) is read
+// first; the in-memory map is the pre-migration fallback. Never holds a
+// connection open.
+router.get('/livestream/:videoId/watermark', requireAuth, async (req, res) => {
+  try {
+    const { videoId } = req.params;
+
+    const resolved = await resolveCanonicalReplay(videoId);
+
+    if (resolved.status !== 200) {
+      return res.status(resolved.status).json(resolved.json);
+    }
+
+    const { canonical, username } = resolved;
+
+    // Live probe: existence + size cap + username-tag freshness.
+    const cached = await probeReplayWatermarkObject(canonical.id, username);
+
+    if (cached.exists && !cached.staleUser) {
+      return res
+        .status(200)
+        .json({ success: true, status: 'ready', watermarkedUrl: cached.url });
+    }
+
+    // Cross-instance job state (null when the migration is not applied).
+    const dbJob = await dbGetReplayWatermarkJob(canonical.id);
+
+    if (dbJob) {
+      if (dbJob.status === 'running') {
+        return res.status(202).json({ success: true, status: 'processing' });
+      }
+
+      if (dbJob.status === 'done') {
+        // Job says done but the probe above failed: the object is gone or
+        // the username changed. Never return the recorded URL blind — ask
+        // the client to re-POST, which re-claims the row and regenerates.
+        return res.status(409).json({
+          success: false,
+          status: 'unknown',
+          error: 'Restart the download request',
+        });
+      }
+
+      // 'failed' — including deletion-cancellations, which cannot apply
+      // here because the canonical row still exists.
+      return res.status(500).json({
+        success: false,
+        status: 'failed',
+        error: dbJob.error || 'Failed to prepare watermarked replay',
+      });
+    }
+
+    // Pre-migration fallback: local job status.
+    const jobStatus = replayWatermarkStatus.get(canonical.id);
+
+    if (jobStatus?.status === 'running') {
+      return res.status(202).json({ success: true, status: 'processing' });
+    }
+
+    if (jobStatus?.status === 'failed') {
+      return res.status(500).json({
+        success: false,
+        status: 'failed',
+        error: jobStatus.error || 'Failed to prepare watermarked replay',
+      });
+    }
+
+    // No verified object, no discoverable job: ask the client to POST
+    // again to (re)start.
+    return res
+      .status(409)
+      .json({ success: false, status: 'unknown', error: 'Restart the download request' });
+  } catch (error) {
+    console.error(
+      '[REPLAY-WATERMARK] Poll failed:',
+      req.params.videoId,
+      error.message
+    );
+
+    return res.status(500).json({
+      error: 'Failed to check watermarked replay status',
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 // WATERMARK (public share)
 //
 // POST /api/videos/:videoId/watermark
@@ -1365,39 +2637,229 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
 
   // 3. Livestream replay mirror: a finalized replay has BOTH a canonical
   //    `livestreams` row and a MIRROR row in `videos` (is_live_stream=true)
-  //    sharing the exact same public livestreams-bucket URL. Detect it and
-  //    look up the canonical row so it can be removed before the mirror.
-  let canonicalRow = null;
+  //    sharing the exact same public livestreams-bucket URL.
+  //
+  //    Shared-reference guard: never delete a replay MP4 or thumbnail that
+  //    another account's row still references, and never orphan duplicate
+  //    mirrors/canonical records of the same account. Storage and DB cannot
+  //    be transacted together, so this re-checks references immediately
+  //    before the destructive step; a concurrent insert inside this narrow
+  //    window can still race (mitigated, not eliminated, by the
+  //    id-scoped metadata deletes below). Concurrent replay
+  //    finalization/account deletion either shares this MP4 URL (caught
+  //    here) or points at a different object (untouched).
+  let canonicalRows = [];    // same-account canonical records to delete
+  let siblingMirrorIds = []; // same-account duplicate mirrors sharing the MP4
+  let eligibleThumbnails = []; // distinct thumbnail objects safe to delete
 
-  if (
+  const isReplayMirror =
     row.is_live_stream === true &&
     typeof row.video_url === 'string' &&
-    row.video_url.includes('/object/public/livestreams/')
-  ) {
-    const { data: found, error: canonicalError } = await supabase
-      .from('livestreams')
-      .select('id, user_id, video_url, thumbnail_url')
-      .eq('video_url', row.video_url)
-      .maybeSingle();
+    row.video_url.includes('/object/public/livestreams/');
 
-    if (canonicalError) {
-      console.warn('[VIDEOS] Failed to look up livestream row:', videoId, canonicalError.message);
+  if (isReplayMirror) {
+    // Every canonical record backed by this MP4 (duplicates included).
+    // Paged explicitly: a single Supabase query silently caps at 1000 rows,
+    // and a truncated read here could leave a canonical record referencing
+    // storage about to be deleted — so a full page is treated as unsafe.
+    canonicalRows = [];
+
+    for (let from = 0; ; from += 1000) {
+      const { data: page, error: canonicalError } = await supabase
+        .from('livestreams')
+        .select('id, user_id, video_url, thumbnail_url')
+        .eq('video_url', row.video_url)
+        .range(from, from + 999);
+
+      if (canonicalError) {
+        console.warn('[VIDEOS] Failed to look up livestream rows:', videoId, canonicalError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      canonicalRows.push(...(page || []));
+
+      if (!page || page.length < 1000) break;
+
+      if (canonicalRows.length >= 10000) {
+        console.warn('[VIDEOS] Too many canonical records for MP4:', videoId);
+        return res.status(500).json({ error: 'Too many livestream records reference this video' });
+      }
+    }
+
+    // Fail closed: a canonical record owned by another account means this
+    // MP4 is theirs — only the mirror metadata may be removed, never its
+    // storage.
+    if (canonicalRows.some(c => c.user_id !== row.user_id)) {
+      return res.status(409).json({ error: 'Replay storage is owned by another account' });
+    }
+
+    // Every row sharing the MP4 URL. Paged for the same 1000-row silent-cap
+    // reason as above. A row is only a DUPLICATE MIRROR when
+    // is_live_stream === true — a same-account row that merely references
+    // the MP4 without being a confirmed mirror is NOT deleted automatically;
+    // the request fails closed so the caller can investigate. Other-account
+    // rows are never touched and always block storage deletion.
+    const siblingRows = []; // confirmed duplicate mirrors: { id, thumbnail_url }
+
+    for (let from = 0; ; from += 1000) {
+      const { data: page, error: siblingError } = await supabase
+        .from('videos')
+        .select('id, user_id, thumbnail_url, is_live_stream')
+        .eq('video_url', row.video_url)
+        .range(from, from + 999);
+
+      if (siblingError) {
+        console.warn('[VIDEOS] Failed to look up rows sharing the replay MP4:', videoId, siblingError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      for (const candidate of page || []) {
+        if (candidate.id === videoId) continue;
+
+        if (candidate.user_id !== row.user_id) {
+          return res
+            .status(409)
+            .json({ error: 'Replay storage is referenced by another account' });
+        }
+
+        if (candidate.is_live_stream !== true) {
+          console.warn(
+            '[VIDEOS] Shared MP4 reference is not a confirmed livestream mirror:',
+            candidate.id,
+            'type:',
+            candidate.is_live_stream
+          );
+          return res
+            .status(409)
+            .json({ error: 'Replay MP4 is referenced by a non-mirror video row' });
+        }
+
+        siblingRows.push(candidate);
+      }
+
+      if (!page || page.length < 1000) break;
+
+      if (siblingRows.length >= 10000) {
+        console.warn('[VIDEOS] Too many mirrors sharing the replay MP4:', videoId);
+        return res.status(500).json({ error: 'Too many rows reference this video' });
+      }
+    }
+
+    siblingMirrorIds = siblingRows.map(s => s.id);
+
+    // The MP4 can also be referenced as another video's ORIGINAL upload
+    // (original_video_url). Any such row outside the delete set — same
+    // account or not — makes MP4 deletion unsafe: it would orphan that
+    // video's source media. Excludes ONLY rows scheduled for deletion
+    // (the mirror itself and confirmed duplicate mirrors).
+    let originalQuery = supabase
+      .from('videos')
+      .select('id')
+      .eq('original_video_url', row.video_url)
+      .neq('id', videoId);
+
+    for (const siblingId of siblingMirrorIds) {
+      originalQuery = originalQuery.neq('id', siblingId);
+    }
+
+    const { data: originalRefs, error: originalError } =
+      await originalQuery.limit(1);
+
+    if (originalError) {
+      console.warn('[VIDEOS] Failed to check original_video_url references:', videoId, originalError.message);
       return res.status(500).json({ error: 'Failed to delete video' });
     }
 
-    // A canonical row owned by someone else is not ours — delete mirror only.
-    if (found && found.user_id === row.user_id) {
-      canonicalRow = found;
+    if ((originalRefs || []).length > 0) {
+      return res
+        .status(409)
+        .json({ error: 'Replay MP4 is referenced as another video\'s original upload' });
+    }
+
+    // Thumbnails: the requested mirror, every duplicate canonical record,
+    // AND every confirmed duplicate mirror may each carry a distinct
+    // thumbnail_url — all of them are candidates. A thumbnail referenced by
+    // any row outside the delete set (videos rows other than the mirror +
+    // confirmed siblings, livestreams rows other than the canonicals) is
+    // left in place, never deleted; the rest are cleaned. Each object is
+    // checked and deleted on its own, so a failure keeps every metadata row
+    // intact for a safe retry.
+    const canonicalIds = canonicalRows.map(c => c.id);
+    const videoDeleteSet = [videoId, ...siblingMirrorIds];
+
+    const thumbnailCandidates = [
+      ...new Set(
+        [
+          row.thumbnail_url,
+          ...canonicalRows.map(c => c.thumbnail_url),
+          ...siblingRows.map(s => s.thumbnail_url),
+        ].filter(Boolean)
+      ),
+    ];
+
+    for (const thumbnailUrl of thumbnailCandidates) {
+      let thumbVideoQuery = supabase
+        .from('videos')
+        .select('id')
+        .eq('thumbnail_url', thumbnailUrl);
+
+      for (const deleteId of videoDeleteSet) {
+        thumbVideoQuery = thumbVideoQuery.neq('id', deleteId);
+      }
+
+      const { data: thumbVideos, error: thumbVideosError } =
+        await thumbVideoQuery.limit(1);
+
+      let thumbLiveQuery = supabase
+        .from('livestreams')
+        .select('id')
+        .eq('thumbnail_url', thumbnailUrl);
+
+      for (const canonicalId of canonicalIds) {
+        thumbLiveQuery = thumbLiveQuery.neq('id', canonicalId);
+      }
+
+      const { data: thumbLivestreams, error: thumbLivestreamsError } =
+        await thumbLiveQuery.limit(1);
+
+      if (thumbVideosError || thumbLivestreamsError) {
+        console.warn(
+          '[VIDEOS] Failed to check thumbnail references:',
+          videoId,
+          thumbVideosError?.message || thumbLivestreamsError?.message
+        );
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      if ((thumbVideos || []).length === 0 && (thumbLivestreams || []).length === 0) {
+        eligibleThumbnails.push(thumbnailUrl);
+      }
     }
   }
 
-  // Delete the row's storage objects. For a replay mirror, fall back to the
-  // canonical row's thumbnail_url (the MP4 URLs are identical, so objects
-  // dedupe via cleanupVideoStorage's existing Map).
-  const cleanup = await cleanupVideoStorage({
-    ...row,
-    thumbnail_url: row.thumbnail_url || canonicalRow?.thumbnail_url,
-  });
+  // Delete the row's storage objects. Replay mirrors: the MP4 plus every
+  // eligible thumbnail, one object at a time. Normal videos: the row's own
+  // URLs (unchanged behavior). Any failure keeps all metadata rows so the
+  // deletion can be retried safely — storage and DB are NOT transacted
+  // together.
+  let cleanup;
+
+  if (isReplayMirror) {
+    cleanup = { ok: true, objectsCleaned: 0, storageFailed: [] };
+
+    for (const url of [row.video_url, ...eligibleThumbnails]) {
+      const objectCleanup = await cleanupVideoStorage({ video_url: url });
+
+      cleanup.objectsCleaned += objectCleanup.objectsCleaned;
+
+      if (!objectCleanup.ok) {
+        cleanup.ok = false;
+        cleanup.storageFailed.push(...objectCleanup.storageFailed);
+      }
+    }
+  } else {
+    cleanup = await cleanupVideoStorage({ ...row });
+  }
 
   // 4. Delete the videos row ONLY if every recognized storage object was
   //    deleted or already absent, and every non-null URL parsed safely.
@@ -1411,21 +2873,81 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
     });
   }
 
-  // Replay mirror: remove the canonical livestreams row FIRST. If a later
-  // step fails, the videos mirror row (with its video_url) is still present,
-  // so a retry can re-resolve the canonical row and finish the job. (The
-  // reverse order would orphan the canonical row: once the mirror row is
-  // gone, its id no longer resolves to any livestreams row.)
-  if (canonicalRow) {
+  // Replay mirror: remove the canonical livestreams records FIRST, then
+  // duplicate sibling mirrors. If a later step fails, the requested mirror
+  // row (with its video_url) is still present, so a retry can re-resolve
+  // everything. (Deleting the requested row first would orphan its
+  // duplicates: once it is gone, its id no longer resolves to any row.)
+  // Cancel any running watermark job FIRST (cross-instance signal), then
+  // STRICT derived-watermark cleanup before any canonical metadata is
+  // removed. If the object exists and its deletion fails, abort with every
+  // metadata row intact (safe retry); the last metadata reference is never
+  // deleted while the derived object survives. Keys are exact deterministic
+  // canonical replay ids — never client input.
+
+  // Queue cleanup BEFORE deleting the canonical replay.
+  // This record survives even if Railway restarts.
+  for (const canonical of canonicalRows) {
+    await queueReplayWatermarkCleanup(canonical.id);
+  }
+
+  // Cancel any running watermark job FIRST so a concurrent generator
+  // cannot recreate the derived object after we remove it.
+  for (const canonical of canonicalRows) {
+    await dbCancelReplayWatermarkJob(canonical.id);
+  }
+
+  for (const canonical of canonicalRows) {
+    try {
+      await deleteReplayWatermarkedObjectStrict(canonical.id);
+    } catch (error) {
+      console.warn(
+        '[VIDEOS] Watermark object cleanup failed; metadata preserved:',
+        canonical.id,
+        error.message
+      );
+      return res.status(500).json({ error: 'Failed to delete watermarked replay files' });
+    }
+  }
+
+  for (const canonical of canonicalRows) {
     const { error: canonicalDeleteError } = await supabase
       .from('livestreams')
       .delete()
-      .eq('id', canonicalRow.id);
+      .eq('id', canonical.id)
+      .eq('user_id', row.user_id);
 
     if (canonicalDeleteError) {
-      console.warn('[VIDEOS] Failed to delete livestream row:', canonicalRow.id, canonicalDeleteError.message);
+      console.warn('[VIDEOS] Failed to delete livestream row:', canonical.id, canonicalDeleteError.message);
       return res.status(500).json({ error: 'Failed to delete video' });
     }
+  }
+
+  // Final cleanup: catch a watermark upload that completed
+  // while canonical replay deletion was in progress.
+  for (const canonical of canonicalRows) {
+    await deleteReplayWatermarkedObjectStrict(canonical.id);
+  }
+
+  for (const siblingId of siblingMirrorIds) {
+    const { error: siblingDeleteError } = await supabase
+      .from('videos')
+      .delete()
+      .eq('id', siblingId)
+      .eq('user_id', row.user_id);
+
+    if (siblingDeleteError) {
+      console.warn('[VIDEOS] Failed to delete duplicate mirror row:', siblingId, siblingDeleteError.message);
+      return res.status(500).json({ error: 'Failed to delete video' });
+    }
+  }
+
+  // Final best-effort pass: generation re-validates the canonical row
+  // before uploading, so a racing job cannot recreate the object after the
+  // metadata deletes above — but if one slipped through, the object is
+  // unreferenced now and removed here when possible (warn-only).
+  for (const canonical of canonicalRows) {
+    await deleteReplayWatermarkedObject(canonical.id);
   }
 
   // Child rows (appeals, comments, likes, notifications, reports) cascade
@@ -1452,6 +2974,239 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
   });
 });
 
+
+// Account deletion: clean completed livestream replays.
+// Keep this separate from the existing normal-video cleanup.
+async function cleanupAccountLivestreamReplays(userId) {
+  // Fail closed: never clean up while the user may be actively live — a
+  // recording could be in flight whose durable replay row is not written
+  // yet. NOTE: no repo migration defines live_streams/is_live (the table
+  // exists only in the live DB), so this check CANNOT be verified against
+  // local schema. Any error — including a missing column — aborts the
+  // cleanup (409) rather than guessing it is safe.
+  const { data: activeStreams, error: activeError } = await supabase
+    .from('live_streams')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('is_live', true)
+    .limit(1);
+
+  if (activeError) {
+    console.error(
+      '[VIDEOS] Active-livestream safety check failed (is_live unverified):',
+      activeError.message
+    );
+
+    const error = new Error(
+      'Could not confirm no active livestream; aborting replay cleanup'
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+
+  if (activeStreams?.length) {
+    const error = new Error('Account is currently livestreaming');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  // Page through canonical replays (a single Supabase query caps at 1000).
+  const replays = [];
+
+  for (let from = 0; ; from += 1000) {
+    const { data, error: replayError } = await supabase
+      .from('livestreams')
+      .select('id, user_id, video_url, thumbnail_url, recording_filename')
+      .eq('user_id', userId)
+      .range(from, from + 999);
+
+    if (replayError) throw replayError;
+
+    replays.push(...(data || []));
+
+    if (!data || data.length < 1000) break;
+  }
+
+  // Fail closed: never delete an unfinished recording.
+  for (const replay of replays) {
+    if (
+      !replay.video_url ||
+      replay.video_url === 'processing' ||
+      !replay.video_url.startsWith(
+        `${process.env.SUPABASE_URL}/storage/v1/object/public/livestreams/`
+      )
+    ) {
+      const error = new Error('Livestream replay is still processing');
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  // Page through ALL of this user's videos rows that reference the
+  // livestreams bucket. Rows whose video_url matches a canonical replay are
+  // feed mirrors (including duplicates); the rest are ORPHAN mirrors whose
+  // canonical livestreams row is already gone — the replay loop below can
+  // never see them, and the delete-user edge function would otherwise
+  // delete their metadata without cleaning their storage.
+  const mirrorRows = []; // { id, video_url, thumbnail_url }
+
+  for (let from = 0; ; from += 1000) {
+    const { data, error: mirrorError } = await supabase
+      .from('videos')
+      .select('id, video_url, thumbnail_url')
+      .eq('user_id', userId)
+      .like('video_url', '%/object/public/livestreams/%')
+      .range(from, from + 999);
+
+    if (mirrorError) throw mirrorError;
+
+    mirrorRows.push(...(data || []));
+
+    if (!data || data.length < 1000) break;
+  }
+
+  // Every distinct storage object this cleanup would touch — from canonical
+  // replays AND mirrors (including orphans), MP4s and thumbnails alike.
+  const urls = new Set();
+
+  for (const row of [...replays, ...mirrorRows]) {
+    if (row.video_url) urls.add(row.video_url);
+    if (row.thumbnail_url) urls.add(row.thumbnail_url);
+  }
+
+  // Shared-reference guard: never delete media still referenced by ANOTHER
+  // account's rows. This user's own rows are all deleted by this endpoint
+  // (mirrors/orphans here, normal videos in the loop below), so references
+  // from them do not protect storage. Four separate queries per URL batch —
+  // a combined or-filter cannot express two in-lists unambiguously, and
+  // PostgREST URLs must stay small, so urlList is chunked.
+  const URL_REFERENCE_BATCH = 50;
+  const urlList = [...urls];
+  const foreignChecks = [];
+
+  for (let i = 0; i < urlList.length; i += URL_REFERENCE_BATCH) {
+    const batch = urlList.slice(i, i + URL_REFERENCE_BATCH);
+
+    foreignChecks.push(
+      {
+        label: 'another account',
+        promise: supabase
+          .from('videos')
+          .select('id')
+          .neq('user_id', userId)
+          .in('video_url', batch)
+          .limit(1),
+      },
+      {
+        label: 'another account',
+        promise: supabase
+          .from('videos')
+          .select('id')
+          .neq('user_id', userId)
+          .in('thumbnail_url', batch)
+          .limit(1),
+      },
+      {
+        label: 'another recording',
+        promise: supabase
+          .from('livestreams')
+          .select('id')
+          .neq('user_id', userId)
+          .in('video_url', batch)
+          .limit(1),
+      },
+      {
+        label: 'another recording',
+        promise: supabase
+          .from('livestreams')
+          .select('id')
+          .neq('user_id', userId)
+          .in('thumbnail_url', batch)
+          .limit(1),
+      }
+    );
+  }
+
+  if (foreignChecks.length > 0) {
+    const results = await Promise.all(
+      foreignChecks.map(({ promise }) => promise)
+    );
+
+    for (let i = 0; i < results.length; i += 1) {
+      const { data, error } = results[i];
+
+      if (error) throw error;
+
+      if (data?.length) {
+        throw new Error(
+          foreignChecks[i].label === 'another account'
+            ? 'Replay is referenced by another account'
+            : 'Replay storage is shared by another recording'
+        );
+      }
+    }
+  }
+
+  // Delete every distinct storage object BEFORE touching any metadata row,
+  // so a failure here keeps all rows intact for a safe retry. (Deleting a
+  // missing key succeeds on S3, so duplicate URLs across rows are harmless;
+  // an unparseable URL makes cleanup not-ok and aborts with metadata kept.)
+  for (const url of urlList) {
+    const cleanup = await cleanupVideoStorage({ video_url: url });
+
+    if (!cleanup.ok) {
+      throw new Error('Livestream replay storage cleanup failed');
+    }
+  }
+
+  // Metadata last, mirrors before canonical rows (canonical rows are the
+  // retry anchor: while they exist, a re-run can re-derive the mirrors).
+  for (const mirror of mirrorRows) {
+    const { error: mirrorDeleteError } = await supabase
+      .from('videos')
+      .delete()
+      .eq('id', mirror.id)
+      .eq('user_id', userId);
+
+    if (mirrorDeleteError) throw mirrorDeleteError;
+  }
+
+  for (const replay of replays) {
+    // Cancel any running watermark job for this replay FIRST, then STRICT
+    // derived-watermark cleanup BEFORE the canonical row is removed: if the
+    // object exists and cannot be deleted, throw with the canonical row
+    // intact so a retry can finish — the last metadata reference is never
+    // deleted while the derived object survives.
+    await queueReplayWatermarkCleanup(replay.id);
+    await dbCancelReplayWatermarkJob(replay.id);
+
+
+    try {
+      await deleteReplayWatermarkedObjectStrict(replay.id);
+    } catch (error) {
+      console.warn(
+        '[VIDEOS] Watermark object cleanup failed; replay metadata preserved:',
+        replay.id,
+        error.message
+      );
+      throw new Error('Livestream replay watermark cleanup failed');
+    }
+
+    const { error: canonicalDeleteError } = await supabase
+      .from('livestreams')
+      .delete()
+      .eq('id', replay.id)
+      .eq('user_id', userId);
+
+    if (canonicalDeleteError) throw canonicalDeleteError;
+
+    // Final strict cleanup after canonical replay deletion.
+    await deleteReplayWatermarkedObjectStrict(replay.id);
+  }
+
+  return replays.length;
+}
+
 // ─────────────────────────────────────────────────────────────
 // ACCOUNT DELETION: CLEAN UP ALL NORMAL VIDEO FILES
 // ─────────────────────────────────────────────────────────────
@@ -1470,10 +3225,24 @@ router.post('/account/:userId/cleanup-videos', requireAuth, async (req, res) => 
     return res.status(403).json({ error: 'Not authorized' });
   }
 
+  let replaysCleaned = 0;
+
+  try {
+    replaysCleaned = await cleanupAccountLivestreamReplays(userId);
+  } catch (error) {
+    console.error('[VIDEOS] Replay cleanup failed:', error.message);
+
+    return res.status(error.statusCode || 500).json({
+      error: 'Could not remove all livestream replay files. Please try again.',
+    });
+  }
+
   // Process videos in bounded first-batch batches: fetch the first
   // BATCH_SIZE remaining normal-video rows, clean each one and delete its
   // row immediately, then re-query from the start. Offset pagination would
-  // skip rows because the result set shrinks as we delete.
+  // skip rows: every deletion shifts the offsets of the remaining rows, so
+  // a fixed offset would stride past entries; re-querying from the start
+  // always sees the next remaining rows.
   const BATCH_SIZE = 50;
   let videosCleaned = 0;
 
@@ -1523,7 +3292,11 @@ router.post('/account/:userId/cleanup-videos', requireAuth, async (req, res) => 
     }
   }
 
-  return res.status(200).json({ success: true, videosCleaned });
+  return res.status(200).json({
+    success: true,
+    videosCleaned,
+    replaysCleaned,
+  });
 });
 
 module.exports = router;
