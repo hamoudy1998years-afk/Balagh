@@ -241,8 +241,14 @@ async function startCompositeRecording(roomName, streamRow) {
   const info =
     await egressClient.startRoomCompositeEgress(
       roomName,
+      { file: fileOutput },
       {
-        file: fileOutput,
+        encodingOptions: {
+          width: 1920,
+          height: 1080,
+          framerate: 30,
+          videoBitrate: 4500,
+        },
       }
     );
 
@@ -1616,8 +1622,8 @@ async function captureAutomaticLiveThumbnail(roomName, streamRow) {
         {
           images: {
             captureInterval: 10,
-            width: 640,
-            height: 360,
+            width: 720,
+            height: 1280,
             filenamePrefix: prefix,
             filenameSuffix: ImageFileSuffix.IMAGE_SUFFIX_INDEX,
             imageCodec: ImageCodec.IC_JPEG,
@@ -1876,8 +1882,8 @@ router.post('/egress/thumbnail-test', requireAuth, async (req, res) => {
         {
           images: {
             captureInterval: 10,
-            width: 640,
-            height: 360,
+            width: 720,
+            height: 1280,
             filenamePrefix: thumbnailPrefix,
             filenameSuffix: ImageFileSuffix.IMAGE_SUFFIX_INDEX,
             imageCodec: ImageCodec.IC_JPEG,
