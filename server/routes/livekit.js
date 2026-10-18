@@ -357,6 +357,47 @@ async function startCompositeRecording(roomName, streamRow, requestedOrientation
     filename
   );
 
+
+  // Diagnostic only: observe LiveKit startup without blocking the stream.
+  void (async () => {
+    const observedAtMs = Date.now();
+    const delays = [0, 1000, 2000, 3000, 5000, 8000];
+
+    for (let i = 0; i < delays.length; i++) {
+      if (i > 0) {
+        await new Promise(resolve =>
+          setTimeout(resolve, delays[i] - delays[i - 1])
+        );
+      }
+
+      try {
+        const records = await egressClient.listEgress({
+          egressId: info.egressId,
+        });
+
+        const current = records?.find(
+          item => item.egressId === info.egressId
+        );
+
+        console.log('[EGRESS-STARTUP]', {
+          egressId: info.egressId,
+          elapsedMs: Date.now() - observedAtMs,
+          status: current?.status ?? 'unavailable',
+          startedAt: current?.startedAt?.toString?.() ?? 'unavailable',
+        });
+
+        if (current && current.status !== 0) break;
+      } catch (error) {
+        console.warn(
+          '[EGRESS-STARTUP] Status lookup failed:',
+          error.message
+        );
+      }
+    }
+  })().catch(error => {
+    console.warn('[EGRESS-STARTUP] Diagnostic failed:', error.message);
+  });
+
   return { egressId: info.egressId, filename };
 }
 
