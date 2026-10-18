@@ -195,53 +195,10 @@ function isLivestreamThumbnailEgress(info, streamId) {
   });
 }
 
-async function getHostRecordingSize(roomName, hostUserId) {
-  try {
-    const host = await getRoomServiceClient()
-      .getParticipant(roomName, hostUserId);
-
-    const camera = (host?.tracks || []).find(track =>
-      (track.source === 1 || track.source === 'CAMERA') &&
-      Number.isFinite(track.width) &&
-      Number.isFinite(track.height) &&
-      track.width > 0 &&
-      track.height > 0
-    );
-
-    if (camera) {
-      const portrait = camera.height >= camera.width;
-
-      console.log(
-        '[EGRESS] Host camera:',
-        camera.width,
-        'x',
-        camera.height,
-        portrait ? 'portrait' : 'landscape'
-      );
-
-      return portrait
-        ? { width: 1080, height: 1920 }
-        : { width: 1920, height: 1080 };
-    }
-
-    console.warn(
-      '[EGRESS] Camera dimensions unavailable; using portrait fallback'
-    );
-  } catch (error) {
-    console.warn(
-      '[EGRESS] Camera lookup failed; using portrait fallback:',
-      error.message
-    );
-  }
-
-  return { width: 1080, height: 1920 };
-}
-
 // Start a room-composite MP4 recording for a verified live_streams row.
 // The filename is unique per attempt (stream id + timestamp), so a recovered
 // recording started after a reconnect NEVER overwrites an earlier segment.
 async function startCompositeRecording(roomName, streamRow) {
-  const recordingSize = await getHostRecordingSize(roomName, streamRow.user_id);
   const requiredStorageEnv = [
     'SUPABASE_S3_KEY_ID',
     'SUPABASE_S3_SECRET',
@@ -287,8 +244,8 @@ async function startCompositeRecording(roomName, streamRow) {
       { file: fileOutput },
       {
         encodingOptions: {
-          width: recordingSize.width,
-          height: recordingSize.height,
+          width: 1920,
+          height: 1080,
           framerate: 30,
           videoBitrate: 4500,
         },
