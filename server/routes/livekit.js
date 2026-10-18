@@ -216,6 +216,7 @@ async function startCompositeRecording(roomName, streamRow, requestedOrientation
     );
   }
 
+  const diagnosticStartMs = Date.now();
   const egressClient = getEgressClient();
 
   const filename =
@@ -333,11 +334,18 @@ async function startCompositeRecording(roomName, streamRow, requestedOrientation
       );
     }
   }
+  const egressRequestMs = Date.now();
+  console.log('[EGRESS-TIMING] Pre-start preparation:', egressRequestMs - diagnosticStartMs, 'ms');
+
   const info = await egressClient.startRoomCompositeEgress(
     roomName,
     { file: fileOutput },
     recordingOptions
   );
+
+  console.log('[EGRESS-TIMING] LiveKit start request:', Date.now() - egressRequestMs, 'ms');
+  console.log('[EGRESS-TIMING] Initial status:', info?.status,
+    'startedAt:', info?.startedAt?.toString?.() ?? 'unavailable');
 
   if (!info?.egressId) {
     throw new Error('LiveKit returned no egressId');
@@ -3104,6 +3112,14 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
     }
 
     // Trusted file locator from LiveKit's own egress record.
+    console.log('[EGRESS-TIMING] Stop request:', {
+      egressId,
+      status: egressInfo.status,
+      startedAt: egressInfo.startedAt?.toString?.() ?? 'unavailable',
+      endedAt: egressInfo.endedAt?.toString?.() ?? 'unavailable',
+      serverTimeMs: Date.now(),
+    });
+
     const trustedFilename = egressFilenameOf(egressInfo);
 
     // An egress that already reached a terminal status (e.g. its room was
@@ -3136,6 +3152,11 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         egressInfo.status
       );
     }
+
+    console.log('[EGRESS-TIMING] Stop completed:', {
+      egressId,
+      serverTimeMs: Date.now(),
+    });
 
     console.log('[EGRESS] Stopped:', egressId);
 
