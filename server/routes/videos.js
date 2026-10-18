@@ -1476,6 +1476,14 @@ async function generateWatermarkedReplay(
         }),
         { abortSignal: uploadController.signal }
       );
+    } catch (uploadError) {
+      const response = uploadError?.$response;
+      console.error('[REPLAY-WATERMARK] S3 upload diagnostic:', {
+        statusCode: uploadError?.$metadata?.httpStatusCode ?? response?.statusCode ?? null,
+        contentType: response?.headers?.['content-type'] ?? null,
+        errorName: uploadError?.name ?? null,
+      });
+      throw uploadError;
     } finally {
       clearTimeout(uploadTimeout);
     }
