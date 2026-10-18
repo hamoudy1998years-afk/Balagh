@@ -198,7 +198,7 @@ function isLivestreamThumbnailEgress(info, streamId) {
 // Start a room-composite MP4 recording for a verified live_streams row.
 // The filename is unique per attempt (stream id + timestamp), so a recovered
 // recording started after a reconnect NEVER overwrites an earlier segment.
-async function startCompositeRecording(roomName, streamRow) {
+async function startCompositeRecording(roomName, streamRow, requestedOrientation) {
   const requiredStorageEnv = [
     'SUPABASE_S3_KEY_ID',
     'SUPABASE_S3_SECRET',
@@ -241,24 +241,23 @@ async function startCompositeRecording(roomName, streamRow) {
   const replayTemplateUrl =
     process.env.BUSHRANN_REPLAY_TEMPLATE_URL?.trim();
 
-  // Test-only recorder: never affect other hosts.
+  const recordingOrientation =
+    requestedOrientation === 'landscape' ? 'landscape' : 'portrait';
+
+  // Keep the original recorder for other hosts until rollout is enabled.
+  const replayAllHostsEnabled =
+    process.env.BUSHRANN_REPLAY_ALL_HOSTS_ENABLED === 'true';
   const replayTestUserId =
     process.env.BUSHRANN_REPLAY_TEST_USER_ID?.trim();
-
-  const replayTestOrientation =
-    process.env.BUSHRANN_REPLAY_TEST_ORIENTATION
-      ?.trim()
-      .toLowerCase();
-
-  const useReplayTestTemplate = Boolean(
+  const useReplayOrientationTemplate = Boolean(
     replayTemplateUrl &&
     /^https:\/\//i.test(replayTemplateUrl) &&
-    replayTestUserId &&
-    String(streamRow.user_id) === replayTestUserId
+    (replayAllHostsEnabled ||
+      (replayTestUserId &&
+        String(streamRow.user_id) === replayTestUserId))
   );
-
-  // Preserve the original recorder unless the test template is enabled
-  // AND the host's published camera dimensions are known.
+  // Preserve the original recorder when the template or camera
+  // orientation cannot be determined.
   let recordingOptions = {
     encodingOptions: {
       width: 1920,
@@ -268,39 +267,43 @@ async function startCompositeRecording(roomName, streamRow) {
     },
   };
 
-  if (useReplayTestTemplate) {
+  if (useReplayOrientationTemplate) {
     try {
-      const participants = await getRoomServiceClient()
-        .listParticipants(roomName);
+      let camera = null;
+      let width = 0;
+      let height = 0;
+      let validDimensions = false;
 
-      const host = (participants || []).find(
-        p => String(p.identity) === String(streamRow.user_id)
-      );
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const participants = await getRoomServiceClient()
+          .listParticipants(roomName);
 
-      const camera = (host?.tracks || []).find(
-        t => t.type === 1 && t.source === 1 && !t.muted
-      );
+        const host = (participants || []).find(
+          p => String(p.identity) === String(streamRow.user_id)
+        );
 
-      const width = Number(camera?.width);
-      const height = Number(camera?.height);
+        camera = (host?.tracks || []).find(
+          t => t.type === 1 && t.source === 1 && !t.muted
+        );
 
-      const validDimensions =
-        Number.isFinite(width) &&
-        Number.isFinite(height) &&
-        width > 0 &&
-        height > 0 &&
-        width !== height;
+        width = Number(camera?.width);
+        height = Number(camera?.height);
 
-      const forcedOrientation =
-        replayTestOrientation === 'portrait' ||
-        replayTestOrientation === 'landscape'
-          ? replayTestOrientation
-          : null;
+        validDimensions =
+          Number.isFinite(width) &&
+          Number.isFinite(height) &&
+          width > 0 &&
+          height > 0 &&
+          width !== height;
 
-      if (camera && (validDimensions || forcedOrientation)) {
-        const portrait = forcedOrientation
-          ? forcedOrientation === 'portrait'
-          : height > width;
+        if (validDimensions) break;
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 400));
+        }
+      }
+
+      if (camera) {
+        const portrait = recordingOrientation === 'portrait';
 
         recordingOptions = {
           customBaseUrl: replayTemplateUrl,
@@ -316,11 +319,11 @@ async function startCompositeRecording(roomName, streamRow) {
         console.log(
           '[EGRESS] Host camera:',
           `${width}x${height}`,
-          portrait ? 'PORTRAIT' : 'LANDSCAPE'
+          'RECORDING:', recordingOrientation.toUpperCase()
         );
       } else {
         console.warn(
-          '[EGRESS] Camera dimensions unavailable; using original recorder'
+          '[EGRESS] Host camera unavailable; using original recorder'
         );
       }
     } catch (error) {
@@ -2314,7 +2317,8 @@ router.post('/egress/start', requireAuth, async (req, res) => {
     try {
       const started = await startCompositeRecording(
         roomName,
-        streamRow
+        streamRow,
+        req.body?.orientation
       );
 
       // Capture a live preview without blocking MP4 recording.
@@ -2480,7 +2484,8 @@ router.post(
       try {
         const started = await startCompositeRecording(
           roomName,
-          streamRow
+          streamRow,
+          req.body?.orientation
         );
 
         console.log(
