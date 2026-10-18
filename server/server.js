@@ -76,6 +76,9 @@ app.use('/api/videos', videoRoutes);
 // Serves only the public admin-uploader HTML and its vendored browser
 // libraries (supabase-js, tus-js-client); no secrets are embedded.
 const path = require('path');
+app.get('/replay-template', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'replay-template.html'));
+});
 const adminUploaderRoutes = require('./routes/adminUploader');
 app.use('/api/admin-uploader', adminUploaderRoutes);
 app.use(

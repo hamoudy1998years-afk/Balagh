@@ -238,19 +238,103 @@ async function startCompositeRecording(roomName, streamRow) {
     },
   };
 
-  const info =
-    await egressClient.startRoomCompositeEgress(
-      roomName,
-      { file: fileOutput },
-      {
-        encodingOptions: {
-          width: 1920,
-          height: 1080,
-          framerate: 30,
-          videoBitrate: 4500,
-        },
+  const replayTemplateUrl =
+    process.env.BUSHRANN_REPLAY_TEMPLATE_URL?.trim();
+
+  // Test-only recorder: never affect other hosts.
+  const replayTestUserId =
+    process.env.BUSHRANN_REPLAY_TEST_USER_ID?.trim();
+
+  const replayTestOrientation =
+    process.env.BUSHRANN_REPLAY_TEST_ORIENTATION
+      ?.trim()
+      .toLowerCase();
+
+  const useReplayTestTemplate = Boolean(
+    replayTemplateUrl &&
+    /^https:\/\//i.test(replayTemplateUrl) &&
+    replayTestUserId &&
+    String(streamRow.user_id) === replayTestUserId
+  );
+
+  // Preserve the original recorder unless the test template is enabled
+  // AND the host's published camera dimensions are known.
+  let recordingOptions = {
+    encodingOptions: {
+      width: 1920,
+      height: 1080,
+      framerate: 30,
+      videoBitrate: 4500,
+    },
+  };
+
+  if (useReplayTestTemplate) {
+    try {
+      const participants = await getRoomServiceClient()
+        .listParticipants(roomName);
+
+      const host = (participants || []).find(
+        p => String(p.identity) === String(streamRow.user_id)
+      );
+
+      const camera = (host?.tracks || []).find(
+        t => t.type === 1 && t.source === 1 && !t.muted
+      );
+
+      const width = Number(camera?.width);
+      const height = Number(camera?.height);
+
+      const validDimensions =
+        Number.isFinite(width) &&
+        Number.isFinite(height) &&
+        width > 0 &&
+        height > 0 &&
+        width !== height;
+
+      const forcedOrientation =
+        replayTestOrientation === 'portrait' ||
+        replayTestOrientation === 'landscape'
+          ? replayTestOrientation
+          : null;
+
+      if (camera && (validDimensions || forcedOrientation)) {
+        const portrait = forcedOrientation
+          ? forcedOrientation === 'portrait'
+          : height > width;
+
+        recordingOptions = {
+          customBaseUrl: replayTemplateUrl,
+          layout: `host:${streamRow.user_id}`,
+          encodingOptions: {
+            width: portrait ? 1080 : 1920,
+            height: portrait ? 1920 : 1080,
+            framerate: 30,
+            videoBitrate: 4500,
+          },
+        };
+
+        console.log(
+          '[EGRESS] Host camera:',
+          `${width}x${height}`,
+          portrait ? 'PORTRAIT' : 'LANDSCAPE'
+        );
+      } else {
+        console.warn(
+          '[EGRESS] Camera dimensions unavailable; using original recorder'
+        );
       }
-    );
+    } catch (error) {
+      console.warn(
+        '[EGRESS] Orientation lookup failed; using original recorder:',
+        error?.message || error
+      );
+    }
+  }
+  const info = await egressClient.startRoomCompositeEgress(
+    roomName,
+    { file: fileOutput },
+    recordingOptions
+  );
 
   if (!info?.egressId) {
     throw new Error('LiveKit returned no egressId');

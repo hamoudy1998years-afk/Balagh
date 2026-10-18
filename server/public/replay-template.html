@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Bushrann Replay Recorder</title>
+<style>
+html, body, #stage {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+}
+#stage video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+#stage audio {
+  display: none;
+}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script src="/admin-uploader-assets/livekit-client.umd.min.js"></script>
+<script>
+(async function () {
+  const params = new URLSearchParams(location.search);
+  const url = params.get('url');
+  const token = params.get('token');
+  const layout = params.get('layout') || '';
+  const hostId = layout.startsWith('host:') ? layout.slice(5) : '';
+  const stage = document.getElementById('stage');
+
+  if (!hostId) {
+    console.error('Missing host identity; recording disabled');
+    return;
+  }
+
+  if (!url || !token || !window.LivekitClient) {
+    console.error('Recorder initialization failed');
+    return;
+  }
+
+  const { Room, RoomEvent, Track } = LivekitClient;
+  const room = new Room({ adaptiveStream: false });
+  let videoElement = null;
+  let started = false;
+
+  function signalStart() {
+    if (started || !videoElement) return;
+    if (!videoElement.videoWidth || !videoElement.videoHeight) return;
+    started = true;
+    console.log('START_RECORDING');
+  }
+
+  room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    if (participant.identity !== hostId) return;
+
+    if (
+      track.kind === Track.Kind.Video &&
+      publication.source === Track.Source.Camera
+    ) {
+      if (videoElement) videoElement.remove();
+
+      videoElement = track.attach();
+      videoElement.autoplay = true;
+      videoElement.playsInline = true;
+      videoElement.muted = true;
+      videoElement.addEventListener('playing', signalStart);
+      videoElement.addEventListener('loadedmetadata', signalStart);
+      videoElement.addEventListener('resize', signalStart);
+      stage.appendChild(videoElement);
+      videoElement.play().catch(() => {});
+      signalStart();
+    }
+
+    if (track.kind === Track.Kind.Audio) {
+      const audio = track.attach();
+      audio.autoplay = true;
+      stage.appendChild(audio);
+      audio.play().catch(() => {});
+    }
+  });
+
+  room.on(RoomEvent.TrackUnsubscribed, track => {
+    track.detach().forEach(element => element.remove());
+  });
+
+  room.on(RoomEvent.Disconnected, () => {
+    console.log('END_RECORDING');
+  });
+
+  try {
+    await room.connect(url, token);
+  } catch (error) {
+    console.error('Recorder connection failed:', error.message);
+  }
+})();
+</script>
+</body>
+</html>
