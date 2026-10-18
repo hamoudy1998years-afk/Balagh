@@ -3342,14 +3342,15 @@ async function finalizeReplay(
         // Extract frame at 1 second.
         await new Promise((resolve, reject) => {
           ffmpeg(tempVideoPath)
-            .screenshots({
-              timestamps: ['1'],
-              filename: `${workerId}.jpg`,
-              folder: '/tmp',
-              size: '720x?',
-            })
+            .seekInput(1)
+            .outputOptions([
+              '-frames:v 1',
+              '-vf scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280'
+            ])
+            .output(tempThumbPath)
             .on('end', resolve)
-            .on('error', reject);
+            .on('error', reject)
+            .run();
         });
 
         // Upload thumbnail.
