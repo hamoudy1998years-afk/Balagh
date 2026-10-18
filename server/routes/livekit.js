@@ -1219,6 +1219,7 @@ router.post('/token', requireAuth, async (req, res) => {
     // LiveKit identity ALWAYS comes from the verified Supabase token.
     const userId = req.authUserId;
     let canPublish = false;
+    let viewerSessionId = null;
 
     if (isHost === true) {
       // Host intent: the server INDEPENDENTLY verifies that the
@@ -1265,13 +1266,49 @@ router.post('/token', requireAuth, async (req, res) => {
       if (!streamRow) {
         return res.status(404).json({ error: 'Stream not found' });
       }
+
+      // Protect the host from same-account viewer connections.
+      if (String(streamRow.user_id) === String(userId)) {
+        return res.status(409).json({
+          code: 'OWN_LIVESTREAM',
+          error: 'You are already hosting this livestream. Use another account to watch.',
+        });
+      }
+
+      // Full viewers claim one atomic session per account.
+      // Previews and older app versions remain exempt.
+      if (req.body.purpose === 'watch') {
+        const requestedId = req.body.viewerSessionId;
+        if (requestedId != null &&
+            (typeof requestedId !== 'string' ||
+             !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedId))) {
+          return res.status(400).json({ error: 'Invalid viewer session' });
+        }
+
+        viewerSessionId = requestedId || require('node:crypto').randomUUID();
+        const { data: claimed, error: leaseError } = await supabase.rpc(
+          'claim_bushrann_viewer',
+          { p_user_id: userId, p_session_id: viewerSessionId, p_room_name: roomName }
+        );
+
+        if (leaseError) {
+          console.error('[LIVEKIT] Viewer lease error:', leaseError.message);
+          return res.status(503).json({ error: 'Unable to verify viewer session' });
+        }
+        if (claimed !== true) {
+          return res.status(409).json({
+            code: 'ALREADY_WATCHING',
+            error: 'This account is already watching a livestream on another device.',
+          });
+        }
+      }
     }
 
     const now = Math.floor(Date.now() / 1000);
 
     const payload = {
       iss: apiKey,
-      sub: userId,
+      sub: canPublish ? userId : `viewer:${userId}:${require('node:crypto').randomUUID()}`,
       iat: now,
       exp: now + 2 * 60 * 60,
       nbf: now,
@@ -1295,6 +1332,7 @@ router.post('/token', requireAuth, async (req, res) => {
       token,
       url: process.env.LIVEKIT_URL,
       roomName,
+      viewerSessionId,
     });
   } catch (error) {
     console.error(
@@ -1306,6 +1344,65 @@ router.post('/token', requireAuth, async (req, res) => {
       .status(500)
       .json({ error: 'Failed to generate token' });
   }
+});
+
+// Renew or release a viewer lease. User identity always comes from requireAuth.
+async function handleViewerSessionAction(req, res, action) {
+  try {
+    const { viewerSessionId, roomName } = req.body || {};
+
+    if (
+      typeof viewerSessionId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(viewerSessionId) ||
+      typeof roomName !== 'string' ||
+      !roomName ||
+      roomName.length > 256
+    ) {
+      return res.status(400).json({ error: 'Invalid viewer session' });
+    }
+
+    const rpcName = action === 'renew'
+      ? 'renew_bushrann_viewer'
+      : 'release_bushrann_viewer';
+
+    const { data, error } = await supabase.rpc(rpcName, {
+      p_user_id: req.authUserId,
+      p_session_id: viewerSessionId,
+      p_room_name: roomName,
+    });
+
+    if (error) {
+      console.error('[LIVEKIT] Viewer session RPC error:', error.message);
+      return res.status(503).json({
+        error: 'Unable to update viewer session',
+      });
+    }
+
+    if (action === 'renew') {
+      if (data !== true) {
+        return res.status(409).json({
+          code: 'VIEWER_SESSION_EXPIRED',
+          error: 'Your viewing session expired. Please rejoin.',
+        });
+      }
+      return res.json({ active: true });
+    }
+
+    return res.json({ released: data === true });
+  } catch (error) {
+    console.error('[LIVEKIT] Viewer session error:', error.message);
+    return res.status(500).json({
+      error: 'Viewer session request failed',
+    });
+  }
+}
+
+router.post('/viewer-session/renew', requireAuth, (req, res) => {
+  return handleViewerSessionAction(req, res, 'renew');
+});
+
+router.post('/viewer-session/release', requireAuth, (req, res) => {
+  return handleViewerSessionAction(req, res, 'release');
 });
 
 // ─── RECORDING STORAGE CLEANUP ───────────────────────────────────
