@@ -63,7 +63,7 @@ async function requireAuth(req, res, next) {
 async function findStreamByRoom(roomName) {
   const { data: rows, error } = await supabase
     .from('live_streams')
-    .select('id, user_id, title, thumbnail_url, is_live, stream_notified_at')
+    .select('id, user_id, title, thumbnail_url, is_live, stream_notified_at, egress_started_at, public_activated_at')
     .eq('channel_name', roomName)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -304,7 +304,12 @@ async function startCompositeRecording(roomName, streamRow, requestedOrientation
       }
 
       if (camera) {
-        const portrait = recordingOrientation === 'portrait';
+        // Use the actual host camera aspect ratio when available.
+        // Fall back to existing orientation if dimensions are invalid.
+        const actualOrientation = validDimensions
+          ? (height > width ? 'portrait' : 'landscape')
+          : recordingOrientation;
+        const portrait = actualOrientation === 'portrait';
 
         recordingOptions = {
           customBaseUrl: replayTemplateUrl,
@@ -320,7 +325,7 @@ async function startCompositeRecording(roomName, streamRow, requestedOrientation
         console.log(
           '[EGRESS] Host camera:',
           `${width}x${height}`,
-          'RECORDING:', recordingOrientation.toUpperCase()
+          'RECORDING:', actualOrientation.toUpperCase()
         );
       } else {
         console.warn(
@@ -2136,6 +2141,9 @@ async function restoreMissingReplayRows() {
           .insert({
             user_id: job.user_id,
             source_live_stream_id: job.stream_id,
+            // REPLAY SYNC: durable recovery metadata
+            egress_started_at: job.egress_started_at ?? null,
+            public_activated_at: job.public_activated_at ?? null,
             video_url: 'processing',
             recording_filename: job.recording_filename,
             thumbnail_url: job.thumbnail_url || null,
@@ -3337,6 +3345,27 @@ router.post('/egress/activate', requireAuth, async (req, res) => {
   try {
     const { roomName, egressId } = req.body || {};
 
+    const timingFromRow = row => {
+      const started = row?.egress_started_at
+        ? Date.parse(row.egress_started_at)
+        : null;
+      const activated = row?.public_activated_at
+        ? Date.parse(row.public_activated_at)
+        : null;
+
+      const startMs = Number.isFinite(started) ? started : null;
+      const activationMs = Number.isFinite(activated) ? activated : null;
+
+      return {
+        egressReportedStartedAtMs: startMs,
+        activationObservedAtMs: activationMs,
+        reportedStartLeadMs:
+          startMs !== null && activationMs !== null
+            ? activationMs - startMs
+            : null
+      };
+    };
+
     if (
       typeof roomName !== 'string' || !roomName.trim() ||
       typeof egressId !== 'string' || !egressId.trim()
@@ -3346,7 +3375,7 @@ router.post('/egress/activate', requireAuth, async (req, res) => {
 
     const { data: streamRow, error: lookupError } = await supabase
       .from('live_streams')
-      .select('id, user_id, is_live, stream_status')
+      .select('id, user_id, is_live, stream_status, egress_started_at, public_activated_at')
       .eq('channel_name', roomName)
       .maybeSingle();
 
@@ -3359,7 +3388,7 @@ router.post('/egress/activate', requireAuth, async (req, res) => {
     }
 
     if (streamRow.stream_status === 'live' && streamRow.is_live === true) {
-      return res.json({ activated: true, alreadyLive: true });
+      return res.json({ activated: true, alreadyLive: true, timing: timingFromRow(streamRow) });
     }
 
     if (streamRow.stream_status !== 'starting' || streamRow.is_live !== false) {
@@ -3396,15 +3425,45 @@ router.post('/egress/activate', requireAuth, async (req, res) => {
       });
     }
 
+    // Capture the request-side activation timestamp before the atomic
+    // database update. This is NOT a frame-accurate MP4 offset.
+    const activationRequestedAt = new Date();
+    let egressStartedAtIso = null;
+
+    try {
+      const startedNs = BigInt(
+        info.startedAt?.toString?.() ?? '0'
+      );
+
+      if (startedNs > 0n) {
+        const startedMs = Number(startedNs / 1000000n);
+
+        if (
+          Number.isSafeInteger(startedMs) &&
+          startedMs > 0 &&
+          startedMs <= activationRequestedAt.getTime()
+        ) {
+          egressStartedAtIso = new Date(startedMs).toISOString();
+        }
+      }
+    } catch (_) {
+      // Timestamp unavailable; recording activation can still proceed.
+    }
+
     const { data: activated, error: activationError } = await supabase
       .from('live_streams')
-      .update({ is_live: true, stream_status: 'live' })
+      .update({
+        is_live: true,
+        stream_status: 'live',
+        egress_started_at: egressStartedAtIso,
+        public_activated_at: activationRequestedAt.toISOString()
+      })
       .eq('id', streamRow.id)
       .eq('user_id', req.authUserId)
       .eq('stream_status', 'starting')
       .eq('is_live', false)
       .eq('egress_stop_pending', false)
-      .select('id')
+      .select('id, egress_started_at, public_activated_at')
       .maybeSingle();
 
     if (activationError) {
@@ -3422,7 +3481,16 @@ router.post('/egress/activate', requireAuth, async (req, res) => {
       });
     }
 
-    return res.json({ activated: true });
+    // REPLAY SYNC PHASE 2: read the timestamps persisted by activation.
+    const timing = timingFromRow(activated);
+
+    console.log('[REPLAY-SYNC] Public activation timing', {
+      streamId: streamRow.id,
+      egressId,
+      ...timing
+    });
+
+    return res.json({ activated: true, timing });
   } catch (error) {
     console.error('[EGRESS] Activation failed:', error?.message);
     return res.status(503).json({ error: 'Activation unavailable' });
@@ -4609,6 +4677,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
             recording_filename: trustedFilename,
             replay_title: streamRow.title || 'Live Stream',
             thumbnail_url: streamRow.thumbnail_url || null,
+            egress_started_at: streamRow.egress_started_at ?? null,
+            public_activated_at: streamRow.public_activated_at ?? null,
           },
           {
             onConflict: 'stream_id',
@@ -4962,6 +5032,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           recording_filename: recoveryFilename,
           replay_title: streamRow.title || 'Live Stream',
           thumbnail_url: streamRow.thumbnail_url || null,
+          egress_started_at: streamRow.egress_started_at ?? null,
+          public_activated_at: streamRow.public_activated_at ?? null,
         },
         {
           onConflict: 'stream_id',
@@ -5203,6 +5275,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         .insert({
           user_id: streamRow.user_id,
           source_live_stream_id: streamRow.id,
+          egress_started_at: streamRow.egress_started_at ?? null,
+          public_activated_at: streamRow.public_activated_at ?? null,
           video_url: 'processing',
           recording_filename:
             mergedTargetFilename,
@@ -5309,6 +5383,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       .insert({
         user_id: streamRow.user_id,
         source_live_stream_id: streamRow.id,
+        egress_started_at: streamRow.egress_started_at ?? null,
+        public_activated_at: streamRow.public_activated_at ?? null,
         video_url: 'processing',
         recording_filename: authoritativeFilename,
         thumbnail_url: streamRow.thumbnail_url || null,
