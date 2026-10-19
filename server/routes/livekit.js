@@ -4687,10 +4687,48 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
     let multiSegments = null;
 
     try {
-      const roomEgresses =
-        await egressClient.listEgress({
+      // LiveKit may finalize/upload the MP4 after accepting stopEgress.
+      // Do not treat a non-COMPLETE recording as a valid replay.
+      const completionDeadline = Date.now() + 20000;
+      let roomEgresses;
+
+      while (true) {
+        if (!(await verifyStopLease())) {
+          throw new Error('Stop lease lost during recording finalization');
+        }
+
+        roomEgresses = await egressClient.listEgress({
           roomName: actualRoomName,
         });
+
+        if (!Array.isArray(roomEgresses)) {
+          throw new Error('Recording discovery unavailable');
+        }
+
+        const recordingSegments = roomEgresses.filter(
+          item =>
+            item?.egressId &&
+            isLivestreamRecordingEgress(item, streamRow.id)
+        );
+
+        const allComplete =
+          recordingSegments.some(item => item.egressId === egressId) &&
+          recordingSegments.every(
+            item =>
+              Number(item.status) === Number(EGRESS_STATUS_COMPLETE) &&
+              Boolean(egressFilenameOf(item))
+          );
+
+        if (allComplete) break;
+
+        if (Date.now() >= completionDeadline) {
+          throw new Error(
+            'Recording finalization timed out; recovery pending'
+          );
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
 
       const segmentsById = new Map();
 
