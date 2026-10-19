@@ -2668,7 +2668,8 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
     // Fail closed when the timestamp is unknown or in the future.
     if (
       !Number.isFinite(ageMs) ||
-      ageMs < 15 * 60 * 1000
+      ageMs < 0 ||
+      (ageMs < 15 * 60 * 1000 && req.authUserId !== row.user_id)
     ) {
       console.error('[REPLAY-DELETE-BLOCKED]', {
         videoId,

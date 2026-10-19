@@ -149,7 +149,15 @@ async function cleanupVideoStorage(videoRow, options = {}) {
         const recordedAt = match ? Number(match[1]) : NaN;
         const ageMs = Date.now() - recordedAt;
 
-        if (!Number.isFinite(ageMs) || ageMs < 15 * 60 * 1000) {
+        const explicitReplayDelete =
+          options.allowLivestreamRecordingDelete === true &&
+          options.reason === 'authenticated-replay-delete';
+
+        if (
+          !Number.isFinite(ageMs) ||
+          ageMs < 0 ||
+          (ageMs < 15 * 60 * 1000 && !explicitReplayDelete)
+        ) {
           console.error('[REPLAY-PROTECTION] BLOCKED fresh recording deletion:', {
             key,
             ageMs: Number.isFinite(ageMs) ? ageMs : 'unknown',
