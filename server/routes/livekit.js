@@ -339,7 +339,7 @@ async function startCompositeRecording(roomName, streamRow, requestedOrientation
 
   const info = await egressClient.startRoomCompositeEgress(
     roomName,
-    { file: fileOutput },
+    fileOutput,
     recordingOptions
   );
 
@@ -576,6 +576,13 @@ async function sweepRecordingCleanupQueue() {
           );
           continue;
         }
+      // Stage 2I: disable destructive cleanup until recovery is durable.
+      // Preserve both the recording and its queued cleanup entry.
+      console.warn(
+        '[EGRESS CLEANUP] Recording deletion suspended for recovery safety:',
+        filename
+      );
+      continue;
 
       const { error: removeError } = await supabase.storage
         .from('livestreams')
@@ -676,9 +683,9 @@ async function sweepStaleLivestreams() {
     const { data: candidates, error: candidateError } = await supabase
       .from('live_streams')
       .select(
-        'id, user_id, channel_name, last_ping, created_at, is_live'
+        'id, user_id, channel_name, last_ping, created_at, is_live, stream_status'
       )
-      .eq('is_live', true)
+      .in('stream_status', ['live', 'starting'])
       .or(`last_ping.lt.${staleBefore},last_ping.is.null`);
 
     if (candidateError) {
@@ -701,6 +708,41 @@ async function sweepStaleLivestreams() {
     const egressClient = getEgressClient();
 
     for (const candidate of staleStreams) {
+      let cleanupLeaseToken = null;
+      let cleanupLeaseTimer = null;
+      let cleanupLeaseRenewal = null;
+      let cleanupLeaseClosing = false;
+      let cleanupLeaseLost = false;
+
+      const renewCleanupLease = async () => {
+        if (!cleanupLeaseToken || cleanupLeaseClosing || cleanupLeaseLost) return false;
+        if (cleanupLeaseRenewal) return cleanupLeaseRenewal;
+
+        cleanupLeaseRenewal = (async () => {
+          try {
+            const { data, error } = await supabase.rpc(
+              'bushrann_renew_egress_recovery_lease',
+              {
+                p_stream_id: candidate.id,
+                p_user_id: candidate.user_id,
+                p_lease_token: cleanupLeaseToken,
+                p_lease_seconds: 120,
+              }
+            );
+            if (error || data !== true) cleanupLeaseLost = true;
+            return !cleanupLeaseLost;
+          } catch (error) {
+            cleanupLeaseLost = true;
+            console.warn('[EGRESS SWEEPER] Lease renewal failed:', error.message);
+            return false;
+          } finally {
+            cleanupLeaseRenewal = null;
+          }
+        })();
+
+        return cleanupLeaseRenewal;
+      };
+
       try {
         // Re-read immediately. The host may have recovered between
         // the candidate query and this stream's turn in the loop.
@@ -710,7 +752,7 @@ async function sweepStaleLivestreams() {
         } = await supabase
           .from('live_streams')
           .select(
-            'id, user_id, channel_name, last_ping, created_at, is_live'
+            'id, user_id, channel_name, last_ping, created_at, is_live, stream_status'
           )
           .eq('id', candidate.id)
           .maybeSingle();
@@ -726,7 +768,7 @@ async function sweepStaleLivestreams() {
 
         if (
           !latest ||
-          latest.is_live !== true ||
+          !((latest.is_live === true && latest.stream_status === 'live') || (latest.is_live === false && latest.stream_status === 'starting')) ||
           !streamLooksStale(latest)
         ) {
           continue;
@@ -739,6 +781,28 @@ async function sweepStaleLivestreams() {
           );
           continue;
         }
+
+        // Exclusively claim this stale stream before touching LiveKit.
+        // Recording start, ensure-active, normal stop, and stop recovery
+        // cannot acquire their respective leases while this is held.
+        const { data: acquiredLease, error: acquireError } =
+          await supabase.rpc('bushrann_acquire_egress_recovery_lease', {
+            p_stream_id: latest.id,
+            p_user_id: latest.user_id,
+            p_lease_seconds: 120,
+          });
+
+        if (acquireError) throw acquireError;
+        if (!acquiredLease) continue;
+
+        cleanupLeaseToken = acquiredLease;
+        cleanupLeaseTimer = setInterval(() => {
+          renewCleanupLease().catch(error => {
+            cleanupLeaseLost = true;
+            console.warn('[EGRESS SWEEPER] Lease timer failed:', error.message);
+          });
+        }, 30000);
+        cleanupLeaseTimer.unref?.();
 
         // First LiveKit verification.
         //
@@ -783,6 +847,11 @@ async function sweepStaleLivestreams() {
           continue;
         }
 
+        if (!Array.isArray(activeEgresses)) {
+          console.warn('[EGRESS SWEEPER] Invalid discovery; preserving:', latest.id);
+          continue;
+        }
+
         // Narrow the recovery race further. The host could have
         // reconnected while the egress lookup was running.
         const {
@@ -791,7 +860,7 @@ async function sweepStaleLivestreams() {
         } = await supabase
           .from('live_streams')
           .select(
-            'id, user_id, channel_name, last_ping, created_at, is_live'
+            'id, user_id, channel_name, last_ping, created_at, is_live, stream_status'
           )
           .eq('id', latest.id)
           .maybeSingle();
@@ -807,7 +876,7 @@ async function sweepStaleLivestreams() {
 
         if (
           !finalCheck ||
-          finalCheck.is_live !== true ||
+          !((finalCheck.is_live === true && finalCheck.stream_status === 'live') || (finalCheck.is_live === false && finalCheck.stream_status === 'starting')) ||
           !streamLooksStale(finalCheck)
         ) {
           continue;
@@ -833,6 +902,11 @@ async function sweepStaleLivestreams() {
         }
 
         if (finalHostConnected) {
+          continue;
+        }
+
+        if (!(await renewCleanupLease())) {
+          console.warn('[EGRESS SWEEPER] Lease lost; preserving:', finalCheck.id);
           continue;
         }
 
@@ -871,6 +945,33 @@ async function sweepStaleLivestreams() {
     : null;
 
   try {
+    if (!(await renewCleanupLease())) {
+      allEgressesStopped = false;
+      break;
+    }
+
+    // A scholar may reconnect while the sweeper processes egresses.
+    // Never stop another recording after detecting that recovery.
+    const hostReconnected = await isHostConnected(
+      roomClient,
+      finalCheck.channel_name,
+      finalCheck.user_id
+    );
+
+    if (hostReconnected) {
+      allEgressesStopped = false;
+      console.warn(
+        '[EGRESS SWEEPER] Host reconnected; aborting recording cleanup:',
+        finalCheck.id
+      );
+      break;
+    }
+
+    if (!(await renewCleanupLease())) {
+      allEgressesStopped = false;
+      break;
+    }
+
     await egressClient.stopEgress(orphanedEgressId);
 
     console.log(
@@ -921,7 +1022,7 @@ async function sweepStaleLivestreams() {
         }
 
         if (
-          Array.isArray(remainingActiveEgresses) &&
+          !Array.isArray(remainingActiveEgresses) ||
           remainingActiveEgresses.length > 0
         ) {
           console.warn(
@@ -939,7 +1040,7 @@ async function sweepStaleLivestreams() {
         } = await supabase
           .from('live_streams')
           .select(
-            'id, user_id, channel_name, last_ping, created_at, is_live'
+            'id, user_id, channel_name, last_ping, created_at, is_live, stream_status'
           )
           .eq('id', finalCheck.id)
           .maybeSingle();
@@ -955,7 +1056,7 @@ async function sweepStaleLivestreams() {
 
         if (
           !deleteCheck ||
-          deleteCheck.is_live !== true ||
+          !((deleteCheck.is_live === true && deleteCheck.stream_status === 'live') || (deleteCheck.is_live === false && deleteCheck.stream_status === 'starting')) ||
           !streamLooksStale(deleteCheck)
         ) {
           continue;
@@ -984,14 +1085,23 @@ async function sweepStaleLivestreams() {
           continue;
         }
 
+        if (!(await renewCleanupLease())) {
+          console.warn('[EGRESS SWEEPER] Lease expired; preserving:', deleteCheck.id);
+          continue;
+        }
+
         // Conditional delete: require the row to still be live AND its
         // last_ping to still be stale. A heartbeat written after deleteCheck
         // therefore prevents this delete even if it happens in this final gap.
         let deleteQuery = supabase
           .from('live_streams')
-          .update({ is_live: false })
+          .update({ is_live: false, stream_status: 'ended' })
           .eq('id', deleteCheck.id)
-          .eq('is_live', true);
+          .eq('stream_status', deleteCheck.stream_status)
+          .eq('is_live', deleteCheck.is_live)
+          .eq('egress_stop_pending', false)
+          .eq('egress_recovery_lease_token', cleanupLeaseToken)
+          .gt('egress_recovery_lease_until', new Date().toISOString());
 
         if (deleteCheck.last_ping) {
           deleteQuery = deleteQuery.lt(
@@ -1022,16 +1132,14 @@ async function sweepStaleLivestreams() {
           continue;
         }
 
-        for (const filename of orphanedRecordingFilenames) {
-          try {
-            await scheduleUnreferencedRecordingCleanup(filename);
-          } catch (cleanupError) {
-            console.warn(
-              '[EGRESS SWEEPER] Could not queue orphaned recording:',
-              filename,
-              cleanupError.message
-            );
-          }
+        // Preserve abandoned scholar recordings for possible replay recovery.
+        // Do not enqueue them for automatic Storage deletion.
+        if (orphanedRecordingFilenames.size > 0) {
+          console.warn(
+            '[EGRESS SWEEPER] Preserving abandoned recordings for recovery:',
+            deleteCheck.id,
+            orphanedRecordingFilenames.size
+          );
         }
 
         console.log(
@@ -1045,6 +1153,31 @@ async function sweepStaleLivestreams() {
           candidate.id,
           streamError.message
         );
+      } finally {
+        cleanupLeaseClosing = true;
+        if (cleanupLeaseTimer) clearInterval(cleanupLeaseTimer);
+        if (cleanupLeaseRenewal) await cleanupLeaseRenewal;
+
+        if (cleanupLeaseToken) {
+          try {
+            const { error: releaseError } = await supabase.rpc(
+              'bushrann_release_egress_recovery_lease',
+              {
+                p_stream_id: candidate.id,
+                p_user_id: candidate.user_id,
+                p_lease_token: cleanupLeaseToken,
+              }
+            );
+            if (releaseError) {
+              console.error('[EGRESS SWEEPER] Lease release failed:', releaseError.message);
+            }
+          } catch (releaseError) {
+            console.error(
+              '[EGRESS SWEEPER] Lease release threw:',
+              releaseError.message
+            );
+          }
+        }
       }
     }
   } catch (error) {
@@ -1403,6 +1536,10 @@ router.post('/token', requireAuth, async (req, res) => {
         return res.status(404).json({ error: 'Stream not found' });
       }
 
+      if (streamRow.is_live !== true) {
+        return res.status(409).json({ error: 'Stream is not live yet' });
+      }
+
       // Protect the host from same-account viewer connections.
       if (String(streamRow.user_id) === String(userId)) {
         return res.status(409).json({
@@ -1597,6 +1734,461 @@ const REPLAY_RECOVERY_MAX_AGE_MS =
 
 let replayRecoverySweepInProgress = false;
 
+// Restore missing replay rows from durable recovery jobs.
+// The source_live_stream_id uniqueness constraint prevents duplicates.
+async function restoreMissingReplayRows() {
+  const { data: jobs, error: jobsError } = await supabase
+    .from('livestream_replay_recovery')
+    .select('*')
+    .is('recovered_at', null)
+    .order('created_at', { ascending: true })
+    .limit(50);
+
+  if (jobsError) {
+    console.error('[RECOVERY] Job lookup failed:', jobsError.message);
+    return;
+  }
+
+  for (const job of jobs || []) {
+    try {
+      if (!job.stream_id || !job.user_id ||
+          !job.egress_id || !job.recording_filename) {
+        console.warn('[RECOVERY] Incomplete job retained:', job.stream_id);
+        continue;
+      }
+
+      // Resume a previously initiated stop after a Railway restart.
+      // Never initiate a stop for a stream without persisted stop intent.
+      const reconcileInterruptedReplayStop = async () => {
+        const { data: pendingStream, error: pendingError } = await supabase
+          .from('live_streams')
+          .select('id, user_id, channel_name, egress_stop_pending')
+          .eq('id', job.stream_id)
+          .eq('user_id', job.user_id)
+          .maybeSingle();
+
+        if (pendingError) throw pendingError;
+        if (!pendingStream || pendingStream.egress_stop_pending !== true) {
+          return;
+        }
+
+        const { data: leaseToken, error: leaseError } = await supabase.rpc(
+          'bushrann_acquire_egress_stop_recovery_lease',
+          {
+            p_stream_id: job.stream_id,
+            p_user_id: job.user_id,
+            p_lease_seconds: 120,
+          }
+        );
+
+        if (leaseError) throw leaseError;
+        if (!leaseToken) return;
+
+        let recoveryLeaseRenewalTimer = null;
+        let recoveryLeaseRenewalPromise = null;
+        let recoveryLeaseClosing = false;
+        let recoveryLeaseLost = false;
+
+        const renewRecoveryLease = async () => {
+          if (recoveryLeaseClosing || recoveryLeaseLost) return false;
+          if (recoveryLeaseRenewalPromise) {
+            return recoveryLeaseRenewalPromise;
+          }
+
+          recoveryLeaseRenewalPromise = (async () => {
+            try {
+              const { data, error } = await supabase.rpc(
+                'bushrann_renew_egress_stop_lease',
+                {
+                  p_stream_id: job.stream_id,
+                  p_user_id: job.user_id,
+                  p_lease_token: leaseToken,
+                  p_lease_seconds: 120,
+                }
+              );
+
+              if (error || data !== true) {
+                recoveryLeaseLost = true;
+                return false;
+              }
+
+              return true;
+            } catch (error) {
+              recoveryLeaseLost = true;
+              console.error(
+                '[RECOVERY] Stop lease renewal failed:',
+                job.stream_id,
+                error.message
+              );
+              return false;
+            } finally {
+              recoveryLeaseRenewalPromise = null;
+            }
+          })();
+
+          return recoveryLeaseRenewalPromise;
+        };
+
+        recoveryLeaseRenewalTimer = setInterval(() => {
+          renewRecoveryLease().catch(error => {
+            recoveryLeaseLost = true;
+            console.error(
+              '[RECOVERY] Stop lease timer failed:',
+              job.stream_id,
+              error.message
+            );
+          });
+        }, 30000);
+
+        recoveryLeaseRenewalTimer.unref?.();
+
+        try {
+          const roomName = pendingStream.channel_name;
+          if (!roomName) return;
+
+          const roomClient = getRoomServiceClient();
+          const client = getEgressClient();
+
+          if (!(await renewRecoveryLease())) {
+            throw new Error('Recovery stop lease lost');
+          }
+
+
+          const roomEgresses = await client.listEgress({ roomName });
+          if (!Array.isArray(roomEgresses)) {
+            throw new Error('Stop recovery discovery unavailable');
+          }
+
+          for (const item of roomEgresses) {
+            if (
+              !item?.egressId ||
+              item.roomName !== roomName ||
+              !isLivestreamRecordingEgress(item, job.stream_id) ||
+              isEgressTerminal(item.status)
+            ) {
+              continue;
+            }
+
+            if (!(await renewRecoveryLease())) {
+              throw new Error('Recovery stop lease lost');
+            }
+
+
+            if (!(await renewRecoveryLease())) {
+              throw new Error('Recovery stop lease lost before stopping');
+            }
+
+            try {
+              await client.stopEgress(item.egressId);
+            } catch (stopError) {
+              if (!isAlreadyEndedStopError(stopError)) {
+                throw stopError;
+              }
+            }
+
+            console.log(
+              '[RECOVERY] Interrupted recording stop resumed:',
+              job.stream_id,
+              item.egressId
+            );
+          }
+
+          if (!(await renewRecoveryLease())) {
+            throw new Error('Recovery lease lost before final discovery');
+          }
+
+          const finalRecoveryEgresses = await client.listEgress({
+            roomName,
+          });
+
+          if (!Array.isArray(finalRecoveryEgresses)) {
+            throw new Error('Final recovery discovery unavailable');
+          }
+
+          const unfinishedRecoveryEgresses =
+            finalRecoveryEgresses.filter(
+              (item) =>
+                item?.roomName === roomName &&
+                isLivestreamRecordingEgress(item, job.stream_id) &&
+                (
+                  !item.egressId ||
+                  !isEgressTerminal(item.status)
+                )
+            );
+
+          if (unfinishedRecoveryEgresses.length > 0) {
+            throw new Error(
+              'New or unfinished recording detected; recovery will retry'
+            );
+          }
+
+          if (!(await renewRecoveryLease())) {
+            throw new Error('Recovery lease lost after final discovery');
+          }
+        } finally {
+          recoveryLeaseClosing = true;
+
+          if (recoveryLeaseRenewalTimer) {
+            clearInterval(recoveryLeaseRenewalTimer);
+            recoveryLeaseRenewalTimer = null;
+          }
+
+          if (recoveryLeaseRenewalPromise) {
+            await recoveryLeaseRenewalPromise;
+          }
+
+          try {
+            const { error: releaseError } = await supabase.rpc(
+              'bushrann_release_egress_stop_lease',
+              {
+                p_stream_id: job.stream_id,
+                p_user_id: job.user_id,
+                p_lease_token: leaseToken,
+              }
+            );
+
+            if (releaseError) {
+              console.error(
+                '[RECOVERY] Stop recovery lease release failed:',
+                releaseError.message
+              );
+            }
+          } catch (releaseError) {
+            console.error(
+              '[RECOVERY] Stop recovery lease release threw:',
+              releaseError?.message || releaseError
+            );
+          }
+        }
+      };
+      await reconcileInterruptedReplayStop();
+      // Reconstruct an unfinished pre-stop intent after Railway restarts.
+      // Never publish until LiveKit confirms the complete source set.
+      if (job.recording_manifest_ready !== true) {
+        const client = getEgressClient();
+
+        const originals = await client.listEgress({
+          egressId: job.egress_id,
+        });
+
+        const original = (originals || []).find(
+          (item) =>
+            item.egressId === job.egress_id &&
+            isLivestreamRecordingEgress(item, job.stream_id) &&
+            egressFilenameOf(item) === job.recording_filename
+        );
+
+        if (
+          !original ||
+          original.status !== EGRESS_STATUS_COMPLETE ||
+          !original.roomName
+        ) {
+          console.warn(
+            '[RECOVERY] Original recording not COMPLETE:',
+            job.stream_id
+          );
+          continue;
+        }
+
+        const roomEgresses = await client.listEgress({
+          roomName: original.roomName,
+        });
+
+        const matching = (roomEgresses || []).filter(
+          (item) =>
+            item &&
+            isLivestreamRecordingEgress(item, job.stream_id)
+        );
+
+        // A missing, incomplete, or failed source makes the
+        // manifest unsafe to finalize.
+        if (
+          matching.length === 0 ||
+          matching.some(
+            (item) =>
+              item.status !== EGRESS_STATUS_COMPLETE ||
+              !item.egressId ||
+              !egressFilenameOf(item)
+          )
+        ) {
+          console.warn(
+            '[RECOVERY] Recording segments not all COMPLETE:',
+            job.stream_id
+          );
+          continue;
+        }
+
+        const byId = new Map();
+
+        for (const item of matching) {
+          if (byId.has(item.egressId)) {
+            throw new Error('Duplicate LiveKit egress identity');
+          }
+
+          byId.set(item.egressId, {
+            egressId: item.egressId,
+            filename: egressFilenameOf(item),
+            startedAt: String(item.startedAt || 0),
+          });
+        }
+
+        const segments = [...byId.values()].sort((a, b) => {
+          const x = BigInt(a.startedAt);
+          const y = BigInt(b.startedAt);
+          return x < y ? -1 : x > y ? 1 : 0;
+        });
+
+        if (
+          !segments.some(
+            (segment) =>
+              segment.egressId === job.egress_id &&
+              segment.filename === job.recording_filename
+          )
+        ) {
+          console.warn(
+            '[RECOVERY] Original egress absent from room manifest:',
+            job.stream_id
+          );
+          continue;
+        }
+
+        const mergedTarget =
+          segments.length > 1
+            ? `recordings/merged_${job.stream_id}_${Date.now()}.mp4`
+            : null;
+
+        const { data: finalized, error: finalizeError } =
+          await supabase.rpc('bushrann_recover_replay_manifest', {
+            p_stream_id: job.stream_id,
+            p_user_id: job.user_id,
+            p_egress_id: job.egress_id,
+            p_original_filename: job.recording_filename,
+            p_segments: segments,
+            p_merged_target: mergedTarget,
+          });
+
+        if (finalizeError) throw finalizeError;
+
+        if (!finalized) {
+          console.log(
+            '[RECOVERY] Manifest recovery deferred:',
+            job.stream_id
+          );
+          continue;
+        }
+
+        // Refresh the authoritative job before restoring its replay row.
+        const { data: refreshed, error: refreshError } =
+          await supabase
+            .from('livestream_replay_recovery')
+            .select('recording_filename, recording_manifest_ready')
+            .eq('stream_id', job.stream_id)
+            .eq('user_id', job.user_id)
+            .single();
+
+        if (refreshError) throw refreshError;
+
+        if (!refreshed?.recording_manifest_ready) {
+          continue;
+        }
+
+        job.recording_filename = refreshed.recording_filename;
+
+        console.log(
+          '[RECOVERY] Recording manifest reconstructed:',
+          job.stream_id,
+          segments.length
+        );
+      }
+
+      // Never restore a replay while its LiveKit recording is active.
+      const recoveryEgressClient = getEgressClient();
+      const recoveryEgresses = await recoveryEgressClient.listEgress({
+        egressId: job.egress_id,
+      });
+
+      const recoveryEgress = (recoveryEgresses || []).find(
+        (item) =>
+          item.egressId === job.egress_id &&
+          isLivestreamRecordingEgress(item, job.stream_id)
+      );
+
+      if (!recoveryEgress ||
+          !isEgressTerminal(recoveryEgress.status)) {
+        console.warn(
+          '[RECOVERY] Recording not confirmed terminal; retry later:',
+          job.stream_id
+        );
+        continue;
+      }
+
+      const { data: existing, error: lookupError } = await supabase
+        .from('livestreams')
+        .select('id, recording_filename')
+        .eq('source_live_stream_id', job.stream_id)
+        .maybeSingle();
+
+      if (lookupError) throw lookupError;
+
+      if (!existing) {
+        const { error: insertError } = await supabase
+          .from('livestreams')
+          .insert({
+            user_id: job.user_id,
+            source_live_stream_id: job.stream_id,
+            video_url: 'processing',
+            recording_filename: job.recording_filename,
+            thumbnail_url: job.thumbnail_url || null,
+            title: job.replay_title || 'Live Stream',
+            is_public: true,
+          });
+
+        if (insertError && insertError.code !== '23505') {
+          throw insertError;
+        }
+      } else if (
+        existing.recording_filename !== job.recording_filename
+      ) {
+        console.error(
+          '[RECOVERY] Filename conflict; retaining job:',
+          job.stream_id
+        );
+        continue;
+      }
+
+      // Mark recovered only after the replay row exists.
+      const { data: verified, error: verifyError } = await supabase
+        .from('livestreams')
+        .select('id, recording_filename')
+        .eq('source_live_stream_id', job.stream_id)
+        .maybeSingle();
+
+      if (verifyError) throw verifyError;
+
+      if (!verified ||
+          verified.recording_filename !== job.recording_filename) {
+        continue;
+      }
+
+      const { error: markError } = await supabase
+        .from('livestream_replay_recovery')
+        .update({ recovered_at: new Date().toISOString() })
+        .eq('stream_id', job.stream_id)
+        .is('recovered_at', null);
+
+      if (markError) throw markError;
+
+      console.log('[RECOVERY] Replay row secured:', job.stream_id);
+    } catch (error) {
+      console.error(
+        '[RECOVERY] Job retry failed:',
+        job.stream_id,
+        error.message
+      );
+    }
+  }
+}
+
 async function sweepReplayRecovery() {
   if (replayRecoverySweepInProgress) {
     return;
@@ -1605,6 +2197,8 @@ async function sweepReplayRecovery() {
   replayRecoverySweepInProgress = true;
 
   try {
+    await restoreMissingReplayRows();
+
     const { data: candidates, error } =
       await supabase
         .from('livestreams')
@@ -1626,6 +2220,7 @@ async function sweepReplayRecovery() {
     }
 
     for (const candidate of candidates || []) {
+      try {
       const filename = candidate?.recording_filename;
 
       if (!filename || typeof filename !== 'string') {
@@ -1754,6 +2349,13 @@ async function sweepReplayRecovery() {
         // materialize, and the replay row keeps recording_filename so the
         // recording can be recovered manually. Only genuinely unreferenced
         // recordings (no replay row) enter the cleanup queue.
+      }
+      } catch (candidateError) {
+        console.error(
+          '[RECOVERY] Candidate processing failed; retry later:',
+          candidate?.id,
+          candidateError?.message || candidateError
+        );
       }
     }
   } finally {
@@ -2343,14 +2945,54 @@ router.post('/stream-active', requireAuth, async (req, res) => {
 });
 
 router.post('/egress/start', requireAuth, async (req, res) => {
+  let leaseToken = null;
+  let leaseStreamId = null;
+  let renewalTimer = null;
+  let renewalPromise = null;
+  let leaseClosing = false;
+  let leaseLost = false;
+
+  const renewLease = async () => {
+    if (leaseClosing || leaseLost || !leaseToken) return false;
+    if (renewalPromise) return renewalPromise;
+
+    renewalPromise = (async () => {
+      try {
+        const { data, error } = await supabase.rpc(
+          'bushrann_renew_egress_recovery_lease',
+          {
+            p_stream_id: leaseStreamId,
+            p_user_id: req.authUserId,
+            p_lease_token: leaseToken,
+            p_lease_seconds: 120,
+          }
+        );
+
+        if (error || data !== true) {
+          leaseLost = true;
+          return false;
+        }
+
+        return true;
+      } catch (error) {
+        leaseLost = true;
+        console.error('[EGRESS] Start lease renewal failed:', error?.message);
+        return false;
+      } finally {
+        renewalPromise = null;
+      }
+    })();
+
+    return renewalPromise;
+  };
+
   try {
-    const { roomName } = req.body;
+    const { roomName } = req.body || {};
 
     if (!roomName || typeof roomName !== 'string') {
       return res.status(400).json({ error: 'Missing roomName' });
     }
 
-    // Verify this room belongs to the authenticated host.
     const streamRow = await findStreamByRoom(roomName);
 
     if (!streamRow) {
@@ -2358,51 +3000,387 @@ router.post('/egress/start', requireAuth, async (req, res) => {
     }
 
     if (streamRow.user_id !== req.authUserId) {
-      return res
-        .status(403)
-        .json({ error: 'Not authorized to record this stream' });
+      return res.status(403).json({ error: 'Not authorized to record this stream' });
     }
 
-    try {
-      const started = await startCompositeRecording(
-        roomName,
-        streamRow,
-        req.body?.orientation
-      );
+    const { data: acquired, error: acquireError } = await supabase.rpc(
+      'bushrann_acquire_egress_recovery_lease',
+      {
+        p_stream_id: streamRow.id,
+        p_user_id: req.authUserId,
+        p_lease_seconds: 120,
+      }
+    );
 
-      // Capture a live preview without blocking MP4 recording.
-      void captureAutomaticLiveThumbnail(roomName, streamRow)
-        .catch(error => {
-          console.warn(
-            '[AUTO THUMBNAIL] Background capture failed:',
-            error.message
-          );
+    if (acquireError) throw acquireError;
+
+    if (!acquired) {
+      return res.status(409).json({
+        error: 'Recording start is busy or stream is stopping',
+      });
+    }
+
+    leaseToken = acquired;
+    leaseStreamId = streamRow.id;
+
+    renewalTimer = setInterval(() => {
+      renewLease().catch(error => {
+        leaseLost = true;
+        console.error('[EGRESS] Start lease timer failed:', error?.message);
+      });
+    }, 30000);
+
+    renewalTimer.unref?.();
+
+    if (!(await renewLease())) {
+      return res.status(409).json({ error: 'Recording start lease lost' });
+    }
+
+    const egressClient = getEgressClient();
+    const activeEgresses = await egressClient.listEgress({
+      roomName,
+      active: true,
+    });
+
+    if (!Array.isArray(activeEgresses)) {
+      throw new Error('Recording discovery unavailable');
+    }
+
+    const existing = activeEgresses.find(
+      item =>
+        item?.egressId &&
+        item.roomName === roomName &&
+        isLivestreamRecordingEgress(item, streamRow.id) &&
+        [0, 1, 2].includes(Number(item.status))
+    );
+
+    if (existing) {
+      const existingFilename = egressFilenameOf(existing);
+
+      if (
+        typeof existingFilename !== 'string' ||
+        !existingFilename.trim()
+      ) {
+        console.error(
+          '[EGRESS] Existing recording missing filename:',
+          existing.egressId
+        );
+
+        return res.status(409).json({
+          error: 'Existing recording metadata incomplete',
+          reconciliationRequired: true,
         });
+      }
 
-      return res.json(started);
-    } catch (startError) {
+      if (Number(existing.status) === 2) {
+        return res.status(409).json({
+          error: 'Existing recording is ending',
+          reconciliationRequired: true,
+        });
+      }
+
+      return res.json({
+        egressId: existing.egressId,
+        filename: existingFilename,
+      });
+    }
+
+    if (!(await renewLease())) {
+      return res.status(409).json({ error: 'Recording start lease lost' });
+    }
+
+    const started = await startCompositeRecording(roomName, streamRow, req.body?.orientation);
+
+    if (!(await renewLease())) {
       console.error(
-        '[EGRESS] Start error:',
-        startError?.response?.data ||
-          startError?.message ||
-          startError
+        '[EGRESS] Start lease lost after recording creation:',
+        streamRow.id,
+        started.egressId
+      );
+
+      return res.status(409).json({
+        error: 'Recording start lease lost after creation',
+        reconciliationRequired: true,
+      });
+    }
+
+    void captureAutomaticLiveThumbnail(roomName, streamRow)
+      .catch(error => {
+        console.warn(
+          '[AUTO THUMBNAIL] Background capture failed:',
+          error.message
+        );
+      });
+
+    return res.json(started);
+  } catch (error) {
+    console.error('[EGRESS] Start error:', error?.message || error);
+    return res.status(500).json({ error: 'Failed to start recording' });
+  } finally {
+    leaseClosing = true;
+
+    if (renewalTimer) clearInterval(renewalTimer);
+    if (renewalPromise) await renewalPromise;
+
+    if (leaseToken && leaseStreamId) {
+      try {
+        const { error } = await supabase.rpc(
+          'bushrann_release_egress_recovery_lease',
+          {
+            p_stream_id: leaseStreamId,
+            p_user_id: req.authUserId,
+            p_lease_token: leaseToken,
+          }
+        );
+
+        if (error) throw error;
+      } catch (error) {
+        console.error('[EGRESS] Start lease release failed:', error?.message);
+      }
+    }
+  }
+});
+router.post('/egress/readiness', requireAuth, async (req, res) => {
+  try {
+    const { roomName, egressId } = req.body || {};
+
+    if (
+      typeof roomName !== 'string' || !roomName ||
+      typeof egressId !== 'string' || !egressId
+    ) {
+      return res.status(400).json({
+        error: 'Missing roomName or egressId',
+      });
+    }
+
+    const streamRow = await findStreamByRoom(roomName);
+
+    if (!streamRow) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+
+    if (streamRow.user_id !== req.authUserId) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const infos = await getEgressClient().listEgress({ egressId });
+
+    const info = Array.isArray(infos)
+      ? infos.find(item =>
+          item.egressId === egressId &&
+          item.roomName === roomName &&
+          isLivestreamRecordingEgress(item, streamRow.id)
+        )
+      : null;
+
+    if (!info) {
+      return res.status(404).json({ error: 'Recording not found' });
+    }
+
+    // LiveKit EGRESS_ACTIVE = 1.
+    if (info.status === 1) {
+      return res.json({ state: 'active' });
+    }
+
+    if (isEgressTerminal(info.status)) {
+      return res.status(409).json({ state: 'terminal' });
+    }
+
+    return res.status(202).json({ state: 'starting' });
+
+  } catch (error) {
+    console.error('[EGRESS] Readiness check failed:', error.message);
+
+    return res.status(503).json({
+      error: 'Recording readiness unavailable',
+    });
+  }
+});
+// ─── STREAM ACTIVE (follower "went live" notification trigger) ──
+// Called by the host client once its local camera track has published.
+// Verifies the caller owns the stream and that the host's camera track is
+// actually live in the LiveKit room, then atomically claims the stream
+// and enqueues the 'live_started' notification job via
+// claim_live_notification (migration 20261025). Safe to call repeatedly:
+// the claim is one-shot per stream (stream_notified_at).
+// Activate a prepared livestream only after LiveKit recording is ACTIVE.
+router.post('/egress/activate', requireAuth, async (req, res) => {
+  try {
+    const { roomName, egressId } = req.body || {};
+
+    if (
+      typeof roomName !== 'string' || !roomName.trim() ||
+      typeof egressId !== 'string' || !egressId.trim()
+    ) {
+      return res.status(400).json({ error: 'Missing roomName or egressId' });
+    }
+
+    const { data: streamRow, error: lookupError } = await supabase
+      .from('live_streams')
+      .select('id, user_id, is_live, stream_status')
+      .eq('channel_name', roomName)
+      .maybeSingle();
+
+    if (lookupError) throw lookupError;
+    if (!streamRow) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+    if (streamRow.user_id !== req.authUserId) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    if (streamRow.stream_status === 'live' && streamRow.is_live === true) {
+      return res.json({ activated: true, alreadyLive: true });
+    }
+
+    if (streamRow.stream_status !== 'starting' || streamRow.is_live !== false) {
+      return res.status(409).json({ error: 'Stream is not starting' });
+    }
+
+    const infos = await getEgressClient().listEgress({ egressId });
+    const info = Array.isArray(infos)
+      ? infos.find(item =>
+          item.egressId === egressId &&
+          item.roomName === roomName &&
+          isLivestreamRecordingEgress(item, streamRow.id)
+        )
+      : null;
+
+    if (!info || info.status !== 1) {
+      return res.status(409).json({ error: 'Recording is not ACTIVE' });
+    }
+
+    const participants = await getRoomServiceClient().listParticipants(
+      roomName
+    );
+    const host = (participants || []).find(
+      p => String(p.identity) === String(streamRow.user_id)
+    );
+    const hasCamera = (host?.tracks || []).some(
+      t => t.type === 1 && t.source === 1 && !t.muted
+    );
+
+    if (!hasCamera) {
+      return res.status(503).json({
+        retryable: true,
+        error: 'Host camera not ready',
+      });
+    }
+
+    const { data: activated, error: activationError } = await supabase
+      .from('live_streams')
+      .update({ is_live: true, stream_status: 'live' })
+      .eq('id', streamRow.id)
+      .eq('user_id', req.authUserId)
+      .eq('stream_status', 'starting')
+      .eq('is_live', false)
+      .eq('egress_stop_pending', false)
+      .select('id')
+      .maybeSingle();
+
+    if (activationError) {
+      if (activationError.code === '23505') {
+        return res.status(409).json({
+          error: 'Another livestream is already active',
+        });
+      }
+      throw activationError;
+    }
+
+    if (!activated) {
+      return res.status(409).json({
+        error: 'Stream changed before activation',
+      });
+    }
+
+    return res.json({ activated: true });
+  } catch (error) {
+    console.error('[EGRESS] Activation failed:', error?.message);
+    return res.status(503).json({ error: 'Activation unavailable' });
+  }
+});
+router.post('/stream-active', requireAuth, async (req, res) => {
+  try {
+    const { roomName } = req.body || {};
+
+    if (!roomName || typeof roomName !== 'string') {
+      return res.status(400).json({ error: 'Missing roomName' });
+    }
+
+    const streamRow = await findStreamByRoom(roomName);
+
+    if (!streamRow) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+
+    if (streamRow.user_id !== req.authUserId) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    if (streamRow.is_live !== true) {
+      return res.status(409).json({ error: 'Stream is not live yet' });
+    }
+
+    if (streamRow.stream_notified_at) {
+      return res
+        .status(409)
+        .json({ error: 'Already notified' });
+    }
+
+    // Require the host's unmuted camera track to be present in the room
+    // before notifying followers, so a host stuck on the preview screen
+    // never triggers a notification.
+    const participants = await getRoomServiceClient().listParticipants(
+      roomName
+    );
+
+    const host = (participants || []).find(
+      p => String(p.identity) === String(streamRow.user_id)
+    );
+
+    const hasCamera = (host?.tracks || []).some(
+      t => t.type === 1 && t.source === 1 && !t.muted
+    );
+
+    if (!hasCamera) {
+      return res
+        .status(503)
+        .json({ retryable: true, error: 'Host camera not live yet' });
+    }
+
+    const { data: claimed, error: claimError } = await supabase.rpc(
+      'claim_live_notification',
+      { p_stream_id: streamRow.id }
+    );
+
+    // The RPC may not exist yet if the migration has not been applied.
+    if (claimError) {
+      console.error(
+        '[NOTIFY] claim_live_notification RPC failed:',
+        claimError.message
       );
 
       return res
-        .status(500)
-        .json({ error: 'Failed to start recording' });
+        .status(503)
+        .json({ retryable: true, error: 'Notification infra unavailable' });
     }
+
+    if (claimed !== true) {
+      return res
+        .status(409)
+        .json({ error: 'Already notified' });
+    }
+
+    return res.json({ notified: true });
   } catch (error) {
     console.error(
-      '[EGRESS] Start error:',
-      error?.response?.data ||
-        error?.message ||
-        error
+      '[NOTIFY] stream-active error:',
+      error?.message || error
     );
 
     return res
       .status(500)
-      .json({ error: 'Failed to start recording' });
+      .json({ error: 'Failed to process stream-active' });
   }
 });
 
@@ -2421,6 +3399,32 @@ router.post(
   '/egress/ensure-active',
   requireAuth,
   async (req, res) => {
+    let recoveryLeaseToken = null;
+    let recoveryLeaseStreamId = null;
+    let recoveryLeaseTimer = null;
+    let recoveryLeaseRenewing = false;
+    let recoveryLeaseLost = false;
+
+    const verifyRecoveryLease = async () => {
+      if (!recoveryLeaseToken || recoveryLeaseLost) return false;
+
+      const { data, error } = await supabase.rpc(
+        'bushrann_verify_egress_recovery_lease',
+        {
+          p_stream_id: recoveryLeaseStreamId,
+          p_user_id: req.authUserId,
+          p_lease_token: recoveryLeaseToken,
+        }
+      );
+
+      if (error || data !== true) {
+        recoveryLeaseLost = true;
+        return false;
+      }
+
+      return true;
+    };
+
     try {
       const { roomName, egressId } = req.body || {};
 
@@ -2444,6 +3448,79 @@ router.post(
           .json({ error: 'Not authorized' });
       }
 
+      // Recovery is allowed only for an active livestream that is not
+      // being stopped. Never restart recording during End Stream.
+      const { data: recoveryState, error: recoveryStateError } =
+        await supabase
+          .from('live_streams')
+          .select('is_live, stream_status, egress_stop_pending')
+          .eq('id', streamRow.id)
+          .eq('user_id', req.authUserId)
+          .maybeSingle();
+
+      if (recoveryStateError) throw recoveryStateError;
+
+      if (
+        !recoveryState ||
+        recoveryState.is_live !== true ||
+        recoveryState.stream_status !== 'live' ||
+        recoveryState.egress_stop_pending !== false
+      ) {
+        return res.status(409).json({
+          error: 'Livestream is not eligible for recording recovery',
+        });
+      }
+
+      const { data: acquiredRecoveryLease, error: recoveryLeaseError } =
+        await supabase.rpc('bushrann_acquire_egress_recovery_lease', {
+          p_stream_id: streamRow.id,
+          p_user_id: req.authUserId,
+          p_lease_seconds: 120,
+        });
+
+      if (recoveryLeaseError) throw recoveryLeaseError;
+
+      if (!acquiredRecoveryLease) {
+        return res.status(409).json({
+          error: 'Recording recovery is busy or stream is stopping',
+        });
+      }
+
+      recoveryLeaseToken = acquiredRecoveryLease;
+      recoveryLeaseStreamId = streamRow.id;
+
+      recoveryLeaseTimer = setInterval(async () => {
+        if (recoveryLeaseRenewing || recoveryLeaseLost) return;
+        recoveryLeaseRenewing = true;
+
+        try {
+          const { data, error } = await supabase.rpc(
+            'bushrann_renew_egress_recovery_lease',
+            {
+              p_stream_id: recoveryLeaseStreamId,
+              p_user_id: req.authUserId,
+              p_lease_token: recoveryLeaseToken,
+              p_lease_seconds: 120,
+            }
+          );
+
+          if (error || data !== true) {
+            recoveryLeaseLost = true;
+            console.error('[EGRESS] Recovery lease renewal failed');
+          }
+        } catch (error) {
+          recoveryLeaseLost = true;
+          console.error(
+            '[EGRESS] Recovery lease renewal error:',
+            error?.message || error
+          );
+        } finally {
+          recoveryLeaseRenewing = false;
+        }
+      }, 30000);
+
+      recoveryLeaseTimer.unref?.();
+
       const egressClient = getEgressClient();
 
       // 1. The client's current egress may still be recording (the
@@ -2463,7 +3540,22 @@ router.post(
             currentInfo.egressId &&
             currentInfo.roomName === roomName &&
             isLivestreamRecordingEgress(currentInfo, streamRow.id) &&
-            !isEgressTerminal(currentInfo.status)
+            [0, 2].includes(Number(currentInfo.status))
+          ) {
+            return res.status(202).json({
+              egressId: currentInfo.egressId,
+              status: 'pending',
+              recovered: false,
+              message: 'Recording is transitioning',
+            });
+          }
+
+          if (
+            currentInfo &&
+            currentInfo.egressId &&
+            currentInfo.roomName === roomName &&
+            isLivestreamRecordingEgress(currentInfo, streamRow.id) &&
+            Number(currentInfo.status) === 1
           ) {
             return res.json({
               egressId: currentInfo.egressId,
@@ -2499,9 +3591,18 @@ router.post(
               info =>
                 info?.egressId &&
                 isLivestreamRecordingEgress(info, streamRow.id) &&
-                !isEgressTerminal(info.status)
+                [0, 1, 2].includes(Number(info.status))
             ) || null
           : null;
+
+        if (existing && Number(existing.status) !== 1) {
+          return res.status(202).json({
+            egressId: existing.egressId,
+            status: 'pending',
+            recovered: false,
+            message: 'Recording is transitioning',
+          });
+        }
 
         if (existing) {
           console.log(
@@ -2531,11 +3632,33 @@ router.post(
       //    timestamped filename guarantees the new MP4 never
       //    overwrites an earlier completed segment.
       try {
+        if (!(await verifyRecoveryLease())) {
+          return res.status(409).json({
+            error: 'Recording recovery lease ownership lost',
+          });
+        }
+
         const started = await startCompositeRecording(
           roomName,
           streamRow,
           req.body?.orientation
         );
+
+        if (!(await verifyRecoveryLease())) {
+          console.error(
+            '[EGRESS] Recovery lease lost after LiveKit start; preserving recording for reconciliation:',
+            {
+              streamId: streamRow.id,
+              egressId: started.egressId,
+              filename: started.filename,
+            }
+          );
+
+          return res.status(409).json({
+            error: 'Recovery lease lost after recording start',
+            reconciliationRequired: true,
+          });
+        }
 
         console.log(
           '[EGRESS] Recovery: started new recording after reconnect:',
@@ -2568,6 +3691,29 @@ router.post(
       return res
         .status(500)
         .json({ error: 'Failed to verify recording' });
+    } finally {
+      if (recoveryLeaseTimer) {
+        clearInterval(recoveryLeaseTimer);
+      }
+
+      if (recoveryLeaseToken && recoveryLeaseStreamId) {
+        try {
+          const { error: releaseError } = await supabase.rpc(
+            'bushrann_release_egress_recovery_lease',
+            {
+              p_stream_id: recoveryLeaseStreamId,
+              p_user_id: req.authUserId,
+              p_lease_token: recoveryLeaseToken,
+            }
+          );
+          if (releaseError) throw releaseError;
+        } catch (releaseError) {
+          console.error(
+            '[EGRESS] Recovery lease release failed:',
+            releaseError?.message || releaseError
+          );
+        }
+      }
     }
   }
 );
@@ -2747,6 +3893,42 @@ async function mergeRecordingSegments(
       );
     }
 
+    // Verify each source recording is COMPLETE before downloading
+    // or merging. Storage existence alone is not enough.
+    const egressClient = getEgressClient();
+
+    if (
+      !Array.isArray(segments) ||
+      segments.length < 2 ||
+      segments.some(
+        (segment) =>
+          !segment?.egressId ||
+          !segment?.filename
+      )
+    ) {
+      throw new Error('Invalid multi-segment recording manifest');
+    }
+
+    for (const segment of segments) {
+      const results = await egressClient.listEgress({
+        egressId: segment.egressId,
+      });
+
+      const confirmed = (results || []).find(
+        (item) =>
+          item.egressId === segment.egressId &&
+          item.status === EGRESS_STATUS_COMPLETE &&
+          isLivestreamRecordingEgress(item, streamRowId) &&
+          egressFilenameOf(item) === segment.filename
+      );
+
+      if (!confirmed) {
+        throw new Error(
+          `Recording segment not confirmed COMPLETE: ${segment.egressId}`
+        );
+      }
+    }
+
     let totalDuration = 0;
     const concatLines = [];
 
@@ -2917,47 +4099,13 @@ async function processMultiSegmentReplay(
       return;
     }
 
-    // Merge failed — fall back to the newest complete segment as the replay.
-    const newestSegment =
-      segments[segments.length - 1];
-
-    if (!newestSegment?.filename) {
-      console.error(
-        '[MERGE] No usable recording for replay; nothing was deleted, manual recovery possible'
-      );
-      return;
-    }
-
-    console.warn(
-      '[MERGE] Falling back to newest segment as replay:',
-      newestSegment.filename
+    // Preserve all original MP4 segments for recovery.
+    // Never substitute one segment for the complete replay.
+    console.error(
+      '[MERGE] Merge failed; retaining complete recording manifest for retry:',
+      streamRow.id
     );
-
-    // Retarget only while the row is still unpublished ('processing').
-    const { error: retargetError } =
-      await supabase
-        .from('livestreams')
-        .update({
-          recording_filename:
-            newestSegment.filename,
-        })
-        .eq('id', recordId)
-        .eq('video_url', 'processing');
-
-    if (retargetError) {
-      console.error(
-        '[MERGE] Fallback retarget failed:',
-        retargetError.message
-      );
-      return;
-    }
-
-    processRecording(
-      recordId,
-      newestSegment.filename,
-      stoppedEgressId
-    );
-  } catch (error) {
+    return;  } catch (error) {
     console.error(
       '[MERGE] Replay processing error:',
       error?.message || error
@@ -3045,19 +4193,54 @@ async function rebuildMergedReplay(candidate) {
   mergeRebuildInProgress.add(candidate.id);
 
   try {
-    const segments =
-      await rediscoverSegmentsForStream(
-        streamRowId
-      );
+    const { data: recoveryJob, error: recoveryError } =
+      await supabase
+        .from('livestream_replay_recovery')
+        .select(
+          'recording_filename, merged_target_filename, recording_segments, recording_manifest_ready'
+        )
+        .eq('stream_id', streamRowId)
+        .single();
 
-    if (!segments || segments.length === 0) {
+    if (recoveryError || !recoveryJob) {
       console.warn(
-        '[RECOVERY] No segments rediscovered yet for merged replay:',
-        candidate.id
+        '[RECOVERY] Missing saved merge manifest:',
+        streamRowId
       );
       return false;
     }
 
+    const segments = recoveryJob.recording_segments;
+
+    if (
+      recoveryJob.recording_manifest_ready !== true ||
+      recoveryJob.recording_filename !== filename ||
+      recoveryJob.merged_target_filename !== filename ||
+      !Array.isArray(segments) ||
+      segments.length < 2 ||
+      segments.some(
+        (segment) =>
+          !segment ||
+          typeof segment.egressId !== 'string' ||
+          !segment.egressId ||
+          typeof segment.filename !== 'string' ||
+          !segment.filename ||
+          !segment.filename.startsWith(
+            `recordings/${streamRowId}_`
+          ) ||
+          !/^\d+$/.test(String(segment.startedAt))
+      ) ||
+      new Set(segments.map((segment) => segment.egressId)).size !==
+        segments.length ||
+      new Set(segments.map((segment) => segment.filename)).size !==
+        segments.length
+    ) {
+      console.warn(
+        '[RECOVERY] Invalid or incomplete saved merge manifest:',
+        streamRowId
+      );
+      return false;
+    }
     const merged = await mergeRecordingSegments(
       streamRowId,
       segments,
@@ -3080,6 +4263,67 @@ async function rebuildMergedReplay(candidate) {
 
 // ─── STOP EGRESS AND SAVE REPLAY ─────────────────────────────────
 router.post('/egress/stop', requireAuth, async (req, res) => {
+  let stopClaimedForCatch = false;
+  let livekitStoppedForCatch = false;
+  let stopStreamIdForCatch = null;
+  let stopLeaseTokenForCatch = null;
+  let stopLeaseRenewalTimer = null;
+  let stopLeaseRenewalInProgress = false;
+  let stopLeaseRenewalClosing = false;
+  let stopLeaseRenewalPromise = null;
+  let stopLeaseLost = false;
+  let stopLeaseReleasePromise = null;
+
+  const releaseStopLeaseSafely = () => {
+    if (stopLeaseReleasePromise) return stopLeaseReleasePromise;
+
+    stopLeaseRenewalClosing = true;
+
+    if (stopLeaseRenewalTimer) {
+      clearInterval(stopLeaseRenewalTimer);
+      stopLeaseRenewalTimer = null;
+    }
+
+    stopLeaseReleasePromise = (async () => {
+      if (stopLeaseRenewalPromise) {
+        await stopLeaseRenewalPromise;
+      }
+
+      if (!stopLeaseTokenForCatch) {
+        return { data: false, error: new Error('No stop lease token') };
+      }
+
+      return supabase.rpc('bushrann_release_egress_stop_lease', {
+        p_stream_id: stopStreamIdForCatch,
+        p_user_id: req.authUserId,
+        p_lease_token: stopLeaseTokenForCatch,
+      });
+    })();
+
+    return stopLeaseReleasePromise;
+  };
+
+  const verifyStopLease = async () => {
+    if (!stopLeaseTokenForCatch || stopLeaseLost) return false;
+
+    const { data, error } = await supabase.rpc(
+      'bushrann_renew_egress_stop_lease',
+      {
+        p_stream_id: stopStreamIdForCatch,
+        p_user_id: req.authUserId,
+        p_lease_token: stopLeaseTokenForCatch,
+        p_lease_seconds: 120,
+      }
+    );
+
+    if (error || data !== true) {
+      stopLeaseLost = true;
+      return false;
+    }
+
+    return true;
+  };
+
   try {
     const { egressId } = req.body;
 
@@ -3152,6 +4396,56 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       });
     }
 
+    // Acquire an exclusive, expiring stop/replay lease.
+    const { data: stopLeaseToken, error: stopLeaseError } =
+      await supabase.rpc('bushrann_acquire_egress_stop_lease', {
+        p_stream_id: streamRow.id,
+        p_user_id: req.authUserId,
+        p_lease_seconds: 120,
+      });
+
+    if (stopLeaseError) throw stopLeaseError;
+
+    if (!stopLeaseToken) {
+      return res.status(409).json({
+        error: 'Recording stop already in progress; retry shortly',
+      });
+    }
+
+    stopClaimedForCatch = true;
+    stopStreamIdForCatch = streamRow.id;
+    stopLeaseTokenForCatch = stopLeaseToken;
+
+    stopLeaseRenewalTimer = setInterval(() => {
+      if (
+        stopLeaseRenewalClosing ||
+        stopLeaseRenewalInProgress ||
+        stopLeaseLost
+      ) return;
+
+      stopLeaseRenewalInProgress = true;
+
+      stopLeaseRenewalPromise = (async () => {
+        try {
+          if (!stopLeaseRenewalClosing) {
+            await verifyStopLease();
+          }
+        } catch (error) {
+          stopLeaseLost = true;
+          console.error(
+            '[EGRESS] Stop lease renewal failed:',
+            error?.message || error
+          );
+        } finally {
+          stopLeaseRenewalInProgress = false;
+        }
+      })();
+    }, 30000);
+
+    stopLeaseRenewalTimer.unref?.();
+
+    let livekitStopConfirmed = false;
+
     // Trusted file locator from LiveKit's own egress record.
     console.log('[EGRESS-TIMING] Stop request:', {
       egressId,
@@ -3163,6 +4457,48 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
 
     const trustedFilename = egressFilenameOf(egressInfo);
 
+    // Persist the user's replay-save intent BEFORE stopping LiveKit.
+    // The recovery worker must independently verify terminal egress status.
+    const wantsReplaySaveBeforeStop =
+      typeof req.body.title === 'string' &&
+      req.body.title.length > 0;
+
+    if (wantsReplaySaveBeforeStop) {
+      if (!trustedFilename) {
+        return res.status(503).json({
+          error: 'Recording filename unavailable before stop; retry',
+        });
+      }
+
+      const { error: preStopRecoveryError } = await supabase
+        .from('livestream_replay_recovery')
+        .upsert(
+          {
+            stream_id: streamRow.id,
+            user_id: streamRow.user_id,
+            egress_id: egressId,
+            recording_filename: trustedFilename,
+            replay_title: streamRow.title || 'Live Stream',
+            thumbnail_url: streamRow.thumbnail_url || null,
+          },
+          {
+            onConflict: 'stream_id',
+            ignoreDuplicates: true,
+          }
+        );
+
+      if (preStopRecoveryError) {
+        console.error(
+          '[RECOVERY] Pre-stop intent failed:',
+          preStopRecoveryError.message
+        );
+
+        return res.status(503).json({
+          error: 'Could not secure replay recovery before stop',
+        });
+      }
+    }
+
     // An egress that already reached a terminal status (e.g. its room was
     // closed by LiveKit — "Source closed" — during a host reconnect) can no
     // longer be stopped: LiveKit answers with HTTP 412. Treat that as
@@ -3172,12 +4508,50 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
     if (!isEgressTerminal(egressInfo.status)) {
       try {
         await egressClient.stopEgress(egressId);
+        livekitStopConfirmed = true;
       } catch (stopError) {
         // Race window: the egress may have ended between the status check
         // above and this stop request. Only that specific LiveKit 412 is
         // tolerated; every other error is a real failure.
         if (!isAlreadyEndedStopError(stopError)) {
-          throw stopError;
+          // A timeout may mean LiveKit stopped successfully but the
+          // response was lost. Verify before releasing the DB guard.
+          let verifiedEgress = null;
+          try {
+            const verifiedList = await egressClient.listEgress({ egressId });
+            verifiedEgress = Array.isArray(verifiedList)
+              ? verifiedList.find((item) =>
+                  item.egressId === egressId &&
+                  item.roomName === actualRoomName &&
+                  isLivestreamRecordingEgress(item, streamRow.id)
+                )
+              : null;
+          } catch (verificationError) {
+            console.error(
+              '[EGRESS] Stop outcome verification failed:',
+              verificationError.message
+            );
+          }
+
+          if (!verifiedEgress) {
+            // Unknown outcome: do not allow a stopped recording to
+            // become live through a concurrent activation.
+            livekitStoppedForCatch = true;
+            throw stopError;
+          }
+
+          if (!isEgressTerminal(verifiedEgress.status)) {
+            // A still-active or ending egress cannot be treated as
+            // safely stopped. Retain the claim if it is ending.
+            if (verifiedEgress.status === 2) {
+              livekitStoppedForCatch = true;
+            }
+            throw stopError;
+          }
+
+          livekitStopConfirmed = true;
+        } else {
+          livekitStopConfirmed = true;
         }
 
         console.log(
@@ -3186,6 +4560,7 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         );
       }
     } else {
+      livekitStopConfirmed = true;
       console.log(
         '[EGRESS] Egress already in terminal status; skipping stop:',
         egressId,
@@ -3194,12 +4569,72 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       );
     }
 
+    livekitStoppedForCatch = livekitStopConfirmed;
     console.log('[EGRESS-TIMING] Stop completed:', {
       egressId,
       serverTimeMs: Date.now(),
     });
 
     console.log('[EGRESS] Stopped:', egressId);
+
+    // Reconcile other MP4 egresses belonging to this exact livestream.
+    // Never stop thumbnail jobs or recordings from another stream.
+    const reconcileAdditionalRecordings = async () => {
+      if (!(await verifyStopLease())) {
+        throw new Error('Stop lease lost before recording reconciliation');
+      }
+
+      const roomEgresses = await egressClient.listEgress({
+        roomName: actualRoomName,
+      });
+
+      if (!Array.isArray(roomEgresses)) {
+        throw new Error('LiveKit recording discovery unavailable');
+      }
+
+      for (const item of roomEgresses) {
+        if (
+          !item?.egressId ||
+          item.egressId === egressId ||
+          item.roomName !== actualRoomName ||
+          !isLivestreamRecordingEgress(item, streamRow.id)
+        ) {
+          continue;
+        }
+
+        if (isEgressTerminal(item.status)) continue;
+
+        if (!(await verifyStopLease())) {
+          throw new Error('Stop lease lost during recording reconciliation');
+        }
+
+        try {
+          await egressClient.stopEgress(item.egressId);
+        } catch (error) {
+          if (!isAlreadyEndedStopError(error)) {
+            throw error;
+          }
+        }
+
+        console.log(
+          '[EGRESS] Reconciled additional recording:',
+          item.egressId
+        );
+      }
+    };
+
+    try {
+      await reconcileAdditionalRecordings();
+    } catch (reconciliationError) {
+      console.error(
+        '[EGRESS] Additional recording reconciliation incomplete:',
+        reconciliationError?.message || reconciliationError
+      );
+
+      return res.status(503).json({
+        error: 'Recording reconciliation incomplete; recovery pending',
+      });
+    }
 
     // Preserve the current wire contract: a replay row is saved only when
     // the caller includes a title in the stop request. The title VALUE is
@@ -3209,16 +4644,36 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       req.body.title.length > 0;
 
     if (!wantsReplaySave) {
+      // A concurrent normal stop may already own this recording.
+      // Never queue cleanup if a replay exists for this stream.
+      const { data: existingReplay, error: existingReplayError } =
+        await supabase
+          .from('livestreams')
+          .select('id')
+          .eq('source_live_stream_id', streamRow.id)
+          .limit(1);
+
+      if (existingReplayError) {
+        throw existingReplayError;
+      }
+
+      if (existingReplay?.length > 0) {
+        return res.json({ success: true, alreadySaved: true });
+      }
+
+      // Preserve recordings stopped during abnormal teardown.
+      // The host may have disconnected before the replay-save request.
+      // Recovery or explicit retention policy must decide their fate.
       if (trustedFilename) {
-        // This recording deliberately has no replay row and therefore
-        // cannot be surfaced by Bushrann. Wait for LiveKit's upload to
-        // settle and then remove the unreferenced MP4.
-        await scheduleUnreferencedRecordingCleanup(
+        console.warn(
+          '[EGRESS] Preserving abnormal-stop recording for recovery:',
+          streamRow.id,
           trustedFilename
         );
       } else {
         console.warn(
-          '[EGRESS CLEANUP] Recording has no replay and no trusted filename; nothing can be safely removed'
+          '[EGRESS] Abnormal-stop recording has no trusted filename:',
+          streamRow.id
         );
       }
 
@@ -3251,15 +4706,19 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
 
         // Only fully completed recordings with a real uploaded file are
         // valid merge inputs.
-        if (item.status !== EGRESS_STATUS_COMPLETE) {
-          continue;
+        if (Number(item.status) !== Number(EGRESS_STATUS_COMPLETE)) {
+          throw new Error(
+            `Recording segment not COMPLETE: ${item.egressId}`
+          );
         }
 
         const segmentFilename =
           egressFilenameOf(item);
 
         if (!segmentFilename) {
-          continue;
+          throw new Error(
+            `Recording segment filename unavailable: ${item.egressId}`
+          );
         }
 
         segmentsById.set(item.egressId, {
@@ -3272,22 +4731,7 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         });
       }
 
-      // The egress stopped just now may still be ENDING (not yet COMPLETE)
-      // in this listing. It IS the newest segment — include it from the
-      // trusted pre-stop record so it is never dropped from the merge.
-      if (
-        !segmentsById.has(egressId) &&
-        trustedFilename
-      ) {
-        segmentsById.set(egressId, {
-          egressId,
-          filename: trustedFilename,
-          startedAt:
-            typeof egressInfo.startedAt === 'bigint'
-              ? egressInfo.startedAt
-              : BigInt(Number.MAX_SAFE_INTEGER),
-        });
-      }
+
 
       const orderedSegments = [
         ...segmentsById.values(),
@@ -3299,13 +4743,225 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         multiSegments = orderedSegments;
       }
     } catch (discoveryError) {
-      // Discovery failure must never break the normal end flow.
-      console.warn(
-        '[MERGE] Segment discovery failed; using single-segment path:',
+      console.error(
+        '[MERGE] Segment discovery incomplete; retaining recovery intent:',
         discoveryError.message
+      );
+
+      return res.status(503).json({
+        error: 'Recording segment discovery incomplete; recovery pending',
+      });
+    }
+
+    // Renew and verify exclusive ownership before creating a replay.
+    // If another request acquired the expired lease, this request
+    // must not create or process a replay.
+    const { data: leaseRenewed, error: leaseRenewError } =
+      await supabase.rpc('bushrann_renew_egress_stop_lease', {
+        p_stream_id: streamRow.id,
+        p_user_id: req.authUserId,
+        p_lease_token: stopLeaseToken,
+        p_lease_seconds: 120,
+      });
+
+    if (leaseRenewError) throw leaseRenewError;
+
+    if (leaseRenewed !== true) {
+      return res.status(409).json({
+        error: 'Recording stop lease expired; retry',
+      });
+    }
+    // Persist replay intent before attempting the replay insert.
+    // This survives deletion of live_streams and Railway restarts.
+    // The existing merged replay recovery path rediscovers segments
+    // from LiveKit using the stream ID embedded in the target filename.
+    const recoveryFilename = multiSegments
+      ? `recordings/merged_${streamRow.id}_${Date.now()}.mp4`
+      : trustedFilename;
+
+    if (!recoveryFilename) {
+      return res.status(503).json({
+        error: 'Recording filename unavailable; retry',
+      });
+    }
+
+    const { error: recoveryJobError } = await supabase
+      .from('livestream_replay_recovery')
+      .upsert(
+        {
+          stream_id: streamRow.id,
+          user_id: streamRow.user_id,
+          egress_id: egressId,
+          recording_filename: recoveryFilename,
+          replay_title: streamRow.title || 'Live Stream',
+          thumbnail_url: streamRow.thumbnail_url || null,
+        },
+        {
+          onConflict: 'stream_id',
+          ignoreDuplicates: true,
+        }
+      );
+
+    if (recoveryJobError) {
+      console.error(
+        '[RECOVERY] Failed to persist replay job:',
+        recoveryJobError.message
+      );
+
+      return res.status(503).json({
+        error: 'Replay recovery could not be saved; retry',
+      });
+    }
+
+    // Read the authoritative persisted job. A concurrent request may
+    // have created it first; never use a newly generated merge target.
+    const { data: savedRecoveryJob, error: savedJobError } =
+      await supabase
+        .from('livestream_replay_recovery')
+        .select('user_id, egress_id, recording_filename')
+        .eq('stream_id', streamRow.id)
+        .single();
+
+    if (savedJobError || !savedRecoveryJob) {
+      return res.status(503).json({
+        error: 'Replay recovery job verification failed; retry',
+      });
+    }
+
+    if (
+      savedRecoveryJob.user_id !== streamRow.user_id ||
+      !savedRecoveryJob.recording_filename
+    ) {
+      return res.status(409).json({
+        error: 'Replay recovery job conflict',
+      });
+    }
+
+    // Convert LiveKit BigInt timestamps into JSON-safe strings.
+    const manifestSegments = multiSegments
+      ? multiSegments.map((segment) => ({
+          egressId: segment.egressId,
+          filename: segment.filename,
+          startedAt: String(segment.startedAt),
+        }))
+      : [{
+          egressId,
+          filename: trustedFilename,
+          startedAt: String(egressInfo.startedAt || 0),
+        }];
+
+    if (manifestSegments.some(
+      (segment) => !segment.egressId || !segment.filename
+    )) {
+      return res.status(503).json({
+        error: 'Recording manifest incomplete; retry',
+      });
+    }
+
+    const proposedMergedTarget = multiSegments
+      ? `recordings/merged_${streamRow.id}_${Date.now()}.mp4`
+      : null;
+
+    if (!(await verifyStopLease())) {
+      return res.status(409).json({
+        error: 'Recording stop lease ownership lost; recovery required',
+      });
+    }
+
+    // Fail closed if LiveKit reports a new or unfinished recording.
+    const finalManifestDiscoveryCheck =
+      await egressClient.listEgress({ roomName: actualRoomName });
+
+    if (!Array.isArray(finalManifestDiscoveryCheck)) {
+      return res.status(503).json({
+        error: 'Final recording discovery unavailable; recovery pending',
+      });
+    }
+
+    const expectedEgressIds = new Set(
+      manifestSegments.map((segment) => segment.egressId)
+    );
+
+    for (const item of finalManifestDiscoveryCheck) {
+      if (
+        !item?.egressId ||
+        item.roomName !== actualRoomName ||
+        !isLivestreamRecordingEgress(item, streamRow.id)
+      ) {
+        continue;
+      }
+
+      if (
+        Number(item.status) !== Number(EGRESS_STATUS_COMPLETE) ||
+        !egressFilenameOf(item) ||
+        !expectedEgressIds.has(item.egressId)
+      ) {
+        return res.status(503).json({
+          error: 'Recording segments changed; recovery pending',
+        });
+      }
+    }
+
+    if (!(await verifyStopLease())) {
+      return res.status(409).json({
+        error: 'Recording stop lease lost before manifest finalization',
+      });
+    }
+
+    const { data: manifestFinalized, error: manifestError } =
+      await supabase.rpc('bushrann_finalize_replay_manifest', {
+        p_stream_id: streamRow.id,
+        p_user_id: streamRow.user_id,
+        p_lease_token: stopLeaseToken,
+        p_egress_id: savedRecoveryJob.egress_id,
+        p_segments: manifestSegments,
+        p_merged_target: proposedMergedTarget,
+      });
+
+    if (manifestError) throw manifestError;
+
+    const { data: finalManifest, error: finalManifestError } =
+      await supabase
+        .from('livestream_replay_recovery')
+        .select(
+          'recording_filename, merged_target_filename, recording_segments, recording_manifest_ready'
+        )
+        .eq('stream_id', streamRow.id)
+        .eq('user_id', streamRow.user_id)
+        .single();
+
+    if (finalManifestError) throw finalManifestError;
+
+    if (
+      finalManifest.recording_manifest_ready !== true ||
+      !Array.isArray(finalManifest.recording_segments) ||
+      finalManifest.recording_segments.length !== manifestSegments.length ||
+      finalManifest.recording_segments.some(
+        (segment, index) =>
+          segment.egressId !== manifestSegments[index].egressId ||
+          segment.filename !== manifestSegments[index].filename ||
+          String(segment.startedAt) !== manifestSegments[index].startedAt
+      ) ||
+      Boolean(finalManifest.merged_target_filename) !== Boolean(multiSegments) ||
+      finalManifest.recording_filename !== (
+        multiSegments
+          ? finalManifest.merged_target_filename
+          : trustedFilename
+      )
+    ) {
+      return res.status(409).json({
+        error: 'Recording manifest conflict; recovery required',
+      });
+    }
+
+    if (!manifestFinalized) {
+      console.log(
+        '[RECOVERY] Reusing previously finalized manifest:',
+        streamRow.id
       );
     }
 
+    const authoritativeFilename = finalManifest.recording_filename;
     if (multiSegments) {
       console.log(
         '[MERGE] Multiple recording segments detected:',
@@ -3319,8 +4975,7 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       // sweepReplayRecovery already resumes. The merged filename embeds
       // streamRow.id so the segments can be rediscovered from LiveKit
       // after a restart even though the live_streams row is deleted.
-      const mergedTargetFilename =
-        `recordings/merged_${streamRow.id}_${Date.now()}.mp4`;
+      const mergedTargetFilename = authoritativeFilename;
 
       const {
         data: mergedRecord,
@@ -3329,6 +4984,7 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         .from('livestreams')
         .insert({
           user_id: streamRow.user_id,
+          source_live_stream_id: streamRow.id,
           video_url: 'processing',
           recording_filename:
             mergedTargetFilename,
@@ -3341,6 +4997,12 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         .select()
         .single();
 
+      if (mergedDbError?.code === '23505') {
+        // Another request already created this stream's replay.
+        // Never clean up or overwrite its recording.
+        return res.json({ success: true, alreadySaved: true });
+      }
+
       if (mergedDbError || !mergedRecord) {
         // Without the durable row there is nothing for the recovery
         // sweeper to resume. The stream still ends successfully; the
@@ -3350,7 +5012,19 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           mergedDbError?.message
         );
 
-        return res.json({ success: true });
+        const { error: releaseError } =
+          await releaseStopLeaseSafely();
+
+        if (releaseError) {
+          console.error(
+            '[EGRESS] Failed to release replay retry lease:',
+            releaseError.message
+          );
+        }
+
+        return res.status(503).json({
+          error: 'Replay creation failed; retry',
+        });
       }
 
       // Background: merging large MP4s can exceed any HTTP timeout, and a
@@ -3366,6 +5040,29 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       return res.json({ success: true });
     }
 
+    // A single replay must have a trusted recording filename before
+    // creating its durable database row.
+    if (!trustedFilename) {
+      console.error(
+        '[EGRESS] Recording filename unavailable; preserving stream for retry:',
+        streamRow.id
+      );
+
+      const { error: releaseError } =
+        await releaseStopLeaseSafely();
+
+      if (releaseError) {
+        console.error(
+          '[EGRESS] Could not release stop lease:',
+          releaseError.message
+        );
+      }
+
+      return res.status(503).json({
+        error: 'Recording filename unavailable; retry',
+      });
+    }
+
     const {
       data: record,
       error: dbError,
@@ -3373,72 +5070,85 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       .from('livestreams')
       .insert({
         user_id: streamRow.user_id,
+        source_live_stream_id: streamRow.id,
         video_url: 'processing',
-        recording_filename: trustedFilename || null,
-        thumbnail_url:
-          streamRow.thumbnail_url || null,
-        title:
-          streamRow.title || 'Live Stream',
+        recording_filename: authoritativeFilename,
+        thumbnail_url: streamRow.thumbnail_url || null,
+        title: streamRow.title || 'Live Stream',
         is_public: true,
       })
       .select()
       .single();
 
-    if (dbError) {
-      console.error(
-        '[EGRESS] DB save error:',
-        dbError.message
-      );
+    if (dbError?.code === '23505') {
+      // A conflict is only success if the existing replay has a
+      // usable recording reference.
+      const { data: existingReplay, error: lookupError } =
+        await supabase
+          .from('livestreams')
+          .select('id, recording_filename')
+          .eq('source_live_stream_id', streamRow.id)
+          .maybeSingle();
 
-      // The recording exists but no replay row references it because
-      // creation of that row failed. It is therefore safe to clean up.
-      if (trustedFilename) {
-        await scheduleUnreferencedRecordingCleanup(
-          trustedFilename
-        );
+      if (lookupError) {
+        throw lookupError;
       }
 
-      return res.json({ success: true });
+      if (existingReplay?.recording_filename) {
+        return res.json({ success: true, alreadySaved: true });
+      }
+
+      return res.status(503).json({
+        error: 'Existing replay is incomplete; recovery required',
+      });
     }
 
-    if (trustedFilename) {
-      // The MP4 is already being written directly into Supabase Storage.
-      // processRecording waits for it, creates the thumbnail, and publishes
-      // the replay metadata.
-      processRecording(
-        record.id,
-        trustedFilename,
-        egressId
-      );
-    } else {
+    if (dbError || !record) {
       console.error(
-        '[EGRESS] Replay record saved but no filename available for processing'
+        '[EGRESS] Replay creation failed:',
+        dbError?.message || 'No replay row returned'
       );
 
-      // No recording filename means this replay can never be processed.
-      // Remove only the still-processing row so a broken replay is not
-      // left permanently in the database.
-      const { error: cleanupRecordError } = await supabase
-        .from('livestreams')
-        .delete()
-        .eq('id', record.id)
-        .eq('video_url', 'processing');
+      console.warn(
+        '[EGRESS] Preserving recording for retry:',
+        trustedFilename
+      );
 
-      if (cleanupRecordError) {
+      const { error: releaseError } =
+        await releaseStopLeaseSafely();
+
+      if (releaseError) {
         console.error(
-          '[EGRESS] Failed to remove unprocessable replay record:',
-          cleanupRecordError.message
-        );
-      } else {
-        console.log(
-          '[EGRESS] Removed unprocessable replay record:',
-          record.id
+          '[EGRESS] Failed to release replay retry lease:',
+          releaseError.message
         );
       }
+
+      return res.status(503).json({
+        error: 'Replay creation failed; retry',
+      });
     }
 
-    res.json({ success: true });
+    // Durable replay row exists and has a trusted recording filename.
+    // The existing processor waits for the MP4 and publishes the replay.
+    processRecording(record.id, authoritativeFilename, egressId);
+
+    return res.json({ success: true });
   } catch (error) {
+    if (stopClaimedForCatch && !livekitStoppedForCatch) {
+      try {
+        const { data: released, error: releaseError } =
+          await releaseStopLeaseSafely();
+        if (releaseError || released !== true) {
+          console.error(
+            '[EGRESS] Stop guard release failed:',
+            releaseError?.message || 'No matching stop claim'
+          );
+        }
+      } catch (releaseError) {
+        console.error('[EGRESS] Failed to release stop guard:', releaseError);
+      }
+    }
     console.error(
       '[EGRESS] Stop error:',
       error.message
@@ -3447,6 +5157,16 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
     res
       .status(500)
       .json({ error: 'Failed to stop recording' });
+  } finally {
+    stopLeaseRenewalClosing = true;
+
+    if (stopLeaseRenewalTimer) {
+      clearInterval(stopLeaseRenewalTimer);
+    }
+
+    if (stopLeaseRenewalPromise) {
+      await stopLeaseRenewalPromise;
+    }
   }
 });
 
