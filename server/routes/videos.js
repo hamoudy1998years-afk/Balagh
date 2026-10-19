@@ -2613,6 +2613,7 @@ router.post('/:videoId/watermark', async (req, res) => {
 router.delete('/:videoId', requireAuth, async (req, res) => {
   const { videoId } = req.params;
 
+
   // 1. Fetch the videos row.
   const { data: row, error: fetchError } = await supabase
     .from('videos')
@@ -2640,6 +2641,45 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
 
     if (adminError || !adminRow) {
       return res.status(403).json({ error: 'Not authorized to delete this video' });
+    }
+  }
+
+  console.warn('[REPLAY-DELETE-AUDIT] Authorized video deletion:', {
+    videoId,
+    actorId: req.authUserId,
+    ownerId: row.user_id,
+    isLiveStream: row.is_live_stream,
+  });
+
+  // Protect newly published replay recordings before ANY destructive work.
+  // The recording timestamp comes from the server-generated storage key.
+  if (
+    row.is_live_stream === true &&
+    typeof row.video_url === 'string' &&
+    row.video_url.includes('/object/public/livestreams/recordings/')
+  ) {
+    const match = /\/recordings\/[^/?]+_(\d{13})\.mp4(?:\?|$)/.exec(
+      row.video_url
+    );
+
+    const recordedAt = match ? Number(match[1]) : NaN;
+    const ageMs = Date.now() - recordedAt;
+
+    // Fail closed when the timestamp is unknown or in the future.
+    if (
+      !Number.isFinite(ageMs) ||
+      ageMs < 15 * 60 * 1000
+    ) {
+      console.error('[REPLAY-DELETE-BLOCKED]', {
+        videoId,
+        actorId: req.authUserId,
+        ageMs: Number.isFinite(ageMs) ? ageMs : 'unknown',
+      });
+
+      return res.status(409).json({
+        error: 'This livestream replay is temporarily protected. Try again later.',
+        code: 'REPLAY_PROTECTION_WINDOW',
+      });
     }
   }
 
@@ -2856,7 +2896,7 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
     cleanup = { ok: true, objectsCleaned: 0, storageFailed: [] };
 
     for (const url of [row.video_url, ...eligibleThumbnails]) {
-      const objectCleanup = await cleanupVideoStorage({ video_url: url });
+      const objectCleanup = await cleanupVideoStorage({ video_url: url }, { allowLivestreamRecordingDelete: true, reason: 'authenticated-replay-delete' });
 
       cleanup.objectsCleaned += objectCleanup.objectsCleaned;
 
@@ -3160,7 +3200,7 @@ async function cleanupAccountLivestreamReplays(userId) {
   // missing key succeeds on S3, so duplicate URLs across rows are harmless;
   // an unparseable URL makes cleanup not-ok and aborts with metadata kept.)
   for (const url of urlList) {
-    const cleanup = await cleanupVideoStorage({ video_url: url });
+    const cleanup = await cleanupVideoStorage({ video_url: url }, { allowLivestreamRecordingDelete: true, reason: 'authenticated-account-delete' });
 
     if (!cleanup.ok) {
       throw new Error('Livestream replay storage cleanup failed');
@@ -3229,9 +3269,15 @@ async function cleanupAccountLivestreamReplays(userId) {
 router.post('/account/:userId/cleanup-videos', requireAuth, async (req, res) => {
   const { userId } = req.params;
 
+
   if (req.authUserId !== userId) {
     return res.status(403).json({ error: 'Not authorized' });
   }
+
+  console.warn('[REPLAY-DELETE-AUDIT] Authorized account cleanup:', {
+    userId,
+    actorId: req.authUserId,
+  });
 
   let replaysCleaned = 0;
 

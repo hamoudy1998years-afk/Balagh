@@ -93,7 +93,7 @@ function parseStorageUrl(url) {
 // Deletes the storage objects referenced by a videos row.
 // Returns { ok, objectsCleaned, storageFailed, unparseableUrls } where
 // ok === (unparseableUrls === 0 && storageFailed.length === 0).
-async function cleanupVideoStorage(videoRow) {
+async function cleanupVideoStorage(videoRow, options = {}) {
   const videoId = videoRow?.id;
 
   // Build the exact object list. Dedupe by `bucket:key`.
@@ -142,6 +142,40 @@ async function cleanupVideoStorage(videoRow) {
 
   if (s3) {
     for (const { bucket, key } of objects.values()) {
+      if (bucket === 'livestreams' && key.startsWith('recordings/')) {
+        // Safety window: never delete a newly created recording.
+        // Unknown filename formats fail closed.
+        const match = /^recordings\/[^/]+_(\d{13})\.mp4$/.exec(key);
+        const recordedAt = match ? Number(match[1]) : NaN;
+        const ageMs = Date.now() - recordedAt;
+
+        if (!Number.isFinite(ageMs) || ageMs < 15 * 60 * 1000) {
+          console.error('[REPLAY-PROTECTION] BLOCKED fresh recording deletion:', {
+            key,
+            ageMs: Number.isFinite(ageMs) ? ageMs : 'unknown',
+            reason: options.reason || 'unspecified',
+          });
+          storageFailed.push(`${bucket}:${key}`);
+          continue;
+        }
+
+        if (
+          options.allowLivestreamRecordingDelete !== true ||
+          !['authenticated-replay-delete', 'authenticated-account-delete']
+            .includes(options.reason)
+        ) {
+          console.error('[REPLAY-PROTECTION] BLOCKED recording deletion:', key);
+          storageFailed.push(`${bucket}:${key}`);
+          continue;
+        }
+
+        console.warn(
+          '[REPLAY-PROTECTION] Authorized recording deletion:',
+          options.reason,
+          key
+        );
+      }
+
       try {
         await s3.send(
           new DeleteObjectCommand({
