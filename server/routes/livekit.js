@@ -2156,6 +2156,135 @@ async function restoreMissingReplayRows() {
         continue;
       }
 
+      // A durable replay and completed recordings must not leave the
+      // original host marked LIVE after its LiveKit room has closed.
+      const { data: recoveryStream, error: streamStateError } =
+        await supabase
+          .from('live_streams')
+          .select('id, user_id, channel_name, is_live, egress_stop_pending')
+          .eq('id', job.stream_id)
+          .eq('user_id', job.user_id)
+          .maybeSingle();
+
+      if (streamStateError) throw streamStateError;
+
+      if (recoveryStream?.is_live === true) {
+        if (
+          recoveryStream.egress_stop_pending !== true ||
+          !recoveryStream.channel_name
+        ) {
+          console.warn('[RECOVERY] Live stream not safe to finalize:', job.stream_id);
+          continue;
+        }
+
+        const roomService = getRoomServiceClient();
+        const roomName = recoveryStream.channel_name;
+
+        // Fail closed if the room is active or room discovery fails.
+        const rooms = await roomService.listRooms([roomName]);
+        if (!Array.isArray(rooms) || rooms.length !== 0) {
+          console.log('[RECOVERY] Room still present; retry later:', job.stream_id);
+          continue;
+        }
+
+        const { data: recoveryStopToken, error: acquireStopError } =
+          await supabase.rpc('bushrann_acquire_egress_stop_recovery_lease', {
+            p_stream_id: job.stream_id,
+            p_user_id: job.user_id,
+            p_lease_seconds: 120,
+          });
+
+        if (acquireStopError) throw acquireStopError;
+        if (!recoveryStopToken) continue;
+
+        let recoveryEnded = false;
+
+        try {
+          // Check again after acquiring exclusive ownership.
+          const finalRooms = await roomService.listRooms([roomName]);
+          if (!Array.isArray(finalRooms) || finalRooms.length !== 0) {
+            throw new Error('LiveKit room reappeared during finalization');
+          }
+
+          const completed = await getEgressClient().listEgress({ roomName });
+          if (!Array.isArray(completed)) {
+            throw new Error('Recovery recording discovery unavailable');
+          }
+
+          const sources = completed.filter(
+            item =>
+              item?.egressId &&
+              item.roomName === roomName &&
+              isLivestreamRecordingEgress(item, job.stream_id)
+          );
+
+          if (
+            sources.length === 0 ||
+            sources.some(item =>
+              Number(item.status) !== Number(EGRESS_STATUS_COMPLETE) ||
+              !egressFilenameOf(item)
+            )
+          ) {
+            throw new Error('Recovery recording is not fully COMPLETE');
+          }
+
+          const { data: renewed, error: renewError } =
+            await supabase.rpc('bushrann_renew_egress_stop_lease', {
+              p_stream_id: job.stream_id,
+              p_user_id: job.user_id,
+              p_lease_token: recoveryStopToken,
+              p_lease_seconds: 120,
+            });
+
+          if (renewError || renewed !== true) {
+            throw new Error('Recovery finalization lost stop lease');
+          }
+
+          const { data: ended, error: endError } = await supabase
+            .from('live_streams')
+            .update({
+              is_live: false,
+              stream_status: 'ended',
+              egress_stop_pending: false,
+              ended_at: new Date().toISOString(),
+              egress_stop_lease_token: null,
+              egress_stop_lease_until: null,
+            })
+            .eq('id', job.stream_id)
+            .eq('user_id', job.user_id)
+            .eq('is_live', true)
+            .eq('egress_stop_pending', true)
+            .eq('egress_stop_lease_token', recoveryStopToken)
+            .gt('egress_stop_lease_until', new Date().toISOString())
+            .select('id')
+            .maybeSingle();
+
+          if (endError) throw endError;
+          if (!ended) {
+            throw new Error('Recovery stream state changed; retry later');
+          }
+
+          recoveryEnded = true;
+          console.log('[RECOVERY] Stale livestream finalized:', job.stream_id);
+        } finally {
+          if (!recoveryEnded) {
+            const { error: releaseError } = await supabase.rpc(
+              'bushrann_release_egress_stop_lease',
+              {
+                p_stream_id: job.stream_id,
+                p_user_id: job.user_id,
+                p_lease_token: recoveryStopToken,
+              }
+            );
+            if (releaseError) {
+              console.error(
+                '[RECOVERY] Finalization lease release failed:',
+                releaseError.message
+              );
+            }
+          }
+        }
+      }
       // Mark recovered only after the replay row exists.
       const { data: verified, error: verifyError } = await supabase
         .from('livestreams')
@@ -4999,6 +5128,57 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       );
     }
 
+    // Shared finalization for every successful stop/replay path.
+    // Only the current stop-lease owner may close this stream.
+    const finalizeStoppedStream = async () => {
+      // Prevent concurrent timer renewal while closing the stop lease.
+      stopLeaseRenewalClosing = true;
+
+      if (stopLeaseRenewalTimer) {
+        clearInterval(stopLeaseRenewalTimer);
+        stopLeaseRenewalTimer = null;
+      }
+
+      if (stopLeaseRenewalPromise) {
+        await stopLeaseRenewalPromise;
+      }
+
+      if (!(await verifyStopLease())) {
+        throw new Error('Stop lease lost before stream finalization');
+      }
+
+      const { data: ended, error } = await supabase
+        .from('live_streams')
+        .update({
+          is_live: false,
+          stream_status: 'ended',
+          egress_stop_pending: false,
+          ended_at: new Date().toISOString(),
+          egress_stop_lease_token: null,
+          egress_stop_lease_until: null,
+        })
+        .eq('id', streamRow.id)
+        .eq('user_id', req.authUserId)
+        .eq('is_live', true)
+        .eq('egress_stop_pending', true)
+        .eq('egress_stop_lease_token', stopLeaseToken)
+        .gt('egress_stop_lease_until', new Date().toISOString())
+        .select('id')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!ended) {
+        throw new Error('Stream finalization ownership or state changed');
+      }
+
+      stopLeaseRenewalClosing = true;
+      if (stopLeaseRenewalTimer) {
+        clearInterval(stopLeaseRenewalTimer);
+        stopLeaseRenewalTimer = null;
+      }
+
+      console.log('[EGRESS] Livestream finalized:', streamRow.id);
+    };
     const authoritativeFilename = finalManifest.recording_filename;
     if (multiSegments) {
       console.log(
@@ -5038,6 +5218,25 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       if (mergedDbError?.code === '23505') {
         // Another request already created this stream's replay.
         // Never clean up or overwrite its recording.
+        const { data: savedReplay, error: replayLookupError } =
+          await supabase
+            .from('livestreams')
+            .select('id, recording_filename')
+            .eq('source_live_stream_id', streamRow.id)
+            .maybeSingle();
+
+        if (replayLookupError) throw replayLookupError;
+
+        if (
+          !savedReplay ||
+          savedReplay.recording_filename !== mergedTargetFilename
+        ) {
+          return res.status(409).json({
+            error: 'Existing replay differs; recovery required',
+          });
+        }
+
+        await finalizeStoppedStream();
         return res.json({ success: true, alreadySaved: true });
       }
 
@@ -5067,6 +5266,7 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
 
       // Background: merging large MP4s can exceed any HTTP timeout, and a
       // merge failure must never prevent the host from ending the stream.
+      await finalizeStoppedStream();
       processMultiSegmentReplay(
         mergedRecord.id,
         streamRow,
@@ -5167,7 +5367,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
       });
     }
 
-    // Durable replay row exists and has a trusted recording filename.
+    await finalizeStoppedStream();
+
     // The existing processor waits for the MP4 and publishes the replay.
     processRecording(record.id, authoritativeFilename, egressId);
 
