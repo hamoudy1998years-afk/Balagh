@@ -4014,12 +4014,23 @@ router.post('/egress/start', requireAuth, async (req, res) => {
 
   try {
     const { roomName } = req.body || {};
+    const startPerfT0 = Date.now();
+    let startPerfLastMs = startPerfT0;
+    const markStartPerf = stage => {
+      const now = Date.now();
+      console.log('[EGRESS-START-PERF]', stage, {
+        stepMs: now - startPerfLastMs,
+        totalMs: now - startPerfT0,
+      });
+      startPerfLastMs = now;
+    };
 
     if (!roomName || typeof roomName !== 'string') {
       return res.status(400).json({ error: 'Missing roomName' });
     }
 
     const streamRow = await findStreamByRoom(roomName);
+    markStartPerf('stream_lookup');
 
     if (!streamRow) {
       return res.status(404).json({ error: 'Stream not found' });
@@ -4038,6 +4049,7 @@ router.post('/egress/start', requireAuth, async (req, res) => {
       }
     );
 
+    markStartPerf('lease_acquire');
     if (acquireError) throw acquireError;
 
     if (!acquired) {
@@ -4062,12 +4074,14 @@ router.post('/egress/start', requireAuth, async (req, res) => {
       return res.status(409).json({ error: 'Recording start lease lost' });
     }
 
+    markStartPerf('initial_lease_verification');
     const egressClient = getEgressClient();
     const activeEgresses = await egressClient.listEgress({
       roomName,
       active: true,
     });
 
+    markStartPerf('existing_recording_lookup');
     if (!Array.isArray(activeEgresses)) {
       throw new Error('Recording discovery unavailable');
     }
@@ -4115,7 +4129,9 @@ router.post('/egress/start', requireAuth, async (req, res) => {
       return res.status(409).json({ error: 'Recording start lease lost' });
     }
 
+    markStartPerf('pre_start_lease_verification');
     const started = await startCompositeRecording(roomName, streamRow, req.body?.orientation);
+    markStartPerf('livekit_recording_start');
 
     // REPLAY-SYNC: anchor the moment the start call resolved on Railway's clock.
     // The client timer starts only after /egress/activate succeeds, so this is the
@@ -4149,6 +4165,7 @@ router.post('/egress/start', requireAuth, async (req, res) => {
       });
     }
 
+    markStartPerf('anchor_and_final_lease');
     void captureAutomaticLiveThumbnail(roomName, streamRow)
       .catch(error => {
         console.warn(
