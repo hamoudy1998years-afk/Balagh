@@ -478,14 +478,20 @@ async function trimReplayFile(
     soundMs > 0 &&
     soundMs < cutHeadMs
   ) {
-    cutHeadMs = Math.max(0, soundMs - REPLAY_TRIM_GUARD_PRE_MS);
+    // Keep the opening guard without restoring several seconds of pre-live footage.
+    const earliestAllowedHeadMs = Math.max(0, headMs - REPLAY_TRIM_GUARD_PRE_MS);
+    cutHeadMs = Math.max(earliestAllowedHeadMs, soundMs - REPLAY_TRIM_GUARD_PRE_MS);
     console.log('[REPLAY-SYNC] Silence bias moved cut earlier:', {
       plannedHeadMs: headMs,
       biasedHeadMs: cutHeadMs,
     });
   }
 
-  const durationSec = (endMs - cutHeadMs) / 1000;
+  // Never request footage beyond the actual source MP4.
+  if (!Number.isFinite(sourceDurationSec) || sourceDurationSec <= 0) return false;
+  const boundedEndMs = Math.min(endMs, Math.floor(sourceDurationSec * 1000));
+  const durationSec = (boundedEndMs - cutHeadMs) / 1000;
+  console.log("[REPLAY-SYNC] Bounded trim:", { cutHeadMs, boundedEndMs, sourceDurationSec });
   if (!Number.isFinite(durationSec) || durationSec <= 0) return false;
 
   const copyResult = await runProcessBounded(
