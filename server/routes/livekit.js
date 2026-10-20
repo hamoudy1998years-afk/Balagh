@@ -4266,7 +4266,7 @@ router.post('/egress/readiness', requireAuth, async (req, res) => {
 // claim_live_notification (migration 20261025). Safe to call repeatedly:
 // the claim is one-shot per stream (stream_notified_at).
 // Activate a prepared livestream only after LiveKit recording is ACTIVE.
-router.post('/egress/activate', requireAuth, async (req, res) => {
+const activatePreparedEgress = async (req, res, allowPending = false) => {
   try {
     const { roomName, egressId } = req.body || {};
 
@@ -4328,6 +4328,10 @@ router.post('/egress/activate', requireAuth, async (req, res) => {
           isLivestreamRecordingEgress(item, streamRow.id)
         )
       : null;
+
+    if (allowPending && info && info.status !== 1 && !isEgressTerminal(info.status)) {
+      return res.status(202).json({ state: 'starting' });
+    }
 
     if (!info || info.status !== 1) {
       return res.status(409).json({ error: 'Recording is not ACTIVE' });
@@ -4420,7 +4424,12 @@ router.post('/egress/activate', requireAuth, async (req, res) => {
     console.error('[EGRESS] Activation failed:', error?.message);
     return res.status(503).json({ error: 'Activation unavailable' });
   }
-});
+};
+
+router.post('/egress/ready-activate', requireAuth, (req, res) =>
+  activatePreparedEgress(req, res, true)
+);
+router.post('/egress/activate', requireAuth, (req, res) => activatePreparedEgress(req, res));
 router.post('/stream-active', requireAuth, async (req, res) => {
   try {
     const { roomName } = req.body || {};
