@@ -15,6 +15,7 @@ const {
   PutObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
 } = require('@aws-sdk/client-s3');
 
 const ffmpegPath = require('ffmpeg-static');
@@ -1637,6 +1638,73 @@ async function deleteReplayWatermarkedObjectStrict(replayId) {
 }
 
 
+// ── Replay-sync correction candidate cleanup ──
+
+// MUST match livekit.js exactly: the correction lease/stale window there
+// is 60 minutes (CORRECTION_STALE_MS). Every deletion guard in this file
+// uses THIS value — a shorter assumption could delete storage out from
+// under a legitimate correction worker.
+const CORRECTION_STALE_MS = 60 * 60 * 1000;
+
+// Deterministic candidate key — identical to livekit.js.
+function correctionCandidateStorageKey(replayId) {
+  return `recordings/trimmed_${replayId}.mp4`;
+}
+
+function correctionCandidateUrl(replayId) {
+  return getPublicLivestreamsUrl(correctionCandidateStorageKey(replayId));
+}
+
+// Strict candidate deletion, mirroring deleteReplayWatermarkedObjectStrict:
+// per-call S3 client, 60s abort, 404 -> false, every other failure THROWS
+// so the caller never removes the last metadata reference while the
+// candidate object survives.
+async function deleteCorrectionCandidateStrict(replayId) {
+  const s3 = getS3Client();
+  const key = correctionCandidateStorageKey(replayId);
+
+  try {
+    await s3.send(
+      new HeadObjectCommand({
+        Bucket: REPLAY_WATERMARK_BUCKET,
+        Key: key,
+      }),
+      { abortSignal: AbortSignal.timeout(60000) }
+    );
+  } catch (error) {
+    if (isS3NotFound(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+
+  await s3.send(
+    new DeleteObjectCommand({
+      Bucket: REPLAY_WATERMARK_BUCKET,
+      Key: key,
+    }),
+    { abortSignal: AbortSignal.timeout(60000) }
+  );
+
+  return true;
+}
+
+// True when the row carries a FRESH correction claim. Stale claims (older
+// than the 60-minute window) are reclaimable by the correction sweep and
+// do NOT block deletion.
+function hasFreshCorrectionClaim(replayRow) {
+  if (replayRow?.correction_status !== 'correcting') return false;
+
+  const claimedAt = Date.parse(replayRow?.correction_claimed_at || '');
+
+  return (
+    Number.isFinite(claimedAt) &&
+    Date.now() - claimedAt < CORRECTION_STALE_MS
+  );
+}
+
+
 async function queueReplayWatermarkCleanup(replayId) {
   const { error } = await supabase
     .from('replay_watermark_cleanup')
@@ -1695,6 +1763,11 @@ async function processReplayWatermarkCleanup() {
       }
 
       await deleteReplayWatermarkedObjectStrict(replayId);
+
+      // Also remove any correction candidate left behind by the deleted
+      // replay. Strict: a failure keeps this cleanup record queued, so the
+      // next worker pass retries — never assume a completed job re-runs.
+      await deleteCorrectionCandidateStrict(replayId);
 
       const { data: finished, error: finishError } = await supabase.rpc(
         'finish_replay_watermark_cleanup',
@@ -1770,6 +1843,114 @@ const replayCleanupTimer = setInterval(async () => {
 }, 5 * 60 * 1000);
 
 replayCleanupTimer.unref?.();
+
+// ── Replay-sync correction candidate orphan sweep ──
+// Lists the deterministic candidate prefix directly from S3. An object is
+// an orphan only when ALL hold: (1) no livestreams row points
+// corrected_video_url at it, (2) it is older than the 60-minute
+// correction lease (a fresh upload is recorded within seconds, so age is
+// a safe in-flight discriminator), and (3) its replay carries no FRESH
+// correction claim. Bounded to one page per run; per-entry failures are
+// warn-only so one bad object never stalls the sweep.
+// Continuation token persisted across runs: every run processes ONE page
+// and remembers where it stopped, so later objects are eventually
+// inspected without any single run becoming unbounded. A null token
+// starts a new full cycle.
+let correctionOrphanSweepToken = null;
+
+async function sweepCorrectionCandidateOrphans() {
+  const s3 = getS3Client();
+
+  const listed = await s3.send(
+    new ListObjectsV2Command({
+      Bucket: REPLAY_WATERMARK_BUCKET,
+      Prefix: 'recordings/trimmed_',
+      MaxKeys: 500,
+      ContinuationToken: correctionOrphanSweepToken || undefined,
+    }),
+    { abortSignal: AbortSignal.timeout(60000) }
+  );
+
+  // Advance the cursor for the NEXT run; reset to a fresh cycle when the
+  // listing is exhausted.
+  correctionOrphanSweepToken = listed.IsTruncated
+    ? listed.NextContinuationToken || null
+    : null;
+
+  for (const object of listed.Contents || []) {
+    try {
+      const key = object.Key || '';
+      const match = /^recordings\/trimmed_(.+)\.mp4$/.exec(key);
+      if (!match) continue;
+
+      const ageMs =
+        Date.now() - new Date(object.LastModified || 0).getTime();
+
+      if (!Number.isFinite(ageMs) || ageMs < CORRECTION_STALE_MS) {
+        continue; // Too recent: possibly mid-upload by a live worker.
+      }
+
+      const replayId = match[1];
+      const candidateUrl = getPublicLivestreamsUrl(key);
+
+      const { data: owners, error: ownerError } = await supabase
+        .from('livestreams')
+        .select('id')
+        .eq('corrected_video_url', candidateUrl)
+        .limit(1);
+
+      if (ownerError) throw ownerError;
+      if ((owners || []).length > 0) continue;
+
+      const { data: replayRow, error: replayError } = await supabase
+        .from('livestreams')
+        .select('id, correction_status, correction_claimed_at')
+        .eq('id', replayId)
+        .maybeSingle();
+
+      if (replayError) throw replayError;
+      if (replayRow && hasFreshCorrectionClaim(replayRow)) continue;
+
+      await deleteCorrectionCandidateStrict(replayId);
+
+      console.log(
+        '[REPLAY-SYNC] Orphan correction candidate removed:',
+        replayId
+      );
+    } catch (orphanError) {
+      console.warn(
+        '[REPLAY-SYNC] Orphan candidate sweep entry failed:',
+        object?.Key,
+        orphanError?.message || orphanError
+      );
+    }
+  }
+}
+
+let correctionOrphanSweepRunning = false;
+
+const correctionOrphanSweepTimer = setInterval(async () => {
+  if (correctionOrphanSweepRunning) return;
+
+  correctionOrphanSweepRunning = true;
+
+  try {
+    await sweepCorrectionCandidateOrphans();
+  } catch (error) {
+    // A failed/expired continuation token must not stall the sweep:
+    // restart from the first page on the next run.
+    correctionOrphanSweepToken = null;
+
+    console.error(
+      '[REPLAY-SYNC] Orphan candidate sweep error:',
+      error?.message || error
+    );
+  } finally {
+    correctionOrphanSweepRunning = false;
+  }
+}, 30 * 60 * 1000);
+
+correctionOrphanSweepTimer.unref?.();
 
 // Check the deterministic output object. Returns { exists, url, staleUser }
 // — staleUser is true when the object was generated for a different owner
@@ -2700,6 +2881,7 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
   let canonicalRows = [];    // same-account canonical records to delete
   let siblingMirrorIds = []; // same-account duplicate mirrors sharing the MP4
   let eligibleThumbnails = []; // distinct thumbnail objects safe to delete
+  let sourceStreamIds = []; // source live_streams ids of the replays being deleted
 
   const isReplayMirror =
     row.is_live_stream === true &&
@@ -2716,7 +2898,7 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
     for (let from = 0; ; from += 1000) {
       const { data: page, error: canonicalError } = await supabase
         .from('livestreams')
-        .select('id, user_id, video_url, thumbnail_url')
+        .select('id, user_id, video_url, thumbnail_url, recording_filename, source_live_stream_id, correction_status, correction_claimed_at')
         .eq('video_url', row.video_url)
         .range(from, from + 999);
 
@@ -2740,6 +2922,48 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
     // storage.
     if (canonicalRows.some(c => c.user_id !== row.user_id)) {
       return res.status(409).json({ error: 'Replay storage is owned by another account' });
+    }
+
+    // Fail closed on any FRESH correction claim (60-minute lease, matching
+    // livekit.js CORRECTION_STALE_MS): a correction worker may be about to
+    // upload or record the candidate. Stale claims are reclaimable by the
+    // correction sweep and do NOT block deletion.
+    if (canonicalRows.some(hasFreshCorrectionClaim)) {
+      return res.status(409).json({
+        error: 'A replay correction is in progress. Try again later.',
+        code: 'REPLAY_CORRECTION_IN_PROGRESS',
+      });
+    }
+
+    // Fail closed on the replay's own ACTIVE recovery job: the recovery
+    // worker can hold the job in memory and recreate the replay row (or
+    // re-reference the recording) after deletion. Historical (recovered)
+    // jobs are deleted with the replay below.
+    sourceStreamIds = [
+      ...new Set(
+        canonicalRows.map(c => c.source_live_stream_id).filter(Boolean)
+      ),
+    ];
+
+    if (sourceStreamIds.length > 0) {
+      const { data: activeJobs, error: activeJobsError } = await supabase
+        .from('livestream_replay_recovery')
+        .select('stream_id')
+        .in('stream_id', sourceStreamIds)
+        .is('recovered_at', null)
+        .limit(1);
+
+      if (activeJobsError) {
+        console.warn('[VIDEOS] Failed to check active recovery jobs:', videoId, activeJobsError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      if ((activeJobs || []).length > 0) {
+        return res.status(409).json({
+          error: 'A replay recovery is in progress. Try again later.',
+          code: 'REPLAY_RECOVERY_IN_PROGRESS',
+        });
+      }
     }
 
     // Every row sharing the MP4 URL. Paged for the same 1000-row silent-cap
@@ -2896,7 +3120,168 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
   if (isReplayMirror) {
     cleanup = { ok: true, objectsCleaned: 0, storageFailed: [] };
 
-    for (const url of [row.video_url, ...eligibleThumbnails]) {
+    // Original recordings via recording_filename (normally the same object
+    // as video_url; distinct when a merge renamed the published object).
+    // EVERY distinct recording object is checked against ALL external
+    // references — even when its URL equals the main playback URL (the
+    // video_url checks above never cover recording_filename or recovery
+    // job references). Exclusions are pushed INTO the queries so a hit is
+    // always external, letting each check use limit(1). Any external
+    // reference keeps the object (fail closed).
+    const deleteUrlSet = new Set([row.video_url, ...eligibleThumbnails]);
+    const canonicalIdsForExclusion = canonicalRows.map(c => c.id);
+    const videoDeleteIdsForExclusion = [videoId, ...siblingMirrorIds];
+    // PostgREST rejects an empty in.() list — only filter when non-empty.
+    const canonicalExclusion = canonicalIdsForExclusion.length > 0
+      ? `(${canonicalIdsForExclusion.join(',')})`
+      : null;
+
+    // A recording whose URL is ALREADY queued for deletion (above all when
+    // it IS the main playback URL) can never be skipped silently: an
+    // external reference to it must abort the whole deletion fail-closed.
+    // Only SEPARATE recording objects may be kept via continue.
+    const keepSeparateOrFail = (target) => {
+      if (!deleteUrlSet.has(target.url)) return false;
+
+      res.status(409).json({
+        error: 'Replay recording is still referenced elsewhere; deletion blocked',
+        code: 'REPLAY_RECORDING_SHARED',
+      });
+
+      return true; // Response sent — caller must return immediately.
+    };
+
+    const recordingTargets = [];
+
+    for (const canonical of canonicalRows) {
+      if (!canonical.recording_filename) continue;
+
+      const recordingUrl = getPublicLivestreamsUrl(canonical.recording_filename);
+
+      if (recordingTargets.some(t => t.url === recordingUrl)) continue;
+
+      recordingTargets.push({
+        key: canonical.recording_filename,
+        url: recordingUrl,
+      });
+    }
+
+    for (const target of recordingTargets) {
+      // Other canonical livestreams rows referencing this recording — by
+      // published URL or by recording key. Separate eq queries: raw URLs
+      // inside or() filter strings risk PostgREST parsing ambiguity.
+      let liveUrlQuery = supabase
+        .from('livestreams')
+        .select('id')
+        .eq('video_url', target.url);
+
+      if (canonicalExclusion) {
+        liveUrlQuery = liveUrlQuery.not('id', 'in', canonicalExclusion);
+      }
+
+      const { data: liveUrlRefs, error: liveUrlRefsError } =
+        await liveUrlQuery.limit(1);
+
+      if (liveUrlRefsError) {
+        console.warn('[VIDEOS] Failed to check recording references:', videoId, liveUrlRefsError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      if ((liveUrlRefs || []).length > 0) {
+        if (keepSeparateOrFail(target)) return;
+        continue; // Shared separate recording — keep the object.
+      }
+
+      let liveKeyQuery = supabase
+        .from('livestreams')
+        .select('id')
+        .eq('recording_filename', target.key);
+
+      if (canonicalExclusion) {
+        liveKeyQuery = liveKeyQuery.not('id', 'in', canonicalExclusion);
+      }
+
+      const { data: liveKeyRefs, error: liveKeyRefsError } =
+        await liveKeyQuery.limit(1);
+
+      if (liveKeyRefsError) {
+        console.warn('[VIDEOS] Failed to check recording key references:', videoId, liveKeyRefsError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      if ((liveKeyRefs || []).length > 0) {
+        if (keepSeparateOrFail(target)) return;
+        continue; // Shared separate recording — keep the object.
+      }
+
+      // Other videos rows referencing this recording (as content or as
+      // original upload).
+      const { data: videoUrlRefs, error: videoUrlRefsError } = await supabase
+        .from('videos')
+        .select('id')
+        .eq('video_url', target.url)
+        .not('id', 'in', `(${videoDeleteIdsForExclusion.join(',')})`)
+        .limit(1);
+
+      if (videoUrlRefsError) {
+        console.warn('[VIDEOS] Failed to check recording video references:', videoId, videoUrlRefsError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      if ((videoUrlRefs || []).length > 0) {
+        if (keepSeparateOrFail(target)) return;
+        continue; // Shared separate recording — keep the object.
+      }
+
+      const { data: videoOrigRefs, error: videoOrigRefsError } = await supabase
+        .from('videos')
+        .select('id')
+        .eq('original_video_url', target.url)
+        .not('id', 'in', `(${videoDeleteIdsForExclusion.join(',')})`)
+        .limit(1);
+
+      if (videoOrigRefsError) {
+        console.warn('[VIDEOS] Failed to check recording original references:', videoId, videoOrigRefsError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      if ((videoOrigRefs || []).length > 0) {
+        if (keepSeparateOrFail(target)) return;
+        continue; // Shared separate recording — keep the object.
+      }
+
+      // Another stream's ACTIVE recovery job referencing this recording.
+      // (Historical jobs of THIS delete set are removed with the replay.)
+      let jobRefQuery = supabase
+        .from('livestream_replay_recovery')
+        .select('stream_id')
+        .eq('recording_filename', target.key)
+        .is('recovered_at', null);
+
+      if (sourceStreamIds.length > 0) {
+        jobRefQuery = jobRefQuery.not(
+          'stream_id',
+          'in',
+          `(${sourceStreamIds.join(',')})`
+        );
+      }
+
+      const { data: jobRefs, error: jobRefsError } = await jobRefQuery.limit(1);
+
+      if (jobRefsError) {
+        console.warn('[VIDEOS] Failed to check recording recovery references:', videoId, jobRefsError.message);
+        return res.status(500).json({ error: 'Failed to delete video' });
+      }
+
+      if ((jobRefs || []).length > 0) {
+        if (keepSeparateOrFail(target)) return;
+        continue; // Shared separate recording — keep the object.
+      }
+
+      deleteUrlSet.add(target.url);
+    }
+
+    for (const url of deleteUrlSet) {
       const objectCleanup = await cleanupVideoStorage({ video_url: url }, { allowLivestreamRecordingDelete: true, reason: 'authenticated-replay-delete' });
 
       cleanup.objectsCleaned += objectCleanup.objectsCleaned;
@@ -2949,13 +3334,14 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
   for (const canonical of canonicalRows) {
     try {
       await deleteReplayWatermarkedObjectStrict(canonical.id);
+      await deleteCorrectionCandidateStrict(canonical.id);
     } catch (error) {
       console.warn(
-        '[VIDEOS] Watermark object cleanup failed; metadata preserved:',
+        '[VIDEOS] Derived-file cleanup failed; metadata preserved:',
         canonical.id,
         error.message
       );
-      return res.status(500).json({ error: 'Failed to delete watermarked replay files' });
+      return res.status(500).json({ error: 'Failed to delete derived replay files' });
     }
   }
 
@@ -2972,10 +3358,38 @@ router.delete('/:videoId', requireAuth, async (req, res) => {
     }
   }
 
-  // Final cleanup: catch a watermark upload that completed
-  // while canonical replay deletion was in progress.
+  // Historical (recovered) recovery jobs share the replay's lifecycle and
+  // are deleted with it. ACTIVE jobs were rejected above (fail-closed 409),
+  // so this cannot touch an in-flight recovery.
+  for (const sourceStreamId of sourceStreamIds) {
+    const { error: jobDeleteError } = await supabase
+      .from('livestream_replay_recovery')
+      .delete()
+      .eq('stream_id', sourceStreamId)
+      .not('recovered_at', 'is', null);
+
+    if (jobDeleteError) {
+      console.warn('[VIDEOS] Failed to delete historical recovery jobs:', sourceStreamId, jobDeleteError.message);
+      return res.status(500).json({ error: 'Failed to delete video' });
+    }
+  }
+
+  // Final cleanup: catch a derived upload that completed
+  // while canonical replay deletion was in progress. Candidate removal is
+  // warn-only here: metadata is already gone, and the durable cleanup
+  // worker (plus the orphan sweep) is the backstop.
   for (const canonical of canonicalRows) {
     await deleteReplayWatermarkedObjectStrict(canonical.id);
+
+    try {
+      await deleteCorrectionCandidateStrict(canonical.id);
+    } catch (candidateError) {
+      console.warn(
+        '[VIDEOS] Correction candidate final cleanup failed (cleanup worker will retry):',
+        canonical.id,
+        candidateError?.message || candidateError
+      );
+    }
   }
 
   for (const siblingId of siblingMirrorIds) {
@@ -3065,7 +3479,7 @@ async function cleanupAccountLivestreamReplays(userId) {
   for (let from = 0; ; from += 1000) {
     const { data, error: replayError } = await supabase
       .from('livestreams')
-      .select('id, user_id, video_url, thumbnail_url, recording_filename')
+      .select('id, user_id, video_url, thumbnail_url, recording_filename, source_live_stream_id, correction_status, correction_claimed_at')
       .eq('user_id', userId)
       .range(from, from + 999);
 
@@ -3086,6 +3500,39 @@ async function cleanupAccountLivestreamReplays(userId) {
       )
     ) {
       const error = new Error('Livestream replay is still processing');
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  // Fail closed on any FRESH correction claim (60-minute lease, matching
+  // livekit.js CORRECTION_STALE_MS). Stale claims are reclaimable by the
+  // correction sweep and do NOT block account deletion.
+  if (replays.some(hasFreshCorrectionClaim)) {
+    const error = new Error('A replay correction is in progress');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  // Fail closed on any ACTIVE recovery job for these replays: the recovery
+  // worker can hold the job in memory and recreate rows after deletion.
+  // Historical (recovered) jobs are deleted with the replays below.
+  const replaySourceIds = [
+    ...new Set(replays.map(r => r.source_live_stream_id).filter(Boolean)),
+  ];
+
+  if (replaySourceIds.length > 0) {
+    const { data: activeJobs, error: activeJobsError } = await supabase
+      .from('livestream_replay_recovery')
+      .select('stream_id')
+      .in('stream_id', replaySourceIds)
+      .is('recovered_at', null)
+      .limit(1);
+
+    if (activeJobsError) throw activeJobsError;
+
+    if ((activeJobs || []).length > 0) {
+      const error = new Error('A replay recovery is in progress');
       error.statusCode = 409;
       throw error;
     }
@@ -3123,6 +3570,14 @@ async function cleanupAccountLivestreamReplays(userId) {
     if (row.thumbnail_url) urls.add(row.thumbnail_url);
   }
 
+  // Original recordings via recording_filename (normally the same object
+  // as video_url; distinct when a merge renamed the published object).
+  for (const replay of replays) {
+    if (replay.recording_filename) {
+      urls.add(getPublicLivestreamsUrl(replay.recording_filename));
+    }
+  }
+
   // Shared-reference guard: never delete media still referenced by ANOTHER
   // account's rows. This user's own rows are all deleted by this endpoint
   // (mirrors/orphans here, normal videos in the loop below), so references
@@ -3152,6 +3607,15 @@ async function cleanupAccountLivestreamReplays(userId) {
           .from('videos')
           .select('id')
           .neq('user_id', userId)
+          .in('original_video_url', batch)
+          .limit(1),
+      },
+      {
+        label: 'another account',
+        promise: supabase
+          .from('videos')
+          .select('id')
+          .neq('user_id', userId)
           .in('thumbnail_url', batch)
           .limit(1),
       },
@@ -3171,6 +3635,41 @@ async function cleanupAccountLivestreamReplays(userId) {
           .select('id')
           .neq('user_id', userId)
           .in('thumbnail_url', batch)
+          .limit(1),
+      }
+    );
+  }
+
+  // Fifth check: the recording KEY itself. Another account's canonical
+  // row pointing at the same recording_filename must protect the object
+  // even when its video_url differs (e.g. after a merge rename).
+  const recordingKeys = [
+    ...new Set(replays.map(r => r.recording_filename).filter(Boolean)),
+  ];
+
+  for (let i = 0; i < recordingKeys.length; i += URL_REFERENCE_BATCH) {
+    const batch = recordingKeys.slice(i, i + URL_REFERENCE_BATCH);
+
+    foreignChecks.push(
+      {
+        label: 'another recording',
+        promise: supabase
+          .from('livestreams')
+          .select('id')
+          .neq('user_id', userId)
+          .in('recording_filename', batch)
+          .limit(1),
+      },
+      {
+        // Another account's ACTIVE recovery job referencing one of these
+        // recordings: deleting the object would break that recovery.
+        label: 'another recording',
+        promise: supabase
+          .from('livestream_replay_recovery')
+          .select('stream_id')
+          .neq('user_id', userId)
+          .in('recording_filename', batch)
+          .is('recovered_at', null)
           .limit(1),
       }
     );
@@ -3232,13 +3731,14 @@ async function cleanupAccountLivestreamReplays(userId) {
 
     try {
       await deleteReplayWatermarkedObjectStrict(replay.id);
+      await deleteCorrectionCandidateStrict(replay.id);
     } catch (error) {
       console.warn(
-        '[VIDEOS] Watermark object cleanup failed; replay metadata preserved:',
+        '[VIDEOS] Derived-file cleanup failed; replay metadata preserved:',
         replay.id,
         error.message
       );
-      throw new Error('Livestream replay watermark cleanup failed');
+      throw new Error('Livestream replay derived-file cleanup failed');
     }
 
     const { error: canonicalDeleteError } = await supabase
@@ -3251,6 +3751,31 @@ async function cleanupAccountLivestreamReplays(userId) {
 
     // Final strict cleanup after canonical replay deletion.
     await deleteReplayWatermarkedObjectStrict(replay.id);
+
+    // Candidate removal is warn-only here: metadata is already gone, and
+    // the durable cleanup worker (plus the orphan sweep) is the backstop.
+    try {
+      await deleteCorrectionCandidateStrict(replay.id);
+    } catch (candidateError) {
+      console.warn(
+        '[VIDEOS] Correction candidate final cleanup failed (cleanup worker will retry):',
+        replay.id,
+        candidateError?.message || candidateError
+      );
+    }
+  }
+
+  // Historical (recovered) recovery jobs share their replays' lifecycle.
+  // ACTIVE jobs were rejected above (fail-closed 409). Chunked: PostgREST
+  // in-lists must stay small.
+  for (let i = 0; i < replaySourceIds.length; i += 200) {
+    const { error: jobDeleteError } = await supabase
+      .from('livestream_replay_recovery')
+      .delete()
+      .in('stream_id', replaySourceIds.slice(i, i + 200))
+      .not('recovered_at', 'is', null);
+
+    if (jobDeleteError) throw jobDeleteError;
   }
 
   return replays.length;

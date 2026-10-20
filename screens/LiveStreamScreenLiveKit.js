@@ -14,6 +14,8 @@ import {
   Switch,
   Image,
   InteractionManager,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import ModernDialog from './ModernDialog';
 import { Room, RoomEvent, Track } from 'livekit-client';
@@ -34,9 +36,29 @@ import { useUser } from '../context/UserContext';
 import { filterMessage } from '../utils/moderation';
 import { fetchWithTimeout } from '../utils/apiClient';
 import { useKeepAwake } from 'expo-keep-awake';
+import * as Clipboard from 'expo-clipboard';
 
 const { width, height } = Dimensions.get('window');
 const SERVER_URL = process.env.EXPO_PUBLIC_SERVER_URL;
+
+// TEMPORARY recording/timer diagnostics. Remove after verification.
+let syncDiagnosticEntries = [];
+
+function logRecordingSync(stage, data = {}) {
+  const timeMs = Date.now();
+  if (stage === 'EGRESS_START_SEND') syncDiagnosticEntries = [];
+  syncDiagnosticEntries.push({
+    stage, timeMs, iso: new Date(timeMs).toISOString(), ...data
+  });
+  if (syncDiagnosticEntries.length > 100) syncDiagnosticEntries.shift();
+  console.warn('[BUSHRANN_SYNC]', JSON.stringify({
+    stage,
+    timeMs,
+    iso: new Date(timeMs).toISOString(),
+    ...data
+  }));
+}
+
 
 // Returns the current Supabase access token for authenticated Railway
 // requests, refreshing first if it is about to expire. Resolves to null
@@ -99,6 +121,11 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   // can await it before deciding whether an egress exists that must be
   // stopped before the live_streams row may be deleted.
   const egressStartPromiseRef = useRef(null);
+  // An HTTP timeout does not prove that Railway did not start egress.
+  // Keep the ownership row until the backend can reconcile an uncertain start.
+  const uncertainEgressStartRef = useRef(false);
+  // Follower notifications should be sent only after recording activation.
+  const streamActiveSentRef = useRef(false);
   // True while a post-reconnect recording-recovery request is in flight, so
   // concurrent Reconnected events can never start duplicate recordings.
   const egressRecoveryInProgressRef = useRef(false);
@@ -107,6 +134,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   const roomNameRef = useRef('');
   const [isEnding, setIsEnding] = useState(false);
   const [streamAnalytics, setStreamAnalytics] = useState(null);
+  const [showSyncReport, setShowSyncReport] = useState(false);
+  const [syncCopied, setSyncCopied] = useState(false);
   const peakViewersRef = useRef(0);
   const [showViewerList, setShowViewerList] = useState(false);
   const [viewerListMode, setViewerListMode] = useState('recent');
@@ -143,6 +172,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   // never clear the guard while a NEW stream's tick owns it.
   const pingInFlightRef = useRef(null);
   const durationIntervalRef = useRef(null);
+  const streamTimerStartedAtRef = useRef(null);
   const backgroundTimeRef = useRef(null);
   const appStateSubscription = useRef(null);
   const cameraRetryTimeoutRef = useRef(null);
@@ -322,7 +352,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   // ─── BACK HANDLER ────────────────────────────────────────────────────────────
   useEffect(() => {
     const backAction = () => {
-      if (!isConnected) {
+      // While recording is still preparing, Back cancels startup instead
+      // of opening an End modal hidden behind the loading screen.
+      if (!isConnected || isConnecting) {
         navigation.goBack();
         return true;
       }
@@ -331,7 +363,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
-  }, [isConnected]);
+  }, [isConnected, isConnecting]);
 
   // ─── CLEANUP ─────────────────────────────────────────────────────────────────
   async function cleanup() {
@@ -351,6 +383,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
+      streamTimerStartedAtRef.current = null;
     }
     if (cameraRetryTimeoutRef.current) {
       clearTimeout(cameraRetryTimeoutRef.current);
@@ -394,7 +427,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       // Await the egress stop before any row deletion: /egress/stop verifies
       // stream ownership via the live_streams row, so the row must still
       // exist while the stop request runs.
-      abnormalEgressStopped = await stopEgressAbnormally();
+      abnormalEgressStopped = uncertainEgressStartRef.current
+        ? false
+        : await stopEgressAbnormally();
     }
 
     if (roomRef.current) {
@@ -444,6 +479,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
+      streamTimerStartedAtRef.current = null;
     }
     if (pingInterval.current) {
       clearInterval(pingInterval.current);
@@ -474,6 +510,20 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       liveFeedChannelRef.current = null;
     }
 
+    // Startup may be in flight when rollback is requested. Do not delete
+    // the row while an egress may exist: /egress/stop needs the row for auth.
+    const pendingEgressStart = egressStartPromiseRef.current;
+    if (pendingEgressStart) {
+      try {
+        await pendingEgressStart;
+      } catch (e) {
+        console.warn('[EGRESS] Rollback start settle error:', e);
+      }
+    }
+    const recordingStopped = uncertainEgressStartRef.current
+      ? false
+      : await stopEgressAbnormally();
+
     if (room) {
       try {
         intentionalDisconnectRooms.add(room);
@@ -489,7 +539,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       roomRef.current = null;
     }
 
-    if (streamRowId) {
+    if (!recordingStopped) {
+      console.warn('[LIVEKIT] Rollback: preserving stream row; recording stop unconfirmed');
+    } else if (streamRowId) {
       try {
         await supabase.from('live_streams').delete().eq('id', streamRowId);
         console.log('[LIVEKIT] Rollback: removed partially-created stream row');
@@ -683,6 +735,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
     isStartingRef.current = true;
     const attemptId = ++startAttemptIdRef.current;
+    streamActiveSentRef.current = false;
     // True if the component unmounted, or a newer start attempt has begun
     // (e.g. user left the screen mid-await, or double-tapped Start).
     const isStale = () => !isMountedRef.current || startAttemptIdRef.current !== attemptId;
@@ -692,6 +745,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
     let createdStreamId = null;
     let room = null;
+    let streamOwnershipRegistered = false;
 
     try {
       // Load the profile first — defense-in-depth scholar check before any
@@ -722,12 +776,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
       setUsername(profile?.username ?? 'Scholar');
 
-      await supabase
-        .from('live_streams')
-        .delete()
-        .eq('user_id', currentUser.id)
-        .eq('is_live', true);
-
+      // Never delete another device's ongoing livestream to start this one.
+      // Let the database reject a conflicting stream; leave the old one intact.
       if (isStale()) return;
 
       // Create the stream record BEFORE requesting the host token so the
@@ -740,7 +790,8 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           title,
           channel_name: roomName,
           max_questions: maxQuestions,
-          is_live: true,
+          is_live: false,
+          stream_status: 'starting',
           thumbnail_url: profile?.avatar_url || null,
           allow_questions: allowQuestions,
           last_ping: new Date().toISOString(),
@@ -749,6 +800,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         .single();
 
       if (streamError) {
+        if (streamError.code === '23505') {
+          throw new Error('Another livestream may already be active for this account. It was not interrupted.');
+        }
         throw new Error('Could not create stream record');
       }
 
@@ -795,6 +849,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       streamEndedRef.current = false;
       setStreamId(createdStreamId);
       currentStreamIdRef.current = createdStreamId;
+      streamOwnershipRegistered = true;
 
       room = new Room({
         adaptiveStream: true,
@@ -842,6 +897,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           if (durationIntervalRef.current) {
             clearInterval(durationIntervalRef.current);
             durationIntervalRef.current = null;
+            streamTimerStartedAtRef.current = null;
           }
           if (cameraRetryTimeoutRef.current) {
             clearTimeout(cameraRetryTimeoutRef.current);
@@ -885,7 +941,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           // the stop request runs. If the stop fails, keep both egressIdRef
           // and the row (streamEndedRef stays false) so the unmount cleanup
           // pass can retry the stop before any deletion.
-          const egressStopped = await stopEgressAbnormally();
+          const egressStopped = uncertainEgressStartRef.current
+            ? false
+            : await stopEgressAbnormally();
 
           if (!egressStopped) {
             console.warn('[LIVEKIT] Egress stop failed; preserving live_streams row');
@@ -955,10 +1013,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           console.log(`[LIVEKIT] Enabling camera (attempt ${attempt})...`);
           await room.localParticipant.enableCameraAndMicrophone();
           console.log('[LIVEKIT] Camera enabled successfully');
-          // Only hide loading after camera is ready
-          if (isMountedRef.current && !isStale()) {
-            setIsConnecting(false);
-          }
+          // Keep loading until egress is ACTIVE and activation succeeds.
         } catch (e) {
           console.error(`[LIVEKIT] Camera error (attempt ${attempt}):`, e.message);
           if (attempt < 4 && isMountedRef.current && isConnectedRef.current && !isStale()) {
@@ -1012,16 +1067,6 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         return;
       }
 
-      // Restore this stream's persisted mute/block sets before any chat
-      // subscription can deliver messages, so the ref filters in
-      // subscribeToChat agree with the database after a reconnect/remount.
-      await hydrateModeration(createdStreamId);
-
-      durationIntervalRef.current = setInterval(() => {
-        streamDurationRef.current += 1;
-        setStreamDuration(streamDurationRef.current);
-      }, 1000);
-
       // Single 5s heartbeat for this stream attempt (shared helper; also
       // restarts the heartbeat after a reconnect — see Reconnected handler).
       startHeartbeatInterval();
@@ -1037,6 +1082,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       let startedEgressId = null;
       let startedEgressFilename = null;
       let egressStartFailed = false;
+      uncertainEgressStartRef.current = false;
 
       const egressStartPromise = (async () => {
         try {
@@ -1048,6 +1094,10 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
             return;
           }
 
+          // A failed/timeout response can leave a remotely created egress.
+          // Clear this only after receiving a valid egressId.
+          uncertainEgressStartRef.current = true;
+          logRecordingSync('EGRESS_START_SEND');
           const egressRes = await fetchWithTimeout(`${SERVER_URL}/api/livekit/egress/start`, {
             method: 'POST',
             headers: {
@@ -1057,6 +1107,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
             body: JSON.stringify({ roomName }),
           });
 
+          logRecordingSync('EGRESS_START_HTTP', { status: egressRes.status });
           if (egressRes.ok) {
             const egressData = await egressRes.json();
 
@@ -1070,6 +1121,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
             // Assign egressIdRef as soon as the egress exists so an
             // in-flight cleanup that awaited this promise can see and stop it.
             if (startedEgressId) {
+              uncertainEgressStartRef.current = false;
               egressIdRef.current = startedEgressId;
               egressFilenameRef.current = startedEgressFilename;
             }
@@ -1084,6 +1136,10 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       })();
 
       egressStartPromiseRef.current = egressStartPromise;
+
+      // Hydrate moderation while Railway creates the recorder; this avoids
+      // delaying the recording request without changing message filters.
+      await hydrateModeration(createdStreamId);
 
       try {
         await egressStartPromise;
@@ -1109,17 +1165,177 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         return;
       }
 
-      if (startedEgressId) {
-        setEgressId(startedEgressId);
-        console.log('[EGRESS] Recording started:', startedEgressId);
-      } else if (egressStartFailed && isMountedRef.current && !isStale()) {
-        setDialog({
-          visible: true,
-          title: 'Recording unavailable',
-          message: 'Your livestream is live, but recording could not start. Viewers can still watch, but a replay may not be saved.',
-          type: 'warning',
-          buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
-        });
+      if (!startedEgressId) {
+        throw new Error(egressStartFailed
+          ? 'Recording could not start. Livestream was not published.'
+          : 'Recording start was not confirmed. Livestream was not published.');
+      }
+
+      setEgressId(startedEgressId);
+      const readinessToken = await getAccessToken();
+      if (!readinessToken) {
+        throw new Error('Session expired while preparing recording');
+      }
+
+      // Do not expose the stream or start the timer during LiveKit STARTING.
+      // A bounded readiness loop prevents an endless "Connecting" state.
+      let recordingReady = false;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (isStale() || streamEndedRef.current || endStreamInProgressRef.current) {
+          console.log('[EGRESS] Startup cancelled during readiness check');
+          return; // Normal End/unmount/disconnect owns stop and cleanup.
+        }
+
+        try {
+          logRecordingSync('READINESS_SEND', { poll: attempt + 1 });
+          const readinessRes = await fetchWithTimeout(
+            `${SERVER_URL}/api/livekit/egress/readiness`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${readinessToken}`,
+              },
+              body: JSON.stringify({ roomName, egressId: startedEgressId }),
+            }
+          );
+          logRecordingSync('READINESS_HTTP', { poll: attempt + 1, status: readinessRes.status });
+          if (readinessRes.ok) {
+            const state = await readinessRes.json();
+            logRecordingSync('READINESS_STATE', { poll: attempt + 1, state: state?.state ?? 'unknown' });
+            if (state?.state === 'active') {
+              recordingReady = true;
+              break;
+            }
+          } else if (readinessRes.status === 409 ||
+                     readinessRes.status === 401 || readinessRes.status === 403) {
+            throw new Error(`Recording readiness rejected (${readinessRes.status})`);
+          }
+        } catch (error) {
+          if (String(error?.message).startsWith('Recording readiness rejected')) {
+            throw error;
+          }
+          console.warn('[EGRESS] Readiness check failed:', error?.message);
+        }
+        if (attempt < 19) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      if (isStale() || streamEndedRef.current || endStreamInProgressRef.current) {
+        return; // Never activate a stream after cancellation.
+      }
+      if (!recordingReady) {
+        throw new Error('Recording did not become ACTIVE. Livestream was not published.');
+      }
+
+      // This Railway endpoint independently rechecks ownership, camera and
+      // ACTIVE egress before atomically changing starting -> live.
+      // Retry only temporary HTTP 503 activation failures.
+      // The Railway activation endpoint is idempotent for an already-live stream.
+      let activationConfirmed = false;
+
+      for (let activationAttempt = 0; activationAttempt < 5; activationAttempt += 1) {
+        if (isStale() || streamEndedRef.current || endStreamInProgressRef.current) {
+          return;
+        }
+
+        logRecordingSync('ACTIVATE_SEND', { attempt: activationAttempt + 1 });
+        const activationRes = await fetchWithTimeout(
+          `${SERVER_URL}/api/livekit/egress/activate`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${readinessToken}`,
+            },
+            body: JSON.stringify({ roomName, egressId: startedEgressId }),
+          }
+        );
+
+        logRecordingSync('ACTIVATE_HTTP', { attempt: activationAttempt + 1, status: activationRes.status });
+        if (activationRes.ok) {
+          const activationData = await activationRes.json();
+          if (activationData?.activated !== true) {
+            throw new Error('Livestream activation was not confirmed');
+          }
+          activationConfirmed = true;
+          break;
+        }
+
+        if (activationRes.status !== 503 || activationAttempt === 4) {
+          throw new Error(`Livestream activation failed (${activationRes.status})`);
+        }
+
+        console.warn('[EGRESS] Activation temporarily unavailable; retrying');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      if (!activationConfirmed) {
+        throw new Error('Livestream activation was not confirmed');
+      }
+      if (isStale() || streamEndedRef.current || endStreamInProgressRef.current) {
+        return; // End/cleanup already owns this stream.
+      }
+
+      // Measure real elapsed time, not the number of JS interval ticks.
+      // Start the visible timer only after activation, not before recording.
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+      }
+
+      streamTimerStartedAtRef.current = Date.now();
+      logRecordingSync('TIMER_START', { timerOriginMs: streamTimerStartedAtRef.current });
+      streamDurationRef.current = 0;
+      setStreamDuration(0);
+
+      durationIntervalRef.current = setInterval(() => {
+        const startedAt = streamTimerStartedAtRef.current;
+        if (startedAt == null) return;
+
+        const elapsed = Math.max(
+          0,
+          Math.floor((Date.now() - startedAt) / 1000)
+        );
+
+        streamDurationRef.current = elapsed;
+        setStreamDuration(elapsed);
+      }, 1000);
+
+      setIsConnecting(false);
+      console.log('[EGRESS] Recording ACTIVE; livestream activated:', startedEgressId);
+
+      // Notify followers only once the recording and host camera are ready.
+      // Failure to notify must never stop an otherwise healthy livestream.
+      if (!streamActiveSentRef.current) {
+        streamActiveSentRef.current = true;
+        void (async () => {
+          try {
+            const notificationToken = await getAccessToken();
+            if (!notificationToken) return;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              if (isStale() || streamEndedRef.current || endStreamInProgressRef.current) return;
+              const response = await fetchWithTimeout(
+                `${SERVER_URL}/api/livekit/stream-active`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${notificationToken}`,
+                  },
+                  body: JSON.stringify({ roomName }),
+                }
+              );
+              if (response.status === 503 && attempt < 2) {
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                continue;
+              }
+              if (!response.ok && response.status !== 409) {
+                console.warn('[STREAM-ACTIVE] Notify failed:', response.status);
+              }
+              return;
+            }
+          } catch (error) {
+            console.warn('[STREAM-ACTIVE] Notify failed:', error?.message);
+          }
+        })();
       }
 
       subscribeToChat(createdStreamId);
@@ -1127,6 +1343,13 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
       subscribeToLiveFeed(createdStreamId);
 
     } catch (err) {
+      if (isStale() || (streamOwnershipRegistered && streamEndedRef.current)) {
+        if (!streamOwnershipRegistered && createdStreamId) {
+          await rollbackFailedStart(createdStreamId, room);
+        }
+        console.log('[LIVEKIT] Startup cancelled; cleanup handled elsewhere');
+        return;
+      }
       console.error('[LIVEKIT] Start stream error:', err);
       await rollbackFailedStart(createdStreamId, room);
       if (isMountedRef.current && startAttemptIdRef.current === attemptId) {
@@ -1247,6 +1470,16 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     if (endStreamInProgressRef.current) return;
     endStreamInProgressRef.current = true;
 
+    // Freeze analytics duration at the moment End was requested.
+    // Keep the live timer running if egress stop fails and can be retried.
+    const endRequestedAt = Date.now();
+    logRecordingSync('END_TAP', { displayedSeconds: streamDurationRef.current, timerOriginMs: streamTimerStartedAtRef.current });
+    const finalStreamDuration = streamTimerStartedAtRef.current != null
+      ? Math.max(0, Math.floor(
+          (endRequestedAt - streamTimerStartedAtRef.current) / 1000
+        ))
+      : streamDurationRef.current;
+
     console.log('[END] Starting cleanup - deleting stream to save storage');
     console.log('[END] currentStreamIdRef.current =', currentStreamIdRef.current);
     console.log('[END] Step 1 - Setting isEnding true');
@@ -1285,6 +1518,22 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     }
     const normalEgressId = egressIdRef.current;
 
+    // A timed-out start can still have created a remote egress. Never delete
+    // the ownership row without reconciling it first.
+    if (uncertainEgressStartRef.current) {
+      streamEndedRef.current = false;
+      setIsEnding(false);
+      endStreamInProgressRef.current = false;
+      setDialog({
+        visible: true,
+        title: 'Recording status uncertain',
+        message: 'Recording startup could not be confirmed. Please retry after the server checks the recording.',
+        type: 'warning',
+        buttons: [{ text: 'OK', onPress: () => setDialog(d => ({ ...d, visible: false })) }],
+      });
+      return;
+    }
+
     if (normalEgressId) {
       let egressStopped = false;
       if (egressStopInProgressRef.current) {
@@ -1311,6 +1560,11 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
               body: JSON.stringify({
                 egressId: normalEgressId,
                 title,
+                // REPLAY-SYNC: measured timer duration (seconds -> ms). A
+                // pure duration, immune to clock skew; the server derives
+                // the trim plan from it. Abnormal stops omit this field,
+                // so their replays stay uncorrected (fail-open).
+                clientElapsedMs: finalStreamDuration * 1000,
               }),
             });
             if (stopRes.ok) {
@@ -1372,7 +1626,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
 
     // Collect analytics BEFORE deleting stream
     try {
-      const streamStart = new Date(Date.now() - streamDurationRef.current * 1000).toISOString();
+      const streamStart = new Date(endRequestedAt - finalStreamDuration * 1000).toISOString();
 
       const withTimeout = (promise, ms) => Promise.race([
         promise,
@@ -1419,7 +1673,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           likes: likesRes.count || 0,
           donations: totalDonations,
           newFollowers: followsRes.count || 0,
-          duration: streamDurationRef.current,
+          duration: finalStreamDuration,
         });
       }
     } catch (analyticsError) {
@@ -1436,6 +1690,7 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
+      streamTimerStartedAtRef.current = null;
     }
 
     // Remove realtime channels
@@ -2182,8 +2437,11 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
           color={COLORS.gold}
         />
         <Text style={styles.loadingText}>
-          Starting your livestream...
+          Preparing recording before going live...
         </Text>
+        <AnimatedButton style={styles.cancelBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.cancelBtnText}>Cancel</Text>
+        </AnimatedButton>
       </View>
     );
   }
@@ -2236,6 +2494,9 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
   }
 
   if (streamAnalytics) {
+    const syncReport = syncDiagnosticEntries.length
+      ? syncDiagnosticEntries.map(entry => JSON.stringify(entry)).join('\n')
+      : 'No timing events captured.';
     const formatDuration = seconds => {
       const hrs = Math.floor(seconds / 3600);
       const mins = Math.floor(
@@ -2255,6 +2516,35 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
         <SystemBars style="light" />
 
         <View style={styles.preStreamContainer}>
+          <Modal visible={showSyncReport} transparent animationType="fade"
+            onRequestClose={() => setShowSyncReport(false)}>
+            <View style={{flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', padding: 18}}>
+              <View style={{backgroundColor: '#112238', padding: 16, borderRadius: 12, maxHeight: '85%'}}>
+                <Text style={{color: '#fff', fontWeight: '700', fontSize: 18, marginBottom: 12}}>
+                  Timing Diagnostics
+                </Text>
+                <ScrollView style={{maxHeight: 340}}>
+                  <Text selectable style={{color: '#fff', fontSize: 11}}>{syncReport}</Text>
+                </ScrollView>
+                <AnimatedButton style={styles.actionButton}
+                  onPress={async () => {
+                    try {
+                      await Clipboard.setStringAsync(syncReport);
+                      setSyncCopied(true);
+                    } catch (e) {
+                      console.warn('[BUSHRANN_SYNC] Copy failed', e?.message);
+                    }
+                  }}>
+                  <Text style={styles.actionButtonText}>Copy Report</Text>
+                </AnimatedButton>
+                {syncCopied && <Text style={{color: '#fff'}}>Copied. Paste it into ChatGPT.</Text>}
+                <AnimatedButton style={styles.cancelBtn} onPress={() => setShowSyncReport(false)}>
+                  <Text style={styles.cancelBtnText}>Close</Text>
+                </AnimatedButton>
+              </View>
+            </View>
+          </Modal>
+
           <Text style={styles.preStreamTitle}>
             Stream Ended
           </Text>
@@ -2348,6 +2638,11 @@ export default function LiveStreamScreenLiveKit({ route, navigation }) {
               </Text>
             </View>
           </View>
+
+          <AnimatedButton style={styles.actionButton}
+            onPress={() => { setSyncCopied(false); setShowSyncReport(true); }}>
+            <Text style={styles.actionButtonText}>View Timing Diagnostics</Text>
+          </AnimatedButton>
 
           <AnimatedButton
             style={styles.actionButton}

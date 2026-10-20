@@ -63,7 +63,7 @@ async function requireAuth(req, res, next) {
 async function findStreamByRoom(roomName) {
   const { data: rows, error } = await supabase
     .from('live_streams')
-    .select('id, user_id, title, thumbnail_url, is_live, stream_notified_at, egress_started_at, public_activated_at')
+    .select('id, user_id, title, thumbnail_url, is_live, stream_notified_at, egress_started_at, public_activated_at, egress_media_started_at')
     .eq('channel_name', roomName)
     .order('created_at', { ascending: false })
     .limit(1);
@@ -155,6 +155,847 @@ function egressFilenameOf(egressInfo) {
     )?.filename ||
     requestedFilename
   );
+}
+
+// ─── REPLAY-SYNC: SHADOW-MODE REPLAY CORRECTION ──────────────────
+// The recording clock starts at LiveKit egress creation; the host timer
+// clock starts only after /egress/activate resolves on the client. The
+// replay therefore leads the timer by a measured per-stream head and runs
+// past it by a stop tail. This block measures that head/tail per stream
+// (never a fixed offset), produces a corrected CANDIDATE MP4 under a
+// deterministic key, verifies it, and records it in
+// livestreams.corrected_video_url with correction_status 'candidate'.
+//
+// SHADOW MODE IS FORCED: this code NEVER re-points livestreams.video_url
+// or videos.video_url, NEVER deletes or overwrites the original
+// recording, and contains no automatic promotion path.
+
+const REPLAY_TRIM_GUARD_PRE_MS = 1000;
+const REPLAY_TRIM_GUARD_POST_MS = 500;
+const REPLAY_TRIM_MAX_HEAD_MS = 30000;
+// A claim is stale only after 60 minutes: comfortably above the worst-case
+// job budget (capped download + silencedetect 2 min + up to two 20-minute
+// ffmpeg passes + probes + upload + margin). Ownership is additionally
+// RENEWED at every gate (assertCorrectionOwned refreshes claimed_at), so a
+// live worker never goes stale mid-job.
+const CORRECTION_STALE_MS = 60 * 60 * 1000;
+const CORRECTION_MAX_ATTEMPTS = 3;
+const CORRECTION_JOB_TIMEOUT_MS = 20 * 60 * 1000;
+// Hard total deadline for the pre-upload phase of one correction job; a
+// job exceeding it aborts BEFORE upload. Worst case then completes at
+// deadline + upload timeout = 55 minutes, strictly inside the 60-minute
+// stale window above, so a still-running worker can never be reclaimed.
+const CORRECTION_JOB_DEADLINE_MS = 45 * 60 * 1000;
+// Bounded transfer windows: without these, a slow download or upload
+// could carry a job past the deadline check and into the stale window.
+const CORRECTION_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+const CORRECTION_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+// Shadow correction never blocks replay publication or the recovery
+// sweep: jobs run detached with bounded in-process concurrency (the
+// row-lock RPC keeps cross-replica concurrency safe).
+const CORRECTION_MAX_CONCURRENT = 1;
+const CORRECTION_MAX_SOURCE_BYTES =
+  Number(process.env.CORRECTION_MAX_SOURCE_BYTES) ||
+  2 * 1024 * 1024 * 1024;
+const CORRECTION_WORKER =
+  `railway-${process.env.RAILWAY_REPLICA_ID || 'local'}-${process.pid}`;
+
+// Measured per-stream trim plan. egress_media_started_at (MP4 t=0 anchor)
+// and public_activated_at (timer t=0) are both written on Railway's clock,
+// and clientElapsedMs is a pure client-side duration, so no clock skew
+// enters the math. Returns { headMs, endMs } in MP4 time, or null when
+// the data is missing or implausible (correction then stays idle).
+function computeReplayTrim(streamRow, clientElapsedMs) {
+  if (
+    !streamRow ||
+    !streamRow.egress_media_started_at ||
+    !streamRow.public_activated_at ||
+    typeof clientElapsedMs !== 'number' ||
+    !Number.isFinite(clientElapsedMs) ||
+    clientElapsedMs <= 0
+  ) {
+    return null;
+  }
+
+  const mediaStartMs = Date.parse(streamRow.egress_media_started_at);
+  const activatedMs = Date.parse(streamRow.public_activated_at);
+
+  if (!Number.isFinite(mediaStartMs) || !Number.isFinite(activatedMs)) {
+    return null;
+  }
+
+  // Head: MP4 t=0 -> timer t=0, minus a pre-guard so speech uttered AT
+  // timer 00:00 is never cut. Capped to reject implausible plans.
+  const headMs = activatedMs - mediaStartMs - REPLAY_TRIM_GUARD_PRE_MS;
+
+  // End: MP4 t=0 -> timer end, plus a post-guard so the last syllable
+  // survives encode and polling jitter.
+  const endMs =
+    activatedMs +
+    clientElapsedMs +
+    REPLAY_TRIM_GUARD_POST_MS -
+    mediaStartMs;
+
+  if (
+    !Number.isFinite(headMs) ||
+    !Number.isFinite(endMs) ||
+    headMs <= 0 ||
+    headMs > REPLAY_TRIM_MAX_HEAD_MS ||
+    endMs <= headMs
+  ) {
+    return null;
+  }
+
+  return { headMs: Math.round(headMs), endMs: Math.round(endMs) };
+}
+
+// Deterministic candidate key: retries and duplicate workers converge on
+// ONE object (upsert), never one orphan per attempt.
+function correctionCandidateKey(replayId) {
+  return `recordings/trimmed_${replayId}.mp4`;
+}
+
+// Spawn with a hard timeout and tail-bounded output capture. Resolves
+// { code, timedOut, stdout, stderr }; rejects only on spawn failure.
+// On timeout the child is SIGKILLed and resolves with code null, so
+// callers treat it as failure without hanging the event loop.
+function runProcessBounded(cmd, args, timeoutMs) {
+  const { spawn } = require('child_process');
+
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      return reject(e);
+    }
+
+    const MAX_TAIL = 64 * 1024;
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill('SIGKILL');
+      } catch (killErr) {
+        // Already dead.
+      }
+      resolve({ code: null, timedOut: true, stdout, stderr });
+    }, timeoutMs);
+
+    child.stdout.on('data', chunk => {
+      stdout = (stdout + chunk.toString('utf8')).slice(-MAX_TAIL);
+    });
+    child.stderr.on('data', chunk => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-MAX_TAIL);
+    });
+    child.on('error', err => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, timedOut: false, stdout, stderr });
+    });
+  });
+}
+
+// ffprobe JSON: container duration plus per-stream codec/duration/start.
+async function probeMediaJson(filePath) {
+  const result = await runProcessBounded(
+    require('ffprobe-static').path,
+    [
+      '-v', 'error',
+      '-show_entries',
+      'format=duration:stream=codec_type,duration,start_time',
+      '-of', 'json',
+      filePath,
+    ],
+    60000
+  );
+  if (result.timedOut || result.code !== 0) return null;
+  try {
+    return JSON.parse(result.stdout);
+  } catch (parseErr) {
+    return null;
+  }
+}
+
+// True when the first video packet is a keyframe. A stream-copy cut can
+// land off-keyframe; such a candidate renders garbled until the next
+// keyframe and must fall back to re-encode.
+async function firstVideoPacketIsKeyframe(filePath) {
+  const result = await runProcessBounded(
+    require('ffprobe-static').path,
+    [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-read_intervals', '%+#1',
+      '-show_entries', 'packet=flags',
+      '-of', 'json',
+      filePath,
+    ],
+    60000
+  );
+  if (result.timedOut || result.code !== 0) return false;
+  try {
+    const parsed = JSON.parse(result.stdout);
+    const flags = parsed?.packets?.[0]?.flags || '';
+    return flags.startsWith('K');
+  } catch (parseErr) {
+    return false;
+  }
+}
+
+// SUPPORTING SIGNAL ONLY: first non-silence onset within windowSec.
+// Background noise can trigger early and quiet syllables can fall below
+// the threshold, so the result may ONLY bias the cut EARLIER (retaining
+// more head), never later. Returns ms, 0 when no silence region is
+// detected (sound from the very start), or null on detection failure.
+async function firstSoundMs(sourcePath, windowSec) {
+  const result = await runProcessBounded(
+    require('ffmpeg-static'),
+    [
+      '-v', 'info',
+      '-t', String(windowSec),
+      '-i', sourcePath,
+      '-af', 'silencedetect=noise=-40dB:d=0.15',
+      '-f', 'null', '-',
+    ],
+    120000
+  );
+  if (result.timedOut || result.code !== 0) return null;
+
+  const match = /silence_end:\s*([0-9.]+)/.exec(result.stderr);
+  if (!match) return 0;
+
+  const sec = Number(match[1]);
+  return Number.isFinite(sec) && sec >= 0
+    ? Math.round(sec * 1000)
+    : null;
+}
+
+// Verification battery. Fail-open contract: { ok: false } means the
+// caller keeps the ORIGINAL replay as the only playback source.
+// needsReencode permits exactly one re-encode retry.
+async function verifyCorrectionCandidate(
+  outPath,
+  sourceDurationSec,
+  targetDurationSec
+) {
+  const probed = await probeMediaJson(outPath);
+  if (!probed || !probed.format) {
+    return { ok: false, needsReencode: false };
+  }
+
+  const durationSec = Number(probed.format.duration);
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    return { ok: false, needsReencode: false };
+  }
+
+  // Container duration must land within tolerance of the planned target.
+  if (
+    Number.isFinite(targetDurationSec) &&
+    Math.abs(durationSec - targetDurationSec) > 1.5
+  ) {
+    return { ok: false, needsReencode: true };
+  }
+
+  // A "correction" that is not shorter than the source is no correction.
+  if (
+    Number.isFinite(sourceDurationSec) &&
+    durationSec >= sourceDurationSec - 0.2
+  ) {
+    return { ok: false, needsReencode: false };
+  }
+
+  const streams = Array.isArray(probed.streams) ? probed.streams : [];
+  const video = streams.find(s => s.codec_type === 'video');
+  const audio = streams.find(s => s.codec_type === 'audio');
+
+  // Both streams are mandatory: a muted "correction" of a talk replay is
+  // a defect; keep the original instead.
+  if (!video || !audio) {
+    return { ok: false, needsReencode: false };
+  }
+
+  const vDur = Number(video.duration);
+  const aDur = Number(audio.duration);
+  if (
+    Number.isFinite(vDur) &&
+    Number.isFinite(aDur) &&
+    Math.abs(vDur - aDur) > 0.25
+  ) {
+    return { ok: false, needsReencode: true };
+  }
+
+  const vStart = Number(video.start_time);
+  const aStart = Number(audio.start_time);
+  if (
+    (Number.isFinite(vStart) && Math.abs(vStart) > 0.1) ||
+    (Number.isFinite(aStart) && Math.abs(aStart) > 0.1)
+  ) {
+    return { ok: false, needsReencode: true };
+  }
+
+  if (!(await firstVideoPacketIsKeyframe(outPath))) {
+    return { ok: false, needsReencode: true };
+  }
+
+  return { ok: true, needsReencode: false };
+}
+
+// Produce the corrected candidate: measured head/end trim, stream-copy
+// first (fast, lossless), exactly one re-encode fallback when the
+// verification battery demands it. Returns true on success, false on any
+// failure -- the caller keeps the original replay (fail-open).
+async function trimReplayFile(
+  sourcePath,
+  headMs,
+  endMs,
+  outPath,
+  sourceDurationSec
+) {
+  const ffmpegPath = require('ffmpeg-static');
+
+  // Silence bias: EARLIER only. When sound is detected before the planned
+  // cut, the cut moves earlier (retaining more head). It NEVER moves
+  // later, so a false silence reading cannot cut speech.
+  const soundMs = await firstSoundMs(
+    sourcePath,
+    Math.ceil(headMs / 1000) + 10
+  );
+  let cutHeadMs = headMs;
+  if (
+    typeof soundMs === 'number' &&
+    soundMs > 0 &&
+    soundMs < cutHeadMs
+  ) {
+    cutHeadMs = Math.max(0, soundMs - REPLAY_TRIM_GUARD_PRE_MS);
+    console.log('[REPLAY-SYNC] Silence bias moved cut earlier:', {
+      plannedHeadMs: headMs,
+      biasedHeadMs: cutHeadMs,
+    });
+  }
+
+  const durationSec = (endMs - cutHeadMs) / 1000;
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return false;
+
+  const copyResult = await runProcessBounded(
+    ffmpegPath,
+    [
+      '-v', 'error',
+      '-ss', (cutHeadMs / 1000).toFixed(3),
+      '-i', sourcePath,
+      '-t', durationSec.toFixed(3),
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      '-y', outPath,
+    ],
+    CORRECTION_JOB_TIMEOUT_MS
+  );
+
+  if (!copyResult.timedOut && copyResult.code === 0) {
+    const verification = await verifyCorrectionCandidate(
+      outPath,
+      sourceDurationSec,
+      durationSec
+    );
+    if (verification.ok) return true;
+    if (!verification.needsReencode) return false;
+    console.warn(
+      '[REPLAY-SYNC] Copy-trim failed verification; one re-encode retry'
+    );
+  } else {
+    console.warn(
+      '[REPLAY-SYNC] Copy-trim ffmpeg failed:',
+      copyResult.stderr.slice(-500)
+    );
+  }
+
+  // Exactly one re-encode fallback.
+  const reencodeResult = await runProcessBounded(
+    ffmpegPath,
+    [
+      '-v', 'error',
+      '-ss', (cutHeadMs / 1000).toFixed(3),
+      '-i', sourcePath,
+      '-t', durationSec.toFixed(3),
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '96k',
+      '-movflags', '+faststart',
+      '-y', outPath,
+    ],
+    CORRECTION_JOB_TIMEOUT_MS
+  );
+
+  if (reencodeResult.timedOut || reencodeResult.code !== 0) {
+    console.warn(
+      '[REPLAY-SYNC] Re-encode ffmpeg failed:',
+      reencodeResult.stderr.slice(-500)
+    );
+    return false;
+  }
+
+  const verification = await verifyCorrectionCandidate(
+    outPath,
+    sourceDurationSec,
+    durationSec
+  );
+  return verification.ok;
+}
+
+// Atomically claim correction rights for one replay via the hardened RPC
+// (single UPDATE ... WHERE with attempts increment; row-lock atomic
+// across Railway replicas). Returns { claimed, token? }.
+async function claimReplayCorrection(recordId) {
+  const token = require('node:crypto').randomUUID();
+
+  const { data, error } = await supabase.rpc(
+    'claim_replay_correction',
+    {
+      p_replay_id: recordId,
+      p_token: token,
+      p_worker: CORRECTION_WORKER,
+      p_stale_ms: CORRECTION_STALE_MS,
+      p_max_attempts: CORRECTION_MAX_ATTEMPTS,
+    }
+  );
+
+  if (error) {
+    console.warn(
+      '[REPLAY-SYNC] Claim RPC failed:',
+      error.message || error
+    );
+    return { claimed: false };
+  }
+
+  // The RPC returns TABLE rows: one row = claim won, zero rows = already
+  // claimed, exhausted, or not eligible.
+  const claimedRow = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  return claimedRow ? { claimed: true, token } : { claimed: false };
+}
+
+// Ownership gate between dangerous steps. Two duties in one:
+//   1. RENEW the lease: token-conditional UPDATE of correction_claimed_at,
+//      so a live worker's claim never crosses the stale window mid-job.
+//   2. VERIFY ownership: zero rows updated means we no longer own the row.
+// Throws Error with .code:
+//   'ROW_GONE'       -- canonical replay deleted; caller removes exactly
+//                       its own deterministic candidate and stops.
+//   'LOST_OWNERSHIP' -- another worker reclaimed the lease; caller
+//                       touches nothing (the new owner may have uploaded
+//                       a fresh candidate under the same key).
+async function assertCorrectionOwned(recordId, token) {
+  const { data: renewed, error: renewError } = await supabase
+    .from('livestreams')
+    .update({ correction_claimed_at: new Date().toISOString() })
+    .eq('id', recordId)
+    .eq('correction_token', token)
+    .select('id');
+
+  if (renewError) throw renewError;
+
+  if (Array.isArray(renewed) && renewed.length > 0) {
+    return; // Ownership verified and lease renewed.
+  }
+
+  // Zero rows updated: distinguish a deleted replay from a lost lease so
+  // the caller cleans up ONLY what it may safely clean up.
+  const { data: row, error: lookupError } = await supabase
+    .from('livestreams')
+    .select('id')
+    .eq('id', recordId)
+    .maybeSingle();
+
+  if (lookupError) throw lookupError;
+
+  if (!row) {
+    const err = new Error('Replay row deleted during correction');
+    err.code = 'ROW_GONE';
+    throw err;
+  }
+
+  const err = new Error('Correction ownership lost');
+  err.code = 'LOST_OWNERSHIP';
+  throw err;
+}
+
+// Best-effort removal of OUR deterministic candidate object. Only called
+// on ROW_GONE (the replay id can never be re-owned afterwards).
+async function removeCorrectionCandidate(replayId) {
+  try {
+    const { error } = await supabase.storage
+      .from('livestreams')
+      .remove([correctionCandidateKey(replayId)]);
+    if (error) {
+      console.warn(
+        '[REPLAY-SYNC] Candidate removal failed:',
+        error.message || error
+      );
+    }
+  } catch (removeErr) {
+    console.warn(
+      '[REPLAY-SYNC] Candidate removal threw:',
+      removeErr?.message || removeErr
+    );
+  }
+}
+
+// S3 client for the correction upload path. Same env configuration as
+// videos.js getS3Client() — the watermark feature already requires these
+// variables in production, and @aws-sdk/client-s3 is an existing project
+// dependency (no new packages).
+function getCorrectionS3Client() {
+  const { S3Client } = require('@aws-sdk/client-s3');
+
+  const required = [
+    'SUPABASE_S3_KEY_ID',
+    'SUPABASE_S3_SECRET',
+    'SUPABASE_S3_ENDPOINT',
+  ];
+
+  const missing = required.filter(key => !process.env[key]);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing Supabase S3 configuration: ${missing.join(', ')}`
+    );
+  }
+
+  return new S3Client({
+    region: process.env.SUPABASE_S3_REGION || 'us-east-1',
+    endpoint: process.env.SUPABASE_S3_ENDPOINT,
+    credentials: {
+      accessKeyId: process.env.SUPABASE_S3_KEY_ID,
+      secretAccessKey: process.env.SUPABASE_S3_SECRET,
+    },
+    forcePathStyle: true,
+  });
+}
+
+// GENUINELY CANCELLABLE candidate upload: aborting the AbortController
+// destroys the in-flight S3 request (unlike a Promise.race, which lets
+// the request finish). We do NOT rely on abort guaranteeing server-side
+// non-commit — protection comes from ordering (upload abort fires at
+// <= deadline + upload timeout = 55 min, while a stale reclaim needs
+// 60 min), the deterministic key with unconditional PutObject overwrite,
+// and the ownership gates before pointer publication. Explicit
+// ContentLength keeps the request on a fixed-length body (no chunked
+// transfer encoding), which S3-compatible endpoints handle
+// deterministically. The timer is always cleared on completion.
+async function uploadCorrectionCandidate(key, filePath, timeoutMs) {
+  const { PutObjectCommand } = require('@aws-sdk/client-s3');
+  const fs = require('fs');
+
+  // Guarded: an unreadable or empty candidate fails here (retryable)
+  // instead of uploading a bad or lengthless object.
+  const stats = fs.statSync(filePath);
+  if (!Number.isSafeInteger(stats.size) || stats.size <= 0) {
+    throw new Error('Candidate file size unavailable');
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    await getCorrectionS3Client().send(
+      new PutObjectCommand({
+        Bucket: 'livestreams',
+        Key: key,
+        Body: fs.createReadStream(filePath),
+        ContentType: 'video/mp4',
+        ContentLength: stats.size,
+      }),
+      { abortSignal: controller.signal }
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Token-conditional status write: only the current owner can transition
+// correction_status, so a stale worker can never resurrect or downgrade
+// a row it no longer owns. Returns true ONLY when exactly the owned row
+// was updated; false means the write failed or ownership was already
+// lost -- callers must not report success on false.
+async function finishCorrection(recordId, token, fields) {
+  const { data, error } = await supabase
+    .from('livestreams')
+    .update({
+      ...fields,
+      correction_claimed_at: null,
+      correction_worker: null,
+    })
+    .eq('id', recordId)
+    .eq('correction_token', token)
+    .select('id');
+
+  if (error) {
+    console.warn(
+      '[REPLAY-SYNC] Finish update failed:',
+      error.message || error
+    );
+    return false;
+  }
+
+  return Array.isArray(data) && data.length > 0;
+}
+
+// The shadow-mode correction pipeline for one published replay.
+// Fail-open at every step: any failure leaves the ORIGINAL replay as the
+// only playback source. Never touches livestreams.video_url,
+// videos.video_url, or the original recording object.
+async function maybeGenerateCorrectedReplay(recordId) {
+  const { data: replay, error: loadErr } = await supabase
+    .from('livestreams')
+    .select(
+      'id, video_url, trim_head_ms, trim_end_ms, correction_attempts'
+    )
+    .eq('id', recordId)
+    .maybeSingle();
+
+  if (loadErr || !replay) return;
+
+  if (
+    typeof replay.trim_head_ms !== 'number' ||
+    typeof replay.trim_end_ms !== 'number' ||
+    replay.trim_head_ms <= 0 ||
+    replay.trim_end_ms <= replay.trim_head_ms ||
+    !replay.video_url ||
+    replay.video_url === 'processing' ||
+    replay.video_url === 'failed'
+  ) {
+    return; // No usable plan or no playable source: correction stays idle.
+  }
+
+  const claim = await claimReplayCorrection(recordId);
+  if (!claim.claimed) return;
+  const token = claim.token;
+
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { Readable } = require('stream');
+
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), `bushrann-correct-${recordId}-`)
+  );
+
+  const jobStartedAt = Date.now();
+
+  try {
+    const sourcePath = path.join(tempDir, 'source.mp4');
+    const outPath = path.join(tempDir, 'candidate.mp4');
+
+    // Streaming, size-capped download of the ORIGINAL recording. The
+    // source object is never modified.
+    const response = await fetch(replay.video_url, {
+      // Bounds the whole body stream, not just the handshake: aborting
+      // mid-body destroys the stream and rejects the pipe below.
+      signal: AbortSignal.timeout(CORRECTION_DOWNLOAD_TIMEOUT_MS),
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(
+        `Source download failed with HTTP ${response.status}`
+      );
+    }
+
+    let downloaded = 0;
+    await new Promise((resolve, reject) => {
+      const writeStream = fs.createWriteStream(sourcePath);
+      const reader = Readable.fromWeb(response.body);
+      reader.on('data', chunk => {
+        downloaded += chunk.length;
+        if (downloaded > CORRECTION_MAX_SOURCE_BYTES) {
+          reader.destroy(
+            new Error('Source exceeds CORRECTION_MAX_SOURCE_BYTES')
+          );
+          writeStream.destroy();
+        }
+      });
+      reader.on('error', reject);
+      writeStream.on('error', reject);
+      writeStream.on('finish', resolve);
+      reader.pipe(writeStream);
+    });
+
+    // Probe the actual source duration so the verification battery can
+    // reject any "correction" that is not genuinely shorter than the
+    // original recording.
+    const sourceProbe = await probeMediaJson(sourcePath);
+    const sourceDurationSec = sourceProbe
+      ? Number(sourceProbe?.format?.duration)
+      : NaN;
+    if (!Number.isFinite(sourceDurationSec) || sourceDurationSec <= 0) {
+      throw new Error('Source duration unprobeable');
+    }
+
+    const trimmed = await trimReplayFile(
+      sourcePath,
+      replay.trim_head_ms,
+      replay.trim_end_ms,
+      outPath,
+      sourceDurationSec
+    );
+    if (!trimmed) {
+      throw new Error('Trim/verification failed');
+    }
+
+    // Total job deadline: a slow-but-alive worker must never approach the
+    // stale window. Exceeding the deadline aborts BEFORE upload (fail-open).
+    if (Date.now() - jobStartedAt > CORRECTION_JOB_DEADLINE_MS) {
+      throw new Error('Correction job deadline exceeded');
+    }
+
+    // Ownership gate 1: after the expensive work, before uploading.
+    // Also renews the lease (see assertCorrectionOwned).
+    await assertCorrectionOwned(recordId, token);
+
+    // Upload the verified candidate to its deterministic key via a
+    // GENUINELY CANCELLABLE S3 PutObject: on timeout the in-flight request
+    // is destroyed and never commits, so an expired worker can never
+    // overwrite a newer worker's candidate. PutObject overwrite gives the
+    // same deterministic-key convergence as upsert.
+    await uploadCorrectionCandidate(
+      correctionCandidateKey(recordId),
+      outPath,
+      CORRECTION_UPLOAD_TIMEOUT_MS
+    );
+
+    // HEAD-verify the object actually landed before recording it.
+    const { data: urlData } = supabase.storage
+      .from('livestreams')
+      .getPublicUrl(correctionCandidateKey(recordId));
+    const candidateUrl = urlData.publicUrl;
+
+    const head = await fetch(candidateUrl, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!head.ok) {
+      throw new Error(
+        `Candidate HEAD verify failed with HTTP ${head.status}`
+      );
+    }
+
+    // Ownership gate 2: after upload, before recording the pointer.
+    await assertCorrectionOwned(recordId, token);
+
+    // SHADOW MODE: record the candidate pointer ONLY. video_url stays on
+    // the original recording; no promotion path exists in this build.
+    const recorded = await finishCorrection(recordId, token, {
+      correction_status: 'candidate',
+      corrected_video_url: candidateUrl,
+    });
+
+    if (recorded) {
+      console.log(
+        '[REPLAY-SYNC] Corrected candidate recorded (shadow):',
+        recordId
+      );
+    } else {
+      // Ownership was lost between the last gate and the finish write, or
+      // the write failed. The candidate object stays at its deterministic
+      // key; the current owner (or the cleanup worker) owns its fate.
+      console.warn(
+        '[REPLAY-SYNC] Candidate NOT recorded (ownership lost or write failed):',
+        recordId
+      );
+    }
+  } catch (correctionErr) {
+    if (correctionErr?.code === 'ROW_GONE') {
+      // Canonical replay deleted mid-flight: remove exactly our own
+      // deterministic candidate and stop.
+      await removeCorrectionCandidate(recordId);
+    } else if (correctionErr?.code === 'LOST_OWNERSHIP') {
+      // Another worker owns the row now: touch nothing.
+      console.warn(
+        '[REPLAY-SYNC] Lost ownership mid-correction:',
+        recordId
+      );
+    } else {
+      console.warn(
+        '[REPLAY-SYNC] Correction failed:',
+        recordId,
+        correctionErr?.message || correctionErr
+      );
+      try {
+        const { data: fresh } = await supabase
+          .from('livestreams')
+          .select('correction_attempts')
+          .eq('id', recordId)
+          .maybeSingle();
+
+        const exhausted =
+          typeof fresh?.correction_attempts === 'number' &&
+          fresh.correction_attempts >= CORRECTION_MAX_ATTEMPTS;
+
+        await finishCorrection(recordId, token, {
+          correction_status: exhausted ? 'failed' : null,
+        });
+      } catch (finishErr) {
+        console.warn(
+          '[REPLAY-SYNC] Failure-path finish threw:',
+          finishErr?.message || finishErr
+        );
+      }
+    }
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch (rmErr) {
+      console.warn(
+        '[REPLAY-SYNC] Tempdir cleanup failed:',
+        rmErr?.message || rmErr
+      );
+    }
+  }
+}
+
+// Detached, bounded-concurrency scheduler for correction jobs. Replay
+// publication and the recovery sweep must NEVER block on a correction
+// (capped download + up to two 20-minute ffmpeg passes). A replay whose
+// slot is unavailable simply keeps its current correction_status and is
+// retried by the next sweep; per-replay duplicates are dropped; every
+// job's errors are handled independently inside
+// maybeGenerateCorrectedReplay, and cross-replica safety comes from the
+// row-lock claim RPC.
+const correctionInFlight = new Set();
+
+function scheduleReplayCorrection(recordId) {
+  if (!recordId) return;
+  if (correctionInFlight.has(recordId)) return;
+  if (correctionInFlight.size >= CORRECTION_MAX_CONCURRENT) return;
+
+  correctionInFlight.add(recordId);
+  maybeGenerateCorrectedReplay(recordId)
+    .catch(scheduleErr => {
+      // Defense in depth: maybeGenerateCorrectedReplay is designed not to
+      // throw; if it ever does, never let it reach the caller's flow.
+      console.warn(
+        '[REPLAY-SYNC] Detached correction threw:',
+        recordId,
+        scheduleErr?.message || scheduleErr
+      );
+    })
+    .finally(() => {
+      correctionInFlight.delete(recordId);
+    });
 }
 
 // Identify only Bushrann's MP4 livestream recordings.
@@ -2144,6 +2985,8 @@ async function restoreMissingReplayRows() {
             // REPLAY SYNC: durable recovery metadata
             egress_started_at: job.egress_started_at ?? null,
             public_activated_at: job.public_activated_at ?? null,
+            trim_head_ms: job.trim_head_ms ?? null,
+            trim_end_ms: job.trim_end_ms ?? null,
             video_url: 'processing',
             recording_filename: job.recording_filename,
             thumbnail_url: job.thumbnail_url || null,
@@ -2494,6 +3337,52 @@ async function sweepReplayRecovery() {
           candidateError?.message || candidateError
         );
       }
+    }
+
+    // REPLAY-SYNC: correction sweep. Picks up replays that published
+    // BEFORE this build shipped (no post-publish hook ran), crashed
+    // mid-correction (stale 'correcting' lease), or failed retryably.
+    // Sequential, bounded to 10 per sweep, and each candidate claim is
+    // row-lock atomic, so overlapping sweeps across replicas are safe.
+    try {
+      const staleBefore = new Date(
+        Date.now() - CORRECTION_STALE_MS
+      ).toISOString();
+
+      const { data: correctionRows, error: correctionQueryError } =
+        await supabase
+          .from('livestreams')
+          .select('id')
+          .neq('video_url', 'processing')
+          .neq('video_url', 'failed')
+          .not('trim_head_ms', 'is', null)
+          .not('trim_end_ms', 'is', null)
+          .lt('correction_attempts', CORRECTION_MAX_ATTEMPTS)
+          .or(
+            `correction_status.is.null,` +
+            `and(correction_status.eq.correcting,` +
+            `correction_claimed_at.lt.${staleBefore})`
+          )
+          .limit(10);
+
+      if (correctionQueryError) {
+        console.error(
+          '[REPLAY-SYNC] Correction sweep query failed:',
+          correctionQueryError.message || correctionQueryError
+        );
+      } else {
+        for (const row of correctionRows || []) {
+          // Detached with bounded concurrency: the recovery sweep never
+          // blocks on a correction job. Replays that cannot get a slot
+          // keep their status and are retried by the next sweep.
+          scheduleReplayCorrection(row.id);
+        }
+      }
+    } catch (correctionSweepOuter) {
+      console.error(
+        '[REPLAY-SYNC] Correction sweep failed:',
+        correctionSweepOuter?.message || correctionSweepOuter
+      );
     }
   } finally {
     replayRecoverySweepInProgress = false;
@@ -3227,6 +4116,25 @@ router.post('/egress/start', requireAuth, async (req, res) => {
     }
 
     const started = await startCompositeRecording(roomName, streamRow, req.body?.orientation);
+
+    // REPLAY-SYNC: anchor the moment the start call resolved on Railway's clock.
+    // The client timer starts only after /egress/activate succeeds, so this is the
+    // closest server-side approximation of MP4 t=0. First-write-wins: ensure-active
+    // reconnects must never overwrite it.
+    try {
+      const { error: anchorErr } = await supabase
+        .from('live_streams')
+        .update({ egress_media_started_at: new Date().toISOString() })
+        .eq('id', streamRow.id)
+        .is('egress_media_started_at', null);
+      if (anchorErr) {
+        console.warn('[REPLAY-SYNC] Media start anchor write failed:', anchorErr.message || anchorErr);
+      } else {
+        console.log('[REPLAY-SYNC] Media start anchor set for stream', streamRow.id);
+      }
+    } catch (anchorEx) {
+      console.warn('[REPLAY-SYNC] Media start anchor write threw:', anchorEx?.message || anchorEx);
+    }
 
     if (!(await renewLease())) {
       console.error(
@@ -4580,6 +5488,23 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         });
     }
 
+    // REPLAY-SYNC: compute the measured per-stream trim plan. clientElapsedMs is
+    // a DURATION (timer stop - timer start on the client), so it is immune to
+    // clock skew. Null plan = insufficient data, correction stays idle.
+    const clientElapsedMs =
+      typeof req.body?.clientElapsedMs === 'number' &&
+      Number.isFinite(req.body.clientElapsedMs) &&
+      req.body.clientElapsedMs > 0
+        ? Math.round(req.body.clientElapsedMs)
+        : null;
+    const replayTrim = computeReplayTrim(streamRow, clientElapsedMs);
+    console.log('[REPLAY-SYNC] Trim plan:', {
+      streamId: streamRow.id,
+      clientElapsedMs,
+      headMs: replayTrim ? replayTrim.headMs : null,
+      endMs: replayTrim ? replayTrim.endMs : null,
+    });
+
     // Only MP4 room-composite recordings may enter the replay workflow.
     // Never allow participant thumbnail egress to be stopped here.
     if (!isLivestreamRecordingEgress(egressInfo, streamRow.id)) {
@@ -4679,6 +5604,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
             thumbnail_url: streamRow.thumbnail_url || null,
             egress_started_at: streamRow.egress_started_at ?? null,
             public_activated_at: streamRow.public_activated_at ?? null,
+            trim_head_ms: replayTrim ? replayTrim.headMs : null,
+            trim_end_ms: replayTrim ? replayTrim.endMs : null,
           },
           {
             onConflict: 'stream_id',
@@ -5034,6 +5961,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           thumbnail_url: streamRow.thumbnail_url || null,
           egress_started_at: streamRow.egress_started_at ?? null,
           public_activated_at: streamRow.public_activated_at ?? null,
+          trim_head_ms: replayTrim ? replayTrim.headMs : null,
+          trim_end_ms: replayTrim ? replayTrim.endMs : null,
         },
         {
           onConflict: 'stream_id',
@@ -5277,6 +6206,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
           source_live_stream_id: streamRow.id,
           egress_started_at: streamRow.egress_started_at ?? null,
           public_activated_at: streamRow.public_activated_at ?? null,
+          trim_head_ms: replayTrim ? replayTrim.headMs : null,
+          trim_end_ms: replayTrim ? replayTrim.endMs : null,
           video_url: 'processing',
           recording_filename:
             mergedTargetFilename,
@@ -5385,6 +6316,8 @@ router.post('/egress/stop', requireAuth, async (req, res) => {
         source_live_stream_id: streamRow.id,
         egress_started_at: streamRow.egress_started_at ?? null,
         public_activated_at: streamRow.public_activated_at ?? null,
+        trim_head_ms: replayTrim ? replayTrim.headMs : null,
+        trim_end_ms: replayTrim ? replayTrim.endMs : null,
         video_url: 'processing',
         recording_filename: authoritativeFilename,
         thumbnail_url: streamRow.thumbnail_url || null,
@@ -5792,6 +6725,12 @@ async function finalizeReplay(
         '[PROCESS] Added to main feed!'
       );
     }
+
+    // REPLAY-SYNC: the replay is published; schedule the corrected shadow
+    // candidate. Detached and fail-open: publication never blocks on
+    // correction, and any failure leaves the original replay untouched.
+    // Shadow mode only -- video_url is never re-pointed here.
+    scheduleReplayCorrection(recordId);
   } catch (error) {
     console.error(
       '[PROCESS] Error:',
