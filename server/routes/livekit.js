@@ -1147,9 +1147,12 @@ async function startCompositeRecording(roomName, streamRow, requestedOrientation
       if (camera) {
         // Use the actual host camera aspect ratio when available.
         // Fall back to existing orientation if dimensions are invalid.
-        const actualOrientation = validDimensions
-          ? (height > width ? 'portrait' : 'landscape')
-          : recordingOrientation;
+        const actualOrientation =
+          (requestedOrientation === 'portrait' || requestedOrientation === 'landscape')
+            ? requestedOrientation
+            : (validDimensions
+                ? (height > width ? 'portrait' : 'landscape')
+                : recordingOrientation);
         const portrait = actualOrientation === 'portrait';
 
         recordingOptions = {
