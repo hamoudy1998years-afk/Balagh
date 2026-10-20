@@ -845,6 +845,12 @@ async function maybeGenerateCorrectedReplay(recordId) {
       throw new Error('Source duration unprobeable');
     }
 
+    console.log('[REPLAY-SYNC-DIAG] Source and trim budget:', {
+      sourceDurationSec,
+      plannedHeadMs: replay.trim_head_ms,
+      plannedEndMs: replay.trim_end_ms,
+      endBeyondSourceMs: Math.max(0, replay.trim_end_ms - sourceDurationSec * 1000),
+    });
     const trimmed = await trimReplayFile(
       sourcePath,
       replay.trim_head_ms,
