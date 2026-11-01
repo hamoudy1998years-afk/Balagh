@@ -691,7 +691,7 @@ async function freshNotificationEligibility(job, recipientIds) {
   for (const id of ids) {
     const profile = profilesById.get(id);
     const inAppAllowed = Boolean(
-      contentAllowed && profile &&
+      contentAllowed && profile && profile.notif_all !== false &&
       activeFollowers.has(id) &&
       !outgoingBlocks.has(id) &&
       !incomingBlocks.has(id) &&
@@ -1247,8 +1247,8 @@ async function processJob(job, assertLease, finalizeClaim) {
         continue;
       }
 
-      // Master push opt-out does not suppress in-app delivery. Skip only
-      // with our own claim; terminal rows and competing claims stay intact.
+      // Master and type preferences apply to both channels.
+      // Skip only with our own claim; preserve terminal rows.
       if (!freshDecision?.pushAllowed) {
         await markChannelSkipped(job.id, recipientId, 'push', claim);
         continue;
