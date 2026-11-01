@@ -65,6 +65,7 @@
 // Importing this module starts it.
 
 const { createClient } = require('@supabase/supabase-js');
+const { freshNotificationEligibility } = require('./notificationEligibility');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -625,6 +626,21 @@ async function dispatchPushTickets(tickets) {
     return;
   }
 
+  const latest = await freshNotificationEligibility(
+    supabase, tickets[0].job, tickets.map(t => t.recipientId)
+  );
+  const permitted = [];
+  for (const ticket of tickets) {
+    const decision = latest.get(ticket.recipientId);
+    if (!decision?.pushAllowed) {
+      await markChannelSkipped(ticket.job.id, ticket.recipientId, 'push', ticket.claim);
+      continue;
+    }
+    permitted.push({ ...ticket, token: decision.pushToken });
+  }
+  if (permitted.length === 0) return;
+  tickets = permitted;
+
   const messages = tickets.map(t => ({
     to: t.token,
     title: t.pushTitle,
@@ -1043,11 +1059,14 @@ async function processJob(job, assertLease, finalizeClaim) {
 
     // Re-read the ledger for this page and deliver everything due.
     const ledger = await fetchLedgerRows(job.id, followerIds);
+    const pageEligibility = await freshNotificationEligibility(
+      supabase, job, followerIds
+    );
     const pushTickets = [];
 
-    for (const profile of profiles) {
+    for (const recipientId of followerIds) {
       await assertLease();
-      const recipientId = profile.id;
+      const decision = pageEligibility.get(recipientId);
 
       // ── in_app channel ──
       const inAppRow = ledger.get(ledgerKey(recipientId, 'in_app'));
@@ -1063,7 +1082,11 @@ async function processJob(job, assertLease, finalizeClaim) {
             );
 
             if (claim !== null) {
-              await deliverInApp(job, recipientId, claim);
+              if (!decision?.inAppAllowed) {
+                await markChannelSkipped(job.id, recipientId, 'in_app', claim);
+              } else {
+                await deliverInApp(job, recipientId, claim);
+              }
             }
           }
         }
@@ -1097,7 +1120,7 @@ async function processJob(job, assertLease, finalizeClaim) {
       }
 
       // Token may have been cleared between ticks — re-check.
-      if (!profile.push_token) {
+      if (!decision?.pushAllowed) {
         await markChannelSkipped(job.id, recipientId, 'push', claim);
         continue;
       }
@@ -1143,7 +1166,7 @@ async function processJob(job, assertLease, finalizeClaim) {
       }
 
       pushTickets.push({
-        token: profile.push_token,
+        token: decision.pushToken,
         recipientId,
         job,
         claim,
