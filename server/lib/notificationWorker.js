@@ -620,10 +620,129 @@ async function postPushChunk(messages) {
 
 // A failed HTTP request or invalid response remains retryable.
 // Event-based quota reservations are retained across retries.
+
+// Recheck current authorization before notification delivery.
+// Read errors fail closed; existing ledger claims are not authorization.
+async function freshNotificationEligibility(job, recipientIds) {
+  if (!['live_started', 'new_video'].includes(job.kind) ||
+      !job.actor_id || !job.ref_id ||
+      !Array.isArray(recipientIds) ||
+      recipientIds.length > FOLLOWER_PAGE_SIZE ||
+      recipientIds.some(id => typeof id !== 'string' || !id)) {
+    throw new Error('Invalid notification eligibility request');
+  }
+  if (recipientIds.length === 0) return new Map();
+
+  const ids = [...new Set(recipientIds)];
+  const typePref = job.kind === 'live_started'
+    ? 'notif_livestreams' : 'notif_new_videos';
+  const contentTable = job.kind === 'live_started'
+    ? 'live_streams' : 'videos';
+  const contentFields = job.kind === 'live_started'
+    ? 'is_live' : 'status, is_private';
+
+  const [profiles, follows, blockedByActor, blockingActor, content] =
+    await Promise.all([
+      supabase.from('profiles')
+        .select(`id, push_token, notif_all, ${typePref}`).in('id', ids),
+      supabase.from('follows')
+        .select('follower_id').eq('following_id', job.actor_id)
+        .in('follower_id', ids),
+      supabase.from('blocked_users')
+        .select('blocked_id').eq('blocker_id', job.actor_id)
+        .in('blocked_id', ids),
+      supabase.from('blocked_users')
+        .select('blocker_id').eq('blocked_id', job.actor_id)
+        .in('blocker_id', ids),
+      supabase.from(contentTable)
+        .select(contentFields).eq('id', job.ref_id).maybeSingle(),
+    ]);
+
+  for (const [name, result] of [
+    ['profiles', profiles], ['follows', follows],
+    ['actor blocks', blockedByActor],
+    ['recipient blocks', blockingActor],
+  ]) {
+    if (result.error || !Array.isArray(result.data)) {
+      throw new Error(
+        `Notification authorization ${name} read failed: ` +
+        (result.error?.message || 'invalid result')
+      );
+    }
+  }
+
+  if (content.error) {
+    throw new Error(
+      `Notification authorization content read failed: ${content.error.message}`
+    );
+  }
+
+  const contentAllowed = job.kind === 'live_started'
+    ? content.data?.is_live === true
+    : content.data?.status === 'approved' &&
+      content.data?.is_private === false;
+
+  const profilesById = new Map(profiles.data.map(p => [p.id, p]));
+  const activeFollowers = new Set(follows.data.map(f => f.follower_id));
+  const outgoingBlocks = new Set(blockedByActor.data.map(b => b.blocked_id));
+  const incomingBlocks = new Set(blockingActor.data.map(b => b.blocker_id));
+  const eligibility = new Map();
+
+  for (const id of ids) {
+    const profile = profilesById.get(id);
+    const inAppAllowed = Boolean(
+      contentAllowed && profile &&
+      activeFollowers.has(id) &&
+      !outgoingBlocks.has(id) &&
+      !incomingBlocks.has(id) &&
+      profile[typePref] !== false
+    );
+
+    const pushAllowed = Boolean(
+      inAppAllowed &&
+      profile.notif_all !== false &&
+      typeof profile.push_token === 'string' &&
+      profile.push_token.length > 0
+    );
+
+    eligibility.set(id, {
+      inAppAllowed,
+      pushAllowed,
+      pushToken: pushAllowed ? profile.push_token : null,
+    });
+  }
+
+  return eligibility;
+}
+
 async function dispatchPushTickets(tickets) {
   if (tickets.length === 0) {
     return;
   }
+
+  // Verify authorization and the current token immediately before Expo.
+  const latest = await freshNotificationEligibility(
+    tickets[0].job, tickets.map(t => t.recipientId)
+  );
+  const permitted = [];
+
+  for (const ticket of tickets) {
+    if (ticket.job.id !== tickets[0].job.id) {
+      throw new Error('Mixed notification jobs in push batch');
+    }
+
+    const decision = latest.get(ticket.recipientId);
+    if (!decision?.pushAllowed) {
+      await markChannelSkipped(
+        ticket.job.id, ticket.recipientId, 'push', ticket.claim
+      );
+      continue;
+    }
+    permitted.push({ ...ticket, token: decision.pushToken });
+  }
+
+  if (permitted.length === 0) return;
+  tickets = permitted;
 
   const messages = tickets.map(t => ({
     to: t.token,
@@ -742,9 +861,33 @@ async function dispatchPushTickets(tickets) {
 // content that was reverted, unpublished, or ended)
 // ─────────────────────────────────────────────────────────────
 
-// Returns TRUE when the job may deliver, FALSE when it was completed as a
-// no-op. Throws on query errors so the job is released retryably.
-async function revalidateJobContent(job, finalizeClaim) {
+async function cancelLiveDeliveries(job, pushTickets, assertLease, finalizeClaim) {
+  // Settle our unsent tickets using their claim tokens; preserve sent rows.
+  for (const t of pushTickets) {
+    await assertLease();
+    await markChannelSkipped(job.id, t.recipientId, 'push', t.claim);
+  }
+
+  await assertLease();
+  const staleBefore = new Date(Date.now() - RECIPIENT_LEASE_MS).toISOString();
+  const { error } = await supabase
+    .from('notification_recipients')
+    .update({ status: 'skipped', claimed_at: null, run_after: null })
+    .eq('job_id', job.id)
+    .in('status', ['pending', 'failed'])
+    .lt('attempts', RECIPIENT_MAX_ATTEMPTS)
+    .or(`claimed_at.is.null,claimed_at.lt.${staleBefore}`);
+
+  if (error) {
+    throw new Error(`live cancellation failed (job ${job.id}): ${error.message}`);
+  }
+
+  await completeJobIfReady(job, finalizeClaim);
+}
+
+// Returns FALSE after stopping invalid content; query/cancellation errors
+// throw so processing can be retried.
+async function revalidateJobContent(job, finalizeClaim, assertLease, pushTickets = []) {
   if (job.kind === 'new_video') {
     const { data, error } = await supabase
       .from('videos')
@@ -791,11 +934,10 @@ async function revalidateJobContent(job, finalizeClaim) {
     console.warn(
       TAG,
       `Job ${job.id}: live stream ${job.ref_id} is missing or no longer ` +
-        'live — completing with zero deliveries.'
+        'live — cancelling remaining deliveries.'
     );
 
-    await finalizeClaim();
-    await markJobDone(job);
+    await cancelLiveDeliveries(job, pushTickets, assertLease, finalizeClaim);
     return false;
   }
 
@@ -876,7 +1018,7 @@ async function completeJobIfReady(job, finalizeClaim) {
 
 async function processJob(job, assertLease, finalizeClaim) {
   // 0. Revalidate the referenced content before ANY delivery.
-  if (!(await revalidateJobContent(job, finalizeClaim))) {
+  if (!(await revalidateJobContent(job, finalizeClaim, assertLease))) {
     return;
   }
 
@@ -971,6 +1113,10 @@ async function processJob(job, assertLease, finalizeClaim) {
 
   while (page * FOLLOWER_PAGE_SIZE < MAX_FOLLOWERS) {
     await assertLease();
+    if (job.kind === 'live_started' &&
+        !(await revalidateJobContent(job, finalizeClaim, assertLease))) {
+      return;
+    }
     const from = page * FOLLOWER_PAGE_SIZE;
     const to = from + FOLLOWER_PAGE_SIZE - 1;
 
@@ -1043,11 +1189,12 @@ async function processJob(job, assertLease, finalizeClaim) {
 
     // Re-read the ledger for this page and deliver everything due.
     const ledger = await fetchLedgerRows(job.id, followerIds);
+    const pageEligibility = await freshNotificationEligibility(job, followerIds);
     const pushTickets = [];
 
-    for (const profile of profiles) {
+    for (const recipientId of followerIds) {
       await assertLease();
-      const recipientId = profile.id;
+      const freshDecision = pageEligibility.get(recipientId);
 
       // ── in_app channel ──
       const inAppRow = ledger.get(ledgerKey(recipientId, 'in_app'));
@@ -1063,7 +1210,11 @@ async function processJob(job, assertLease, finalizeClaim) {
             );
 
             if (claim !== null) {
-              await deliverInApp(job, recipientId, claim);
+              if (!freshDecision?.inAppAllowed) {
+                await markChannelSkipped(job.id, recipientId, 'in_app', claim);
+              } else {
+                await deliverInApp(job, recipientId, claim);
+              }
             }
           }
         }
@@ -1096,8 +1247,9 @@ async function processJob(job, assertLease, finalizeClaim) {
         continue;
       }
 
-      // Token may have been cleared between ticks — re-check.
-      if (!profile.push_token) {
+      // Master push opt-out does not suppress in-app delivery. Skip only
+      // with our own claim; terminal rows and competing claims stay intact.
+      if (!freshDecision?.pushAllowed) {
         await markChannelSkipped(job.id, recipientId, 'push', claim);
         continue;
       }
@@ -1143,7 +1295,7 @@ async function processJob(job, assertLease, finalizeClaim) {
       }
 
       pushTickets.push({
-        token: profile.push_token,
+        token: freshDecision.pushToken,
         recipientId,
         job,
         claim,
@@ -1156,6 +1308,12 @@ async function processJob(job, assertLease, finalizeClaim) {
 
     for (let i = 0; i < pushTickets.length; i += PUSH_CHUNK_SIZE) {
       await assertLease();
+      if (job.kind === 'live_started' &&
+          !(await revalidateJobContent(
+            job, finalizeClaim, assertLease, pushTickets.slice(i)
+          ))) {
+        return;
+      }
       await dispatchPushTickets(pushTickets.slice(i, i + PUSH_CHUNK_SIZE));
     }
 
